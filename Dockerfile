@@ -35,7 +35,7 @@ RUN apk add --no-cache ca-certificates nginx supervisor
 
 WORKDIR /app
 
-COPY --from=backend-builder /app/server /app/server
+COPY --from=backend-builder /app/api /app/api
 COPY --from=frontend-builder /frontend/dist /usr/share/nginx/html
 
 COPY nginx.conf /etc/nginx/http.d/default.conf
