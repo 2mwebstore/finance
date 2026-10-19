@@ -1,0 +1,37 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --app-navy: #122448;
+  --app-blue: #1769e8;
+  --app-blue-soft: #eef5ff;
+  --app-canvas: #f3f7fd;
+  --app-border: #e2eaf5;
+  --app-muted: #7184a2;
+  --app-income: #12865f;
+  --app-expense: #d94357;
+}
+
+html, body, #__nuxt { min-height: 100%; background-color: var(--app-canvas); color: var(--app-navy); }
+* { box-sizing: border-box; }
+body { margin: 0; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+button, input, select, textarea { font: inherit; }
+button { -webkit-tap-highlight-color: transparent; }
+::selection { color: #fff; background: var(--app-blue); }
+
+/* Shared visual language for the smaller application screens. */
+.page-content > div > h1,
+.page-content > section > header h1 { color: var(--app-navy); letter-spacing: -.035em; }
+.page-content .bg-white { box-shadow: 0 4px 16px rgb(24 60 110 / 4%); }
+.page-content input, .page-content select, .page-content textarea { transition: border-color .15s ease, box-shadow .15s ease; }
+.page-content input:focus, .page-content select:focus, .page-content textarea:focus { border-color: #8ab6fa; outline: 0; box-shadow: 0 0 0 3px rgb(37 99 235 / 10%); }
+
+.pb-safe { padding-bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px)); }
+
+@media (max-width: 760px) {
+  .page-content .grid.grid-cols-2 { grid-template-columns: 1fr; }
+  .page-content .sm\\:grid-cols-2 { grid-template-columns: 1fr; }
+  .page-content .rounded-xl { border-radius: 14px; }
+}
+

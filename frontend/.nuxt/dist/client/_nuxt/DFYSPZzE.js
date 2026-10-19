@@ -1,0 +1,1 @@
+function r(t,i){const e=typeof t=="number"?t:Number(t||0),m=Number.isFinite(e)?e:0,n=i==="USD"?2:0,o=new Intl.NumberFormat("en-US",{minimumFractionDigits:n,maximumFractionDigits:n}).format(m);return`${i==="USD"?"$":"៛"}${o}`}export{r as f};

@@ -1,0 +1,157 @@
+package controllers
+
+import (
+	"net/http"
+
+	"github.com/cambodia-finance/income-expense/internal/middleware"
+	"github.com/cambodia-finance/income-expense/internal/models"
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	"gorm.io/gorm"
+)
+
+func getActorID(c *gin.Context) (uuid.UUID, bool) {
+	v, ok := c.Get(middleware.ContextUserIDKey)
+	if !ok {
+		return uuid.Nil, false
+	}
+	id, ok := v.(uuid.UUID)
+	return id, ok
+}
+
+func actorIsSuperAdmin(c *gin.Context, db *gorm.DB) bool {
+	id, ok := getActorID(c)
+	if !ok {
+		return false
+	}
+	var user models.User
+	if err := db.Select("is_super_admin").First(&user, "id = ?", id).Error; err != nil {
+		return false
+	}
+	return user.IsSuperAdmin
+}
+
+func writeServiceError(c *gin.Context, err error) {
+	switch err {
+	case nil:
+		return
+	default:
+		msg := err.Error()
+		switch msg {
+		case "branch not found", "user not found", "role not found", "category not found", "payment method not found":
+			c.JSON(http.StatusNotFound, gin.H{"error": msg})
+		case "branch code already exists", "username already taken", "email already taken", "role code already exists", "role is assigned to one or more users", "category code already exists for this type", "payment method code already exists":
+			c.JSON(http.StatusConflict, gin.H{"error": msg})
+		case "forbidden", "cannot modify or delete system role", "cannot escalate your own privileges", "cannot demote or deactivate the last super admin", "cannot remove your own super admin status":
+			c.JSON(http.StatusForbidden, gin.H{"error": msg})
+		default:
+			if len(msg) > 0 {
+				c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+			} else {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+			}
+		}
+	}
+}
+
+func roleSummary(roles []models.Role) []gin.H {
+	out := make([]gin.H, 0, len(roles))
+	for _, r := range roles {
+		codes := make([]string, 0, len(r.Permissions))
+		seen := map[string]bool{}
+		for _, p := range r.Permissions {
+			if p.Code == "" || seen[p.Code] {
+				continue
+			}
+			seen[p.Code] = true
+			codes = append(codes, p.Code)
+		}
+		out = append(out, gin.H{
+			"id":               r.ID,
+			"code":             r.Code,
+			"name":             r.Name,
+			"permission_codes": codes,
+		})
+	}
+	return out
+}
+
+func branchSummary(branches []models.Branch) []gin.H {
+	out := make([]gin.H, 0, len(branches))
+	for _, b := range branches {
+		out = append(out, gin.H{"id": b.ID, "code": b.Code, "name": b.Name, "is_active": b.IsActive})
+	}
+	return out
+}
+
+func userJSON(u *models.User) gin.H {
+	return gin.H{
+		"id":                u.ID,
+		"username":          u.Username,
+		"email":             u.Email,
+		"full_name":         u.FullName,
+		"is_active":         u.IsActive,
+		"is_super_admin":    u.IsSuperAdmin,
+		"default_branch_id": u.DefaultBranchID,
+		"last_login_at":     u.LastLoginAt,
+		"roles":             roleSummary(u.Roles),
+		"branches":          branchSummary(u.Branches),
+		"permission_codes":  permissionCodesFromRoles(u),
+		"created_at":        u.CreatedAt,
+		"updated_at":        u.UpdatedAt,
+	}
+}
+
+// permissionCodesFromRoles returns unique permission codes from the user's roles.
+// Super admin is indicated separately via is_super_admin (all permissions).
+func permissionCodesFromRoles(u *models.User) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0)
+	for _, r := range u.Roles {
+		for _, p := range r.Permissions {
+			if p.Code == "" || seen[p.Code] {
+				continue
+			}
+			seen[p.Code] = true
+			out = append(out, p.Code)
+		}
+	}
+	return out
+}
+
+func branchJSON(b *models.Branch) gin.H {
+	return gin.H{
+		"id":         b.ID,
+		"code":       b.Code,
+		"name":       b.Name,
+		"address":    b.Address,
+		"phone":      b.Phone,
+		"email":      b.Email,
+		"is_active":  b.IsActive,
+		"manager_id": b.ManagerID,
+		"created_at": b.CreatedAt,
+		"updated_at": b.UpdatedAt,
+	}
+}
+
+func roleJSON(r *models.Role) gin.H {
+	perms := make([]gin.H, 0, len(r.Permissions))
+	for _, p := range r.Permissions {
+		perms = append(perms, gin.H{
+			"id":     p.ID,
+			"code":   p.Code,
+			"name":   p.Name,
+			"module": p.Module,
+		})
+	}
+	return gin.H{
+		"id":          r.ID,
+		"code":        r.Code,
+		"name":        r.Name,
+		"description": r.Description,
+		"is_system":   r.IsSystem,
+		"permissions": perms,
+		"created_at":  r.CreatedAt,
+		"updated_at":  r.UpdatedAt,
+	}
+}

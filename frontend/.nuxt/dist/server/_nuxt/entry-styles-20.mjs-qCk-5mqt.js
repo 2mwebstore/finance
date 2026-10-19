@@ -1,0 +1,5 @@
+const VDatePickerYears = "@layer vuetify-components{.v-date-picker-years{height:288px;overflow-y:scroll}.v-date-picker-years__content{display:grid;flex:1 1;gap:8px 24px;grid-template-columns:repeat(var(--v-date-picker-years-columns,3),1fr);justify-content:space-around;padding-inline:32px}.v-date-picker-years__content .v-btn{padding-inline:8px}}";
+export {
+  VDatePickerYears as default
+};
+//# sourceMappingURL=entry-styles-20.mjs-qCk-5mqt.js.map
