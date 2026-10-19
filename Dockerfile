@@ -1,5 +1,5 @@
 
-# Stage 1: Build Nuxt 3
+# Stage 1: Build Nuxt 3 frontend
 FROM node:22-alpine AS frontend-builder
 
 WORKDIR /frontend
@@ -10,7 +10,8 @@ RUN npm ci
 COPY frontend/ ./
 RUN npm run build
 
-# Stage 2: Build Go backend
+
+# Stage 2: Build Go API
 FROM golang:1.25-alpine AS backend-builder
 
 WORKDIR /app
@@ -22,9 +23,10 @@ RUN go mod download
 
 COPY backend/ ./
 
-# Assumes backend/main.go is the Go entry point.
+# Correct Go entry point: backend/cmd/api/main.go
 RUN CGO_ENABLED=0 GOOS=linux go build \
-    -o /app/api .
+    -o /app/api ./cmd/api
+
 
 # Stage 3: Run both applications
 FROM node:22-alpine
@@ -33,9 +35,13 @@ RUN apk add --no-cache nginx supervisor ca-certificates tzdata
 
 WORKDIR /app
 
-COPY --from=backend-builder /app/api /cmd/api
+# Copy compiled Go binary
+COPY --from=backend-builder /app/api /app/api
+
+# Copy Nuxt SSR output
 COPY --from=frontend-builder /frontend/.output /frontend/.output
 
+# Copy service configurations
 COPY nginx.conf /etc/nginx/http.d/default.conf
 COPY deploy/supervisord.conf /etc/supervisord.conf
 
