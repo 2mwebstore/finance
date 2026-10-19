@@ -25,7 +25,7 @@ COPY backend/ ./
 
 # Change this if your main.go is located elsewhere.
 RUN CGO_ENABLED=0 GOOS=linux go build \
-    -o /app/server ./cmd/server
+    -o /app/api ./cmd/api
 
 
 # Stage 3: Run both applications in one container
