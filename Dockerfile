@@ -1,5 +1,5 @@
 
-# Stage 1: Build Vue 3 + Vite frontend
+# Stage 1: Build Nuxt 3
 FROM node:22-alpine AS frontend-builder
 
 WORKDIR /frontend
@@ -9,7 +9,6 @@ RUN npm ci
 
 COPY frontend/ ./
 RUN npm run build
-
 
 # Stage 2: Build Go backend
 FROM golang:1.25-alpine AS backend-builder
@@ -23,25 +22,26 @@ RUN go mod download
 
 COPY backend/ ./
 
-# Change this if your main.go is located elsewhere.
+# Assumes backend/main.go is the Go entry point.
 RUN CGO_ENABLED=0 GOOS=linux go build \
-    -o /app/api ./cmd/api
+    -o /app/api .
 
+# Stage 3: Run both applications
+FROM node:22-alpine
 
-# Stage 3: Run both applications in one container
-FROM alpine:3.22
-
-RUN apk add --no-cache ca-certificates nginx supervisor
+RUN apk add --no-cache nginx supervisor ca-certificates tzdata
 
 WORKDIR /app
 
-COPY --from=backend-builder /app/api /app/api
-COPY --from=frontend-builder /frontend/dist /usr/share/nginx/html
+COPY --from=backend-builder /app/api /cmd/api
+COPY --from=frontend-builder /frontend/.output /frontend/.output
 
 COPY nginx.conf /etc/nginx/http.d/default.conf
 COPY deploy/supervisord.conf /etc/supervisord.conf
 
-ENV GIN_MODE=release
+ENV NODE_ENV=production
+ENV NITRO_HOST=127.0.0.1
+ENV NITRO_PORT=3000
 ENV PORT=8080
 
 EXPOSE 8080
