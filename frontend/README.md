@@ -24,18 +24,18 @@ Mobile-first Nuxt 3 + Vue 3 + TypeScript + Tailwind CSS UI for the Cambodia fina
 - Access token held **in memory** (not localStorage)
 - Refresh via **HttpOnly cookie** (`credentials: 'include'`)
 - Global middleware redirects unauthenticated users to `/login`
-- `useApi()` retries once after refresh on 401
+- `useApi()` retries once after refresh on 401; parallel callers share one refresh request
+- The API rotates the refresh cookie on each refresh and briefly accepts the previous one, so several tabs can reload at once without signing each other out. No cookie → `204` (not signed in)
 
 ## Setup
 
 ```bash
 cd frontend
 npm install
-export NUXT_PUBLIC_API_BASE=http://127.0.0.1:8080/api/v1
 npm run dev
 ```
 
-Backend must allow CORS origin `http://localhost:3000` with credentials (already configured).
+`frontend/.env` sets `NUXT_PUBLIC_API_BASE=/api/v1`, and `npm run dev` proxies `/api/v1` to the Go API at `API_PROXY_TARGET` (default `http://localhost:8080`), like nginx in production. Keeping the API on the app's own origin keeps the refresh cookie first-party, so reloads stay signed in in every browser. See `.env.example` for other setups.
 
 ## Build
 

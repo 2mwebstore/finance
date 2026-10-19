@@ -1,0 +1,5 @@
+# Kept out of the Docker build context: local secrets and build output.
+.env
+.env.*
+!.env.example
+tmp/

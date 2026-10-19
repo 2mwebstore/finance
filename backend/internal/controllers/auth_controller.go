@@ -101,7 +101,8 @@ func (ac *AuthController) Login(c *gin.Context) {
 func (ac *AuthController) Refresh(c *gin.Context) {
 	refresh, err := c.Cookie("refresh_token")
 	if err != nil || refresh == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing refresh token"})
+		// No session cookie (first visit or signed out): nothing to refresh, and not an error.
+		c.Status(http.StatusNoContent)
 		return
 	}
 
@@ -112,7 +113,10 @@ func (ac *AuthController) Refresh(c *gin.Context) {
 		return
 	}
 
-	ac.setRefreshCookie(c, result.RefreshToken)
+	// Empty when a parallel refresh rotated first; its response already set the new cookie.
+	if result.RefreshToken != "" {
+		ac.setRefreshCookie(c, result.RefreshToken)
+	}
 
 	if ac.audit != nil {
 		uid := result.User.ID

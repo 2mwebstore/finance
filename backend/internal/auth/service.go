@@ -124,12 +124,26 @@ func (s *Service) recordFailedLogin(ctx context.Context, user *models.User) erro
 	return s.db.WithContext(ctx).Model(user).Updates(updates).Error
 }
 
+// refreshGracePeriod is how long the token replaced by a rotation is still accepted.
+const refreshGracePeriod = 30 * time.Second
+
+// Refresh issues a new access token. The refresh token is rotated; LoginResult.RefreshToken
+// is empty when this request lost a race with a parallel refresh, in which case the caller
+// must leave the cookie alone (the winning response already set the new one).
 func (s *Service) Refresh(ctx context.Context, refreshPlain, userAgent, ip string) (*LoginResult, error) {
 	hash := hashToken(refreshPlain)
 	var session models.Session
+	rotate := true
 	err := s.db.WithContext(ctx).Where("refresh_token_hash = ?", hash).First(&session).Error
 	if err != nil {
-		return nil, ErrSessionRevoked
+		// A request sent just before another one rotated the token still carries the old one.
+		err = s.db.WithContext(ctx).
+			Where("previous_token_hash = ? AND rotated_at > ?", hash, time.Now().Add(-refreshGracePeriod)).
+			First(&session).Error
+		if err != nil {
+			return nil, ErrSessionRevoked
+		}
+		rotate = false
 	}
 	if session.IsRevoked || (session.RevokedAt != nil) {
 		return nil, ErrSessionRevoked
@@ -146,17 +160,30 @@ func (s *Service) Refresh(ctx context.Context, refreshPlain, userAgent, ip strin
 		return nil, ErrAccountInactive
 	}
 
-	// Rotate refresh token
-	newPlain, newHash, err := GenerateRefreshToken()
-	if err != nil {
-		return nil, err
-	}
-	session.RefreshTokenHash = newHash
-	session.UserAgent = userAgent
-	session.IPAddress = ip
-	session.ExpiresAt = time.Now().Add(s.cfg.RefreshTokenTTL)
-	if err := s.db.WithContext(ctx).Save(&session).Error; err != nil {
-		return nil, err
+	newPlain := ""
+	if rotate {
+		plain, newHash, err := GenerateRefreshToken()
+		if err != nil {
+			return nil, err
+		}
+		now := time.Now()
+		// Only rotate if nobody else did since we read the session (compare-and-swap).
+		res := s.db.WithContext(ctx).Model(&models.Session{}).
+			Where("id = ? AND refresh_token_hash = ?", session.ID, hash).
+			Updates(map[string]interface{}{
+				"refresh_token_hash":  newHash,
+				"previous_token_hash": hash,
+				"rotated_at":          now,
+				"user_agent":          userAgent,
+				"ip_address":          ip,
+				"expires_at":          now.Add(s.cfg.RefreshTokenTTL),
+			})
+		if res.Error != nil {
+			return nil, res.Error
+		}
+		if res.RowsAffected == 1 {
+			newPlain = plain
+		}
 	}
 
 	roles := make([]string, 0, len(user.Roles))

@@ -1,0 +1,7 @@
+# Not uploaded by `railway up`: local secrets, dependencies (the image installs its own) and build output.
+.env
+.env.*
+!.env.example
+node_modules
+.nuxt
+.output

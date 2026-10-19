@@ -100,6 +100,10 @@ type Session struct {
 	ExpiresAt        time.Time `gorm:"index;not null" json:"expires_at"`
 	RevokedAt        *time.Time `json:"revoked_at,omitempty"`
 	IsRevoked        bool      `gorm:"default:false;not null" json:"is_revoked"`
+	// The token replaced by the last rotation stays usable for a few seconds so
+	// parallel refreshes (two tabs, several requests) don't log each other out.
+	PreviousTokenHash string     `gorm:"size:255;index" json:"-"`
+	RotatedAt         *time.Time `json:"-"`
 }
 
 // AuditLog records security and important business events.

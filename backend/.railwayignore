@@ -1,0 +1,5 @@
+# Not uploaded by `railway up`: local secrets and build output.
+.env
+.env.*
+!.env.example
+tmp/

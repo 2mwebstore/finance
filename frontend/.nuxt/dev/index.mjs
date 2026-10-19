@@ -7,8 +7,8 @@ import { parentPort, threadId } from 'node:worker_threads';
 import { escapeHtml } from 'file:///Users/sila/Downloads/income-expense-source%20(1)/frontend/node_modules/@vue/shared/dist/shared.cjs.js';
 import viteNodeEntry_mjs from 'file:///Users/sila/Downloads/income-expense-source%20(1)/frontend/node_modules/@nuxt/vite-builder/dist/vite-node-entry.mjs';
 import { viteNodeFetch } from 'file:///Users/sila/Downloads/income-expense-source%20(1)/frontend/node_modules/@nuxt/vite-builder/dist/vite-node.mjs';
-import { createRenderer, getRequestDependencies, getPreloadLinks, getPrefetchLinks } from 'file:///Users/sila/Downloads/income-expense-source%20(1)/frontend/node_modules/vue-bundle-renderer/dist/runtime.mjs';
 import { parseURL, withoutBase, joinURL, getQuery, withQuery, withTrailingSlash, decodePath, withLeadingSlash, withoutTrailingSlash, encodePath, joinRelativeURL } from 'file:///Users/sila/Downloads/income-expense-source%20(1)/frontend/node_modules/ufo/dist/index.mjs';
+import { createRenderer, getRequestDependencies, getPreloadLinks, getPrefetchLinks } from 'file:///Users/sila/Downloads/income-expense-source%20(1)/frontend/node_modules/vue-bundle-renderer/dist/runtime.mjs';
 import { renderToString } from 'file:///Users/sila/Downloads/income-expense-source%20(1)/frontend/node_modules/vue/server-renderer/index.mjs';
 import destr, { destr as destr$1 } from 'file:///Users/sila/Downloads/income-expense-source%20(1)/frontend/node_modules/destr/dist/index.mjs';
 import { createHooks } from 'file:///Users/sila/Downloads/income-expense-source%20(1)/frontend/node_modules/hookable/dist/index.mjs';
@@ -710,8 +710,9 @@ const _inlineRuntimeConfig = {
     }
   },
   "public": {
-    "apiBase": "http://localhost:8080/api/v1"
-  }
+    "apiBase": "/api/v1"
+  },
+  "apiProxyTarget": "http://localhost:8080"
 };
 const envOptions = {
   prefix: "NITRO_",
@@ -2866,10 +2867,12 @@ async function getIslandContext(event) {
 	};
 }
 
+const _lazy_P4cMGY = () => Promise.resolve().then(function () { return ____path_$1; });
 const _lazy_55wnJG = () => Promise.resolve().then(function () { return renderer; });
 
 const handlers = [
   { route: '', handler: _yg76TA, lazy: false, middleware: true, method: undefined },
+  { route: '/api/v1/**:path', handler: _lazy_P4cMGY, lazy: true, middleware: false, method: undefined },
   { route: '/__nuxt_error', handler: _lazy_55wnJG, lazy: true, middleware: false, method: undefined },
   { route: '/__nuxt_island/**', handler: handler$1, lazy: false, middleware: false, method: undefined },
   { route: '/**', handler: _lazy_55wnJG, lazy: true, middleware: false, method: undefined }
@@ -3222,6 +3225,16 @@ const styles = {};
 const styles$1 = /*#__PURE__*/Object.freeze(/*#__PURE__*/Object.defineProperty({
   __proto__: null,
   default: styles
+}, Symbol.toStringTag, { value: 'Module' }));
+
+const ____path_ = defineEventHandler((event) => {
+  const target = useRuntimeConfig(event).apiProxyTarget;
+  return proxyRequest(event, joinURL(target, event.path));
+});
+
+const ____path_$1 = /*#__PURE__*/Object.freeze(/*#__PURE__*/Object.defineProperty({
+  __proto__: null,
+  default: ____path_
 }, Symbol.toStringTag, { value: 'Module' }));
 
 function renderPayloadResponse(ssrContext) {

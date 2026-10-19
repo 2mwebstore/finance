@@ -23,8 +23,9 @@ func main() {
 		log.Fatalf("database: %v", err)
 	}
 
-	// Development bootstrap only. Production must use versioned migrations.
-	if cfg.AppEnv == "development" || cfg.AppEnv == "test" {
+	// Schema + base data (roles, permissions, categories). Development/test always; other
+	// environments opt in with AUTO_MIGRATE=true (e.g. Railway, which has no migration step).
+	if cfg.AutoMigrate {
 		if err := database.AutoMigrate(db); err != nil {
 			log.Fatalf("migrate: %v", err)
 		}
@@ -34,8 +35,12 @@ func main() {
 		if err := database.SeedCategoriesAndPaymentMethods(db); err != nil {
 			log.Fatalf("seed finance: %v", err)
 		}
-		if err := database.SeedDemoData(db); err != nil {
-			log.Fatalf("seed demo: %v", err)
+		// Demo branches/users (PIN 2468) only in development, or when explicitly requested.
+		seedDemo := os.Getenv("SEED_DEMO") == "true" || os.Getenv("SEED_DEMO") == "1"
+		if cfg.AppEnv == "development" || cfg.AppEnv == "test" || seedDemo {
+			if err := database.SeedDemoData(db); err != nil {
+				log.Fatalf("seed demo: %v", err)
+			}
 		}
 	}
 

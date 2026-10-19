@@ -14,6 +14,9 @@ type Config struct {
 	AppPort  string
 	AppName  string
 	Timezone string
+	// AutoMigrate creates/updates tables and seeds roles, permissions and categories on start.
+	// Always on in development/test; set AUTO_MIGRATE=true on hosts without a migration step (Railway).
+	AutoMigrate bool
 
 	DBHost     string
 	DBPort     string
@@ -46,10 +49,12 @@ func Load() *Config {
 	}
 
 	return &Config{
-		AppEnv:   getEnv("APP_ENV", "development"),
-		AppPort:  getEnv("APP_PORT", "8080"),
-		AppName:  getEnv("APP_NAME", "income-expense-api"),
-		Timezone: getEnv("TZ", "Asia/Phnom_Penh"),
+		AppEnv: getEnv("APP_ENV", "development"),
+		// Hosts like Railway assign the port through PORT.
+		AppPort:     getEnv("APP_PORT", getEnv("PORT", "8080")),
+		AppName:     getEnv("APP_NAME", "income-expense-api"),
+		Timezone:    getEnv("TZ", "Asia/Phnom_Penh"),
+		AutoMigrate: appEnv == "development" || appEnv == "test" || getEnvBool("AUTO_MIGRATE", false),
 
 		DBHost:     getEnv("DB_HOST", "localhost"),
 		DBPort:     getEnv("DB_PORT", "3306"),

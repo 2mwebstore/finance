@@ -4,6 +4,9 @@ import { useApiBase } from '~/composables/useApiBase'
 const accessToken = ref<string | null>(null)
 const currentUser = ref<User | null>(null)
 const authReady = ref(false)
+// One refresh at a time: the API rotates the refresh cookie on every call, so parallel
+// refreshes (several requests hitting an expired token together) must share one request.
+let refreshInFlight: Promise<boolean> | null = null
 
 export function useAuth() {
   const apiBase = useApiBase()
@@ -61,20 +64,32 @@ export function useAuth() {
     try { usePermissionsStore().clearUser() } catch { /* ignore */ }
   }
 
-  async function tryRefresh() {
-    try {
-      const res = await $fetch<{ access_token: string }>(`${apiBase}/auth/refresh`, {
-        method: 'POST',
-        credentials: 'include',
-      })
-      accessToken.value = res.access_token
-      await fetchMe()
-      return true
-    } catch {
-      accessToken.value = null
-      currentUser.value = null
-      return false
-    }
+  function tryRefresh() {
+    if (refreshInFlight) return refreshInFlight
+    refreshInFlight = (async () => {
+      try {
+        // 204 (no body) means there is no session cookie yet: simply not signed in.
+        const res = await $fetch<{ access_token?: string } | undefined>(`${apiBase}/auth/refresh`, {
+          method: 'POST',
+          credentials: 'include',
+        })
+        if (!res?.access_token) {
+          accessToken.value = null
+          currentUser.value = null
+          return false
+        }
+        accessToken.value = res.access_token
+        await fetchMe()
+        return !!accessToken.value
+      } catch {
+        accessToken.value = null
+        currentUser.value = null
+        return false
+      } finally {
+        refreshInFlight = null
+      }
+    })()
+    return refreshInFlight
   }
 
   function hasPermission(...codes: string[]) {

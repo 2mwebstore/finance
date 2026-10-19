@@ -24,6 +24,9 @@ export default defineNuxtConfig({
     },
   },
   runtimeConfig: {
+    // Server-only: where server/routes/api/v1 forwards API calls. Override at runtime with
+    // NUXT_API_PROXY_TARGET (Railway: http://<api service>.railway.internal:8080).
+    apiProxyTarget: (process.env.NUXT_API_PROXY_TARGET || process.env.API_PROXY_TARGET || 'http://localhost:8080').replace(/\/$/, ''),
     public: {
       // When unset, useApiBase matches the API hostname to the browser host so
       // the refresh cookie remains same-site on localhost and 127.0.0.1.

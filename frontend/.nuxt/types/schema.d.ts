@@ -11,6 +11,8 @@ import { NuxtModule, ModuleDependencyMeta } from '@nuxt/schema'
       cdnURL: string,
    },
 
+   apiProxyTarget: string,
+
    nitro: {
       envPrefix: string,
    },
