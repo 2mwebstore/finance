@@ -19,7 +19,7 @@
         </div>
         <div v-if="showBranchFilter" class="control-field branch-field">
           <span>Branch</span>
-          <SearchSelect v-model="branchFilter" :options="branchOptions" :searchable="branchOptions.length > 7" placeholder="All branches" aria-label="Report branch" />
+          <SearchSelect v-model="branchFilter" :options="branchOptions" placeholder="All branches" search-placeholder="Search branches…" aria-label="Report branch" />
         </div>
       </div>
       <p class="control-hint">Updates automatically when the dates or branch change.</p>

@@ -1,0 +1,8 @@
+# Local-only files: the image installs its own dependencies and gets
+# NUXT_PUBLIC_API_BASE from the Dockerfile build argument.
+.env
+.env.*
+!.env.example
+node_modules
+.nuxt
+.output

@@ -181,7 +181,7 @@
 
           <div class="filter-group">
             <label class="filter-label">Branch</label>
-            <SearchSelect v-model="branchId" :options="branchOptions" placeholder="All accessible branches" aria-label="Branch filter" />
+            <SearchSelect v-model="branchId" :options="branchOptions" placeholder="All accessible branches" search-placeholder="Search branches…" aria-label="Branch filter" />
           </div>
 
           <div class="filter-group">

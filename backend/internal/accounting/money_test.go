@@ -24,6 +24,12 @@ func TestParseAndValidateAmount(t *testing.T) {
 	if _, err := ParseAmount("1.12345"); err == nil {
 		t.Fatal("5 decimal places should fail")
 	}
+	if _, err := ParseAmount("999999999999"); err != nil {
+		t.Fatalf("maximum amount should pass: %v", err)
+	}
+	if _, err := ParseAmount("1000000000000"); err != ErrAmountTooLarge {
+		t.Fatalf("13-digit amount should be too large, got %v", err)
+	}
 }
 
 func TestValidateCurrency(t *testing.T) {

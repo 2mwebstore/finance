@@ -12,7 +12,11 @@ var (
 	ErrInvalidCurrency = errors.New("currency must be USD or KHR")
 	ErrInvalidAmount   = errors.New("amount must be a positive number with at most 4 decimal places")
 	ErrInvalidTxnType  = errors.New("type must be income or expense")
+	ErrAmountTooLarge  = errors.New("amount is too large (maximum 999,999,999,999)")
 )
+
+// MaxAmount keeps amounts well inside DECIMAL(19,4) and exact in browser number formatting.
+var MaxAmount = decimal.RequireFromString("999999999999")
 
 // ParseAmount parses a string amount into decimal.Decimal and validates it.
 func ParseAmount(s string) (decimal.Decimal, error) {
@@ -31,6 +35,9 @@ func ValidateAmount(amount decimal.Decimal) error {
 	// Exponent is negative of decimal places; e.g. 1.2345 has exponent -4
 	if amount.Exponent() < -4 {
 		return ErrInvalidAmount
+	}
+	if amount.GreaterThan(MaxAmount) {
+		return ErrAmountTooLarge
 	}
 	return nil
 }

@@ -39,6 +39,7 @@
               <span class="amount-symbol" aria-hidden="true">{{ currencySymbol }}</span>
               <MoneyInput v-model="form.amount" :currency="form.currency" aria-label="Transaction amount" required />
             </div>
+            <small v-if="amountAtLimit" class="field-hint">Maximum is {{ form.currency === 'USD' ? '$999,999,999.99' : '៛999,999,999,999' }}.</small>
             <small v-if="mode === 'edit'" class="field-hint">The currency can't be changed after a transaction is created.</small>
           </div>
 
@@ -141,6 +142,8 @@ const currencyOptions: { value: TransactionCurrency; symbol: string }[] = [
   { value: 'USD', symbol: '$' },
   { value: 'KHR', symbol: '៛' },
 ]
+// Mirrors MoneyInput's digit limit so people see why extra digits are ignored.
+const amountAtLimit = computed(() => (form.amount.split('.')[0] || '').length >= (form.currency === 'USD' ? 9 : 12))
 const currencySymbol = computed(() => currencyOptions.find(option => option.value === form.currency)?.symbol || '')
 
 const transactionType = computed<TransactionType>(() => props.mode === 'edit'

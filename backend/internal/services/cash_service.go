@@ -165,5 +165,8 @@ func parseNonNegativeAmount(s string) (decimal.Decimal, error) {
 	if d.Exponent() < -4 {
 		return decimal.Zero, accounting.ErrInvalidAmount
 	}
+	if d.GreaterThan(accounting.MaxAmount) {
+		return decimal.Zero, accounting.ErrAmountTooLarge
+	}
 	return d, nil
 }

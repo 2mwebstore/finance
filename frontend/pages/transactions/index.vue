@@ -26,7 +26,7 @@
       </div>
       <div v-if="showBranchFilter" class="filter-field filter-wide branch-filter">
         <span>Branch</span>
-        <SearchSelect v-model="branchFilter" :options="branchOptions" :searchable="branchOptions.length > 7" placeholder="All branches" aria-label="Branch filter" />
+        <SearchSelect v-model="branchFilter" :options="branchOptions" placeholder="All branches" search-placeholder="Search branches…" aria-label="Branch filter" />
       </div>
       <div class="filter-field currency-filter">
         <span>Currency</span>

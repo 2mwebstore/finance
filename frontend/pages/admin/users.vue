@@ -35,7 +35,7 @@
     <FilterCard :summary="userFilterSummary" :active="userFiltersActive">
       <div v-if="branches.length > 1" class="filter-field">
         <span>Branch</span>
-        <SearchSelect v-model="branchFilter" :options="filterBranchOptions" :searchable="filterBranchOptions.length > 7" placeholder="All branches" aria-label="Filter users by branch" />
+        <SearchSelect v-model="branchFilter" :options="filterBranchOptions" placeholder="All branches" search-placeholder="Search branches…" aria-label="Filter users by branch" />
       </div>
       <div class="filter-field">
         <span>Role</span>

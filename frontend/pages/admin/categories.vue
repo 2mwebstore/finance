@@ -14,7 +14,7 @@
     <FilterCard :summary="categoryFilterSummary" :active="categoryFiltersActive">
       <div class="filter-field">
         <span>Applies to</span>
-        <SearchSelect v-model="scopeFilter" :options="scopeFilterOptions" :searchable="scopeFilterOptions.length > 7" aria-label="Filter categories by branch" />
+        <SearchSelect v-model="scopeFilter" :options="scopeFilterOptions" search-placeholder="Search branches…" aria-label="Filter categories by branch" />
       </div>
       <div class="filter-field">
         <span>Status</span>
@@ -61,7 +61,7 @@
           </label>
           <div class="block space-y-1.5 text-xs font-semibold text-navy">
             <span>Applies to</span>
-            <SearchSelect v-if="formMode === 'create'" v-model="form.branch_id" :options="scopeOptions" :searchable="scopeOptions.length > 6" aria-label="Category applies to" />
+            <SearchSelect v-if="formMode === 'create'" v-model="form.branch_id" :options="scopeOptions" search-placeholder="Search branches…" aria-label="Category applies to" />
             <p v-else class="rounded-lg border border-border bg-canvas px-3 py-2.5 font-normal text-muted">{{ editing?.branch_id ? (editing.branch_name || 'One branch') : 'Shared — every branch' }}</p>
           </div>
           <label class="block space-y-1.5 text-xs font-semibold text-navy">

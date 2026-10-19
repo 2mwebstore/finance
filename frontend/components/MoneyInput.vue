@@ -16,6 +16,9 @@
 <script setup lang="ts">
 import type { SupportedCurrency } from '~/utils/money'
 
+// USD up to $999,999,999.99; KHR up to ៛999,999,999,999 (the API's maximum).
+const MAX_WHOLE_DIGITS: Record<SupportedCurrency, number> = { USD: 9, KHR: 12 }
+
 const props = defineProps<{
   modelValue: string
   currency: SupportedCurrency
@@ -29,12 +32,18 @@ const displayValue = ref(formatEntry(props.modelValue, props.currency, false))
 
 function normalize(value: string, currency: SupportedCurrency) {
   const cleaned = value.replace(/,/g, '').replace(/[^\d.]/g, '')
-  if (currency === 'KHR') return cleaned.split('.')[0].replace(/\D/g, '')
+  const limit = MAX_WHOLE_DIGITS[currency]
+  if (currency === 'KHR') return trimWhole(cleaned.split('.')[0].replace(/\D/g, ''), limit)
   const dot = cleaned.indexOf('.')
-  if (dot < 0) return cleaned
-  const whole = cleaned.slice(0, dot).replace(/\./g, '')
+  if (dot < 0) return trimWhole(cleaned, limit)
+  const whole = trimWhole(cleaned.slice(0, dot).replace(/\./g, ''), limit)
   const fraction = cleaned.slice(dot + 1).replace(/\./g, '').slice(0, 2)
   return `${whole}.${fraction}`
+}
+
+// Drop leading zeros and stop at the currency's digit limit (extra digits are ignored).
+function trimWhole(digits: string, limit: number) {
+  return digits.replace(/^0+(?=\d)/, '').slice(0, limit)
 }
 
 function groupDigits(value: string) {
