@@ -16,11 +16,16 @@ type bucket struct {
 }
 
 type RateLimiter struct {
-	mu       sync.Mutex
-	buckets  map[string]*bucket
-	rate     float64 // tokens per second
-	capacity float64
+	mu        sync.Mutex
+	buckets   map[string]*bucket
+	rate      float64 // tokens per second
+	capacity  float64
+	lastSweep time.Time
 }
+
+// sweepEvery is how often buckets that have refilled completely are dropped, so the map only
+// holds recently active clients.
+const sweepEvery = time.Minute
 
 func NewRateLimiter(requestsPerMinute int) *RateLimiter {
 	if requestsPerMinute < 1 {
@@ -38,6 +43,15 @@ func (rl *RateLimiter) allow(key string) bool {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 	now := time.Now()
+	if now.Sub(rl.lastSweep) >= sweepEvery {
+		refill := time.Duration(rl.capacity / rl.rate * float64(time.Second))
+		for k, b := range rl.buckets {
+			if now.Sub(b.lastRefill) >= refill {
+				delete(rl.buckets, k) // full again: same as a new bucket
+			}
+		}
+		rl.lastSweep = now
+	}
 	b, ok := rl.buckets[key]
 	if !ok {
 		rl.buckets[key] = &bucket{tokens: rl.capacity - 1, lastRefill: now}

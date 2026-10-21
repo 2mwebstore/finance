@@ -4,13 +4,13 @@
       :value="modelValue"
       :type="visible ? 'text' : 'password'"
       inputmode="numeric"
-      pattern="[0-9]{4}"
-      minlength="4"
-      maxlength="4"
-      autocomplete="new-password"
+      :pattern="existing ? `[0-9]{${OLD_PIN_LENGTH},${PIN_LENGTH}}` : `[0-9]{${PIN_LENGTH}}`"
+      :minlength="existing ? OLD_PIN_LENGTH : PIN_LENGTH"
+      :maxlength="PIN_LENGTH"
+      :autocomplete="existing ? 'current-password' : 'new-password'"
       required
       :aria-label="ariaLabel"
-      placeholder="••••"
+      :placeholder="'•'.repeat(PIN_LENGTH)"
       @input="onInput"
     />
     <!-- There is no confirm field, so let people check what they typed. -->
@@ -23,14 +23,16 @@
 
 <script setup lang="ts">
 import { Eye, EyeOff } from 'lucide-vue-next'
+import { OLD_PIN_LENGTH, PIN_LENGTH } from '~/utils/validation'
 
-defineProps<{ modelValue: string; ariaLabel?: string }>()
+// `existing`: the PIN someone already has, which may still be an old 4-digit one.
+defineProps<{ modelValue: string; ariaLabel?: string; existing?: boolean }>()
 const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
 const visible = ref(false)
 
 function onInput(event: Event) {
   const input = event.target as HTMLInputElement
-  const digits = input.value.replace(/\D/g, '').slice(0, 4)
+  const digits = input.value.replace(/\D/g, '').slice(0, PIN_LENGTH)
   if (digits !== input.value) input.value = digits
   emit('update:modelValue', digits)
 }

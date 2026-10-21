@@ -35,6 +35,7 @@ var fieldLabels = map[string]string{
 	"full_name":        "full name",
 	"password":         "PIN",
 	"new_password":     "new PIN",
+	"current_password": "current PIN",
 	"identifier":       "username or email",
 	"setup_token":      "setup token",
 	"role_codes":       "roles",

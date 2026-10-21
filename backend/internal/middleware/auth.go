@@ -36,14 +36,13 @@ func AuthRequired(authSvc *auth.Service, tokenSvc *auth.TokenService) gin.Handle
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid session"})
 			return
 		}
-		if err := authSvc.ValidateSession(c.Request.Context(), sessionID); err != nil {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "session revoked or expired"})
-			return
-		}
-
 		userID, err := uuid.Parse(claims.UserID)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid user"})
+			return
+		}
+		if err := authSvc.ValidateSession(c.Request.Context(), sessionID, userID); err != nil {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "session revoked or expired"})
 			return
 		}
 

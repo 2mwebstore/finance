@@ -81,7 +81,7 @@
 
     <nav ref="mobileNavEl" class="mobile-nav" :class="{ 'is-ready': lensReady }" aria-label="Mobile navigation">
       <!-- Telegram-style selection "lens" that springs to the active tab. -->
-      <span class="mobile-nav-lens" :class="{ 'is-moving': lensMoving, 'is-hidden': !lens.width }" :style="{ translate: `${lens.x}px 0`, width: `${lens.width}px` }" aria-hidden="true"></span>
+      <span class="mobile-nav-lens" :class="{ 'is-moving': lensMoving, 'is-hidden': !lens.width || centerActive }" :style="{ translate: `${lens.x}px 0`, width: `${lens.width}px` }" aria-hidden="true"></span>
       <NuxtLink v-for="item in mobileNav" :key="item.label" :to="item.to" :data-nav-key="item.label" :class="[activeNavKey === item.label ? 'is-active' : '', item.center ? 'mobile-nav-center' : '']" @click="onNavTap(item.label)">
         <span v-if="item.center" class="mobile-nav-fab" :class="{ 'is-popping': popping === item.label }"><component :is="item.icon" :size="22" /></span>
         <span v-else class="mobile-nav-icon" :class="{ 'is-popping': popping === item.label }"><component :is="item.icon" :size="20" /></span>
@@ -181,6 +181,8 @@ const activeNavKey = computed(() => {
   if (mobileMenuOpen.value) return 'Menu'
   return mobileNav.value.find(isActive)?.label || 'Menu'
 })
+// The raised centre button stands out on its own, so it gets no highlight behind it.
+const centerActive = computed(() => !!mobileNav.value.find(item => item.label === activeNavKey.value)?.center)
 
 // Telegram-style tab bar: a "lens" springs to the active tab (stretching while it moves)
 // and the chosen icon pops. Positions are measured, so any number of tabs works.
@@ -338,12 +340,19 @@ async function onLogout() {
   .topbar-user { margin-left: auto; border: 0; }
   .topbar-avatar { width: 33px; height: 33px; }
   .mobile-logout { display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; border: 1px solid #e1e9f4; border-radius: 10px; color: #607898; background: #fff; cursor: pointer; }
-  .page-content { padding: 18px 14px calc(92px + env(safe-area-inset-bottom)); }
-  .mobile-nav { position: fixed; right: 10px; bottom: calc(8px + env(safe-area-inset-bottom)); left: 10px; z-index: 40; display: flex; justify-content: space-around; gap: 3px; padding: 7px; border: 1px solid #dfe8f4; border-radius: 17px; background: rgb(255 255 255 / 97%); box-shadow: 0 9px 28px rgb(26 58 100 / 15%); backdrop-filter: blur(12px); }
-  .mobile-nav a, .mobile-nav button { position: relative; z-index: 1; display: flex; flex: 1 1 0; min-width: 0; flex-direction: column; align-items: center; justify-content: center; gap: 3px; border: 0; border-radius: 12px; padding: 7px 3px; color: #8998ad; background: transparent; font: inherit; font-size: 10px; font-weight: 650; text-decoration: none; white-space: nowrap; cursor: pointer; transition: color .25s ease; -webkit-tap-highlight-color: transparent; }
+  .page-content { padding: 18px 14px calc(96px + env(safe-area-inset-bottom)); }
+  /* Floating glass capsule, like a native app's tab bar: content stays visible (blurred) behind it. */
+  .mobile-nav { position: fixed; right: 12px; bottom: calc(10px + env(safe-area-inset-bottom)); left: 12px; z-index: 40; display: flex; justify-content: space-around; gap: 3px; padding: 7px; border: 1px solid rgb(255 255 255 / 70%); border-radius: 999px; background: linear-gradient(180deg, rgb(255 255 255 / 72%), rgb(242 247 255 / 58%)); box-shadow: inset 0 1px 0 rgb(255 255 255 / 90%), inset 0 -1px 0 rgb(255 255 255 / 30%), 0 0 0 .5px rgb(20 48 86 / 10%), 0 12px 32px rgb(26 58 100 / 18%); -webkit-backdrop-filter: blur(22px) saturate(180%); backdrop-filter: blur(22px) saturate(180%); }
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .mobile-nav { background: rgb(255 255 255 / 96%); }
+  }
+  @media (prefers-reduced-transparency: reduce) {
+    .mobile-nav { background: rgb(255 255 255 / 97%); -webkit-backdrop-filter: none; backdrop-filter: none; }
+  }
+  .mobile-nav a, .mobile-nav button { position: relative; z-index: 1; display: flex; flex: 1 1 0; min-width: 0; flex-direction: column; align-items: center; justify-content: center; gap: 3px; border: 0; border-radius: 999px; padding: 7px 3px; color: #8998ad; background: transparent; font: inherit; font-size: 10px; font-weight: 650; text-decoration: none; white-space: nowrap; cursor: pointer; transition: color .25s ease; -webkit-tap-highlight-color: transparent; }
   .mobile-nav a.is-active, .mobile-nav button.is-active { color: #1769e8; }
   /* Telegram-style selection lens: springs between tabs and stretches while it travels. */
-  .mobile-nav-lens { position: absolute; top: 7px; bottom: 7px; left: 0; z-index: 0; border-radius: 13px; background: linear-gradient(180deg, #f1f7ff, #e2edff); box-shadow: inset 0 0 0 1px rgb(23 105 232 / 9%), 0 3px 10px rgb(23 105 232 / 12%); pointer-events: none; }
+  .mobile-nav-lens { position: absolute; top: 7px; bottom: 7px; left: 0; z-index: 0; border-radius: 999px; background: linear-gradient(180deg, rgb(255 255 255 / 92%), rgb(224 236 255 / 85%)); box-shadow: inset 0 1px 0 rgb(255 255 255 / 95%), inset 0 0 0 1px rgb(23 105 232 / 10%), 0 4px 12px rgb(23 105 232 / 14%); pointer-events: none; }
   .mobile-nav.is-ready .mobile-nav-lens { transition: translate .55s cubic-bezier(.3, 1.4, .45, 1), width .55s cubic-bezier(.3, 1.4, .45, 1), opacity .2s ease; }
   .mobile-nav-lens.is-hidden { opacity: 0; }
   .mobile-nav-lens.is-moving { animation: nav-lens-stretch .55s cubic-bezier(.3, .7, .4, 1); }
@@ -357,10 +366,10 @@ async function onLogout() {
   /* Activity: a raised round button that sits on top of the bar. */
   .mobile-nav a.mobile-nav-center, .mobile-nav a.mobile-nav-center.is-active { justify-content: flex-end; padding-top: 0; color: #1b3156; background: transparent; }
   .mobile-nav a.mobile-nav-center.is-active { color: #1769e8; }
-  .mobile-nav-fab { display: grid; width: 52px; height: 52px; margin-top: -30px; place-items: center; border: 4px solid #fff; border-radius: 50%; color: #fff; background: linear-gradient(140deg, #2f86ff, #1263df); box-shadow: 0 8px 18px rgb(23 105 232 / 32%); transition: scale .2s cubic-bezier(.3, 1.4, .45, 1), box-shadow .25s ease; }
+  /* The ring is frosted white rather than solid, so it sits on the glass bar instead of cutting into it. */
+  .mobile-nav-fab { display: grid; width: 52px; height: 52px; margin-top: -30px; place-items: center; border: 4px solid rgb(255 255 255 / 82%); border-radius: 50%; color: #fff; background: linear-gradient(140deg, #2f86ff, #1263df) padding-box; box-shadow: inset 0 1px 0 rgb(255 255 255 / 30%), 0 8px 18px rgb(23 105 232 / 32%); transition: scale .2s cubic-bezier(.3, 1.4, .45, 1), box-shadow .25s ease; }
   .mobile-nav a.mobile-nav-center:active .mobile-nav-fab { scale: .9; transition-duration: .08s; }
   .mobile-nav-fab.is-popping { animation: nav-fab-pop .65s cubic-bezier(.3, .7, .4, 1); }
-  .mobile-nav a.mobile-nav-center.is-active .mobile-nav-fab { box-shadow: 0 0 0 3px #cfe1ff, 0 8px 18px rgb(23 105 232 / 32%); }
   .mobile-menu-backdrop { position: fixed; inset: 0; z-index: 50; display: block; background: rgb(10 35 75 / 42%); backdrop-filter: blur(2px); }
   /* Menu: a bottom sheet with a grid of everything not in the bar. */
   .mobile-sheet { position: fixed; right: 0; bottom: 0; left: 0; z-index: 60; display: flex; max-height: calc(100dvh - 48px); flex-direction: column; border-radius: 22px 22px 0 0; color: #162a4d; background: #fff; box-shadow: 0 -12px 32px rgb(20 48 86 / 18%); transform: translateY(105%); visibility: hidden; transition: transform .26s cubic-bezier(.4, 0, .8, .4), visibility 0s linear .26s; }

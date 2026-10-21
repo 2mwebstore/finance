@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cambodia-finance/income-expense/internal/accounting"
 	"github.com/cambodia-finance/income-expense/internal/services"
@@ -54,9 +55,11 @@ func TestBindJSONMessages(t *testing.T) {
 		want  string
 	}{
 		{"min length", &services.CreateBranchInput{}, `{"code":"A","name":"Main"}`, "code", "code must be at least 2 characters"},
-		{"email", &services.CreateUserInput{}, `{"username":"dara","email":"nope","password":"1234","full_name":"Dara"}`, "email", "email must be a valid email address"},
-		{"pin digits", &services.CreateUserInput{}, `{"username":"dara","email":"d@x.io","password":"12ab","full_name":"Dara"}`, "password", "PIN must contain digits only"},
-		{"pin length", &services.CreateUserInput{}, `{"username":"dara","email":"d@x.io","password":"12","full_name":"Dara"}`, "password", "PIN must be exactly 4 digits"},
+		{"email", &services.CreateUserInput{}, `{"username":"dara","email":"nope","password":"123456","full_name":"Dara"}`, "email", "email must be a valid email address"},
+		{"pin digits", &services.CreateUserInput{}, `{"username":"dara","email":"d@x.io","password":"12ab56","full_name":"Dara"}`, "password", "PIN must contain digits only"},
+		{"pin length", &services.CreateUserInput{}, `{"username":"dara","email":"d@x.io","password":"1234","full_name":"Dara"}`, "password", "PIN must be exactly 6 digits"},
+		{"new pin length", &changePasswordRequest{}, `{"current_password":"2468","new_password":"1234"}`, "new_password", "new PIN must be exactly 6 digits"},
+		{"setup pin digits", &setupRequest{}, `{"setup_token":"t","username":"admin","email":"a@x.io","password":"12345a","full_name":"Admin"}`, "password", "PIN must contain digits only"},
 		{"oneof", &services.CreateTransactionInput{}, `{"type":"gift","branch_id":"7a1f0c39-6c41-4f0e-9a52-2f3a9f6f4c11","currency":"USD","amount":"1"}`, "type", "type must be income or expense"},
 		{"blank update", &services.UpdateBranchInput{}, `{"name":""}`, "name", "name must be at least 2 characters"},
 		{"wrong type", &services.CreateTransactionInput{}, `{"amount":12}`, "amount", "amount is not valid"},
@@ -82,6 +85,10 @@ func TestBindJSONAcceptsValidBodyAndOmittedUpdates(t *testing.T) {
 	if code, out := bindResponse(t, &services.CreateBranchInput{}, `{"code":"PP","name":"Main","email":""}`); code != http.StatusOK {
 		t.Fatalf("status = %d (%v), want 200", code, out)
 	}
+	// Someone still on an old 4-digit PIN types it as the current one when choosing a 6-digit PIN.
+	if code, out := bindResponse(t, &changePasswordRequest{}, `{"current_password":"2468","new_password":"246810"}`); code != http.StatusOK {
+		t.Fatalf("status = %d (%v), want 200", code, out)
+	}
 }
 
 func TestBindJSONEmptyBody(t *testing.T) {
@@ -100,5 +107,17 @@ func TestErrorFieldsPointAtTheInput(t *testing.T) {
 	}
 	if got := errorFields(errors.New("something else")); got != nil {
 		t.Fatalf("unrelated error fields = %v, want nil", got)
+	}
+}
+
+func TestDayRangeUsesBusinessTimeZone(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodGet, "/?date_from=2026-10-18&date_to=2026-10-18", nil)
+	loc := accounting.LoadLocation("Asia/Phnom_Penh")
+	from, to := dayRange(c, loc)
+	midnight := time.Date(2026, 10, 18, 0, 0, 0, 0, loc)
+	if from == nil || !from.Equal(midnight) || to == nil || !to.Equal(midnight.AddDate(0, 0, 1)) {
+		t.Fatalf("dayRange = %v – %v, want %v – next day", from, to, midnight)
 	}
 }

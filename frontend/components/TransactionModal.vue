@@ -113,6 +113,11 @@
             <i class="pending-icon" aria-hidden="true"><Clock3 :size="17" :stroke-width="2.3" /></i>
             <span><strong>Sent for approval</strong><small>It stays pending until a manager approves it.</small></span>
           </div>
+          <!-- The API sends an approved transaction back for approval when its money details change. -->
+          <div v-else-if="transaction?.status === 'approved' && !canApprove" class="pending-option is-locked" role="note">
+            <i class="pending-icon" aria-hidden="true"><Clock3 :size="17" :stroke-width="2.3" /></i>
+            <span><strong>Needs approval again</strong><small>Changing the amount, date or category sends it back to a manager.</small></span>
+          </div>
         </div>
 
         <!-- Pinned above the buttons so it is visible however far the form is scrolled. -->

@@ -38,9 +38,18 @@ type Config struct {
 
 	LoginRateLimit  int
 	LoginRateWindow time.Duration
+	// RateLimitPerMinute is the per-IP limit for all API requests. A whole office behind one
+	// public IP shares it, so it is generous.
+	RateLimitPerMinute int
+	// TrustedProxies may set X-Forwarded-For (the client IP used for rate limits and audit logs).
+	// Defaults to private networks: nginx, the Nuxt server and the host's edge proxy.
+	TrustedProxies []string
 
 	CORSOrigins []string
 }
+
+// privateNetworks are the proxies in front of the API in every supported deployment.
+const privateNetworks = "127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,100.64.0.0/10,fc00::/7"
 
 func Load() *Config {
 	appEnv := getEnv("APP_ENV", "development")
@@ -77,7 +86,10 @@ func Load() *Config {
 		LoginRateLimit:  getEnvInt("LOGIN_RATE_LIMIT", 10),
 		LoginRateWindow: time.Duration(getEnvInt("LOGIN_RATE_WINDOW_MINUTES", 15)) * time.Minute,
 
-		CORSOrigins: strings.Split(getEnv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000"), ","),
+		RateLimitPerMinute: getEnvInt("RATE_LIMIT_PER_MINUTE", 300),
+		TrustedProxies:     splitList(getEnv("TRUSTED_PROXIES", privateNetworks)),
+
+		CORSOrigins: splitList(getEnv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000")),
 	}
 }
 
@@ -121,6 +133,17 @@ func loadLocalEnv() {
 
 func (c *Config) DSN() string {
 	return c.DBUser + ":" + c.DBPassword + "@tcp(" + c.DBHost + ":" + c.DBPort + ")/" + c.DBName + "?" + c.DBParams
+}
+
+// splitList splits a comma-separated setting, ignoring spaces and empty items.
+func splitList(v string) []string {
+	out := []string{}
+	for _, item := range strings.Split(v, ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			out = append(out, item)
+		}
+	}
+	return out
 }
 
 func getEnv(key, fallback string) string {

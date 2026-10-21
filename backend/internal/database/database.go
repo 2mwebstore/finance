@@ -43,7 +43,10 @@ func Connect(cfg *config.Config) (*gorm.DB, error) {
 // AutoMigrate is used only for development / first bootstrap.
 // Production must use versioned SQL migrations.
 func AutoMigrate(db *gorm.DB) error {
-	return db.AutoMigrate(
+	// Every PIN stored before pin_upgrade_required existed is a 4-digit one (see migration 000008).
+	backfillPINUpgrade := db.Migrator().HasTable(&models.User{}) &&
+		!db.Migrator().HasColumn(&models.User{}, "pin_upgrade_required")
+	err := db.AutoMigrate(
 		&models.User{},
 		&models.Role{},
 		&models.Permission{},
@@ -64,6 +67,10 @@ func AutoMigrate(db *gorm.DB) error {
 		&models.TransactionApproval{},
 		&models.AppSetting{},
 	)
+	if err != nil || !backfillPINUpgrade {
+		return err
+	}
+	return db.Exec("UPDATE users SET pin_upgrade_required = TRUE").Error
 }
 
 func Ping(db *gorm.DB) error {

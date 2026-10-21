@@ -19,21 +19,49 @@ const (
 	argonSaltLen = 16
 )
 
-// HashPassword creates an Argon2id hash of the password.
-func HashPassword(password string) (string, error) {
-	if len(password) != 4 {
-		return "", errors.New("password must be exactly 4 digits")
+// hashSlots caps how many Argon2 hashes run at once (64 MB each), so a burst of login
+// requests queues up instead of exhausting the server's memory.
+var hashSlots = make(chan struct{}, 4)
+
+func argonKey(password, salt []byte, time, memory uint32, threads uint8, keyLen uint32) []byte {
+	hashSlots <- struct{}{}
+	defer func() { <-hashSlots }()
+	return argon2.IDKey(password, salt, time, memory, threads, keyLen)
+}
+
+// PINLength is how many digits a new PIN has. PINs set before it grew from 4 still sign in
+// (VerifyPassword doesn't care about length); those users are asked to choose a new one.
+const PINLength = 6
+
+var errPINFormat = fmt.Errorf("PIN must be exactly %d digits", PINLength)
+
+// IsCurrentPIN reports whether pin has the format new PINs must have (PINLength digits).
+func IsCurrentPIN(pin string) bool {
+	if len(pin) != PINLength {
+		return false
 	}
-	for _, digit := range password {
+	for _, digit := range pin {
 		if digit < '0' || digit > '9' {
-			return "", errors.New("password must be exactly 4 digits")
+			return false
 		}
 	}
+	return true
+}
+
+// HashPassword creates an Argon2id hash of a new PIN, which must be PINLength digits.
+func HashPassword(password string) (string, error) {
+	if !IsCurrentPIN(password) {
+		return "", errPINFormat
+	}
+	return encodeHash(password)
+}
+
+func encodeHash(password string) (string, error) {
 	salt := make([]byte, argonSaltLen)
 	if _, err := rand.Read(salt); err != nil {
 		return "", fmt.Errorf("generate salt: %w", err)
 	}
-	hash := argon2.IDKey([]byte(password), salt, argonTime, argonMemory, argonThreads, argonKeyLen)
+	hash := argonKey([]byte(password), salt, argonTime, argonMemory, argonThreads, argonKeyLen)
 
 	b64Salt := base64.RawStdEncoding.EncodeToString(salt)
 	b64Hash := base64.RawStdEncoding.EncodeToString(hash)
@@ -79,7 +107,7 @@ func VerifyPassword(password, encodedHash string) (bool, error) {
 		return false, err
 	}
 
-	otherHash := argon2.IDKey([]byte(password), salt, time, memory, threads, uint32(len(hash)))
+	otherHash := argonKey([]byte(password), salt, time, memory, threads, uint32(len(hash)))
 	if subtle.ConstantTimeCompare(hash, otherHash) == 1 {
 		return true, nil
 	}

@@ -39,6 +39,15 @@ func (bc *BranchController) Update(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
 	}
+	// branches.edit alone (without branches.manage) covers only the actor's own branches.
+	scope, ok := loadScope(c, bc.db)
+	if !ok {
+		return
+	}
+	if !scope.HasBranch(id) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "no access to this branch"})
+		return
+	}
 	var in services.UpdateBranchInput
 	if !bindJSON(c, &in) {
 		return

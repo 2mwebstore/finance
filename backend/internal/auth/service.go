@@ -2,8 +2,11 @@ package auth
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"fmt"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/cambodia-finance/income-expense/internal/config"
@@ -52,30 +55,27 @@ func (s *Service) Login(ctx context.Context, identifier, password, userAgent, ip
 		First(&user).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
+			spendHashTime(password)
 			return nil, ErrInvalidCredentials
 		}
 		return nil, err
 	}
 
+	if err := s.checkPIN(ctx, &user, password); err != nil {
+		return nil, err
+	}
+	// Only someone who knows the PIN learns that the account is switched off.
 	if !user.IsActive {
 		return nil, ErrAccountInactive
 	}
-	if user.LockedUntil != nil && user.LockedUntil.After(time.Now()) {
-		return nil, ErrAccountLocked
+	updates := map[string]interface{}{"last_login_at": time.Now()}
+	// PINs from before they grew to 6 digits still sign in; flag those users so the app asks
+	// them to choose a new one.
+	if upgrade := !IsCurrentPIN(password); upgrade != user.PINUpgradeRequired {
+		updates["pin_upgrade_required"] = upgrade
+		user.PINUpgradeRequired = upgrade
 	}
-
-	ok, err := VerifyPassword(password, user.PasswordHash)
-	if err != nil || !ok {
-		_ = s.recordFailedLogin(ctx, &user)
-		return nil, ErrInvalidCredentials
-	}
-
-	// Reset failed logins
-	s.db.WithContext(ctx).Model(&user).Updates(map[string]interface{}{
-		"failed_logins": 0,
-		"locked_until":  nil,
-		"last_login_at": time.Now(),
-	})
+	s.db.WithContext(ctx).Model(&user).Updates(updates)
 
 	roles := make([]string, 0, len(user.Roles))
 	for _, r := range user.Roles {
@@ -114,14 +114,72 @@ func (s *Service) Login(ctx context.Context, identifier, password, userAgent, ip
 	}, nil
 }
 
-func (s *Service) recordFailedLogin(ctx context.Context, user *models.User) error {
-	failed := user.FailedLogins + 1
-	updates := map[string]interface{}{"failed_logins": failed}
-	if failed >= 5 {
-		lockUntil := time.Now().Add(15 * time.Minute)
-		updates["locked_until"] = lockUntil
+const (
+	// maxFailedLogins wrong PINs in a row lock the account.
+	maxFailedLogins = 5
+	firstLockout    = 15 * time.Minute
+	longestLockout  = 24 * time.Hour
+)
+
+// lockoutAfter is how long the account locks once it reaches `failures` wrong PINs in a row:
+// every 5th failure locks it, twice as long each time (15 min, 30 min, 1 h … 24 h), so a
+// 4-digit PIN can't be found by waiting out short locks.
+func lockoutAfter(failures int) time.Duration {
+	if failures < maxFailedLogins || failures%maxFailedLogins != 0 {
+		return 0
 	}
-	return s.db.WithContext(ctx).Model(user).Updates(updates).Error
+	d := firstLockout << (failures/maxFailedLogins - 1)
+	if d <= 0 || d > longestLockout {
+		return longestLockout
+	}
+	return d
+}
+
+// checkPIN verifies a PIN for the account with brute-force protection. The attempt is counted
+// before the PIN is checked, in one statement that also sets the lock, so parallel requests can't
+// sneak more than maxFailedLogins guesses past it. A correct PIN clears the count.
+func (s *Service) checkPIN(ctx context.Context, user *models.User, pin string) error {
+	now := time.Now()
+	lockSQL := "CASE WHEN MOD(failed_logins + 1, ?) <> 0 THEN locked_until"
+	args := []interface{}{maxFailedLogins}
+	for failures := maxFailedLogins; lockoutAfter(failures) < longestLockout; failures += maxFailedLogins {
+		lockSQL += " WHEN failed_logins + 1 <= ? THEN ?"
+		args = append(args, failures, now.Add(lockoutAfter(failures)))
+	}
+	lockSQL += " ELSE ? END"
+	args = append(args, now.Add(longestLockout), user.ID, now)
+	// locked_until is assigned first so it reads the count from before this attempt in every database.
+	res := s.db.WithContext(ctx).Exec(
+		"UPDATE users SET locked_until = "+lockSQL+", failed_logins = failed_logins + 1 "+
+			"WHERE id = ? AND (locked_until IS NULL OR locked_until <= ?)",
+		args...,
+	)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrAccountLocked
+	}
+	ok, err := VerifyPassword(pin, user.PasswordHash)
+	if err != nil || !ok {
+		return ErrInvalidCredentials
+	}
+	return s.db.WithContext(ctx).Model(&models.User{}).Where("id = ?", user.ID).
+		Updates(map[string]interface{}{"failed_logins": 0, "locked_until": nil}).Error
+}
+
+var (
+	unknownUserHash     string
+	unknownUserHashOnce sync.Once
+)
+
+// spendHashTime makes a login for an unknown username take as long as a real PIN check, so
+// response times don't reveal which usernames exist.
+func spendHashTime(pin string) {
+	unknownUserHashOnce.Do(func() { unknownUserHash, _ = HashPassword(strings.Repeat("0", PINLength)) })
+	if unknownUserHash != "" {
+		_, _ = VerifyPassword(pin, unknownUserHash)
+	}
 }
 
 // refreshGracePeriod is how long the token replaced by a rotation is still accepted.
@@ -225,10 +283,12 @@ func (s *Service) LogoutAll(ctx context.Context, userID uuid.UUID) error {
 		}).Error
 }
 
-func (s *Service) ValidateSession(ctx context.Context, sessionID uuid.UUID) error {
+// ValidateSession checks the token's session is live and belongs to the token's user, so a
+// token can never borrow someone else's session.
+func (s *Service) ValidateSession(ctx context.Context, sessionID, userID uuid.UUID) error {
 	var session models.Session
 	err := s.db.WithContext(ctx).First(&session, "id = ?", sessionID).Error
-	if err != nil {
+	if err != nil || session.UserID != userID {
 		return ErrSessionRevoked
 	}
 	if session.IsRevoked {
@@ -245,7 +305,7 @@ func (s *Service) SetupSuperAdmin(ctx context.Context, setupToken, username, ema
 	if s.cfg.SetupToken == "" {
 		return nil, ErrSetupDisabled
 	}
-	if setupToken != s.cfg.SetupToken {
+	if subtle.ConstantTimeCompare([]byte(setupToken), []byte(s.cfg.SetupToken)) != 1 {
 		return nil, ErrSetupTokenInvalid
 	}
 
@@ -289,22 +349,32 @@ func (s *Service) SetupSuperAdmin(ctx context.Context, setupToken, username, ema
 	return &user, nil
 }
 
-func (s *Service) ChangePassword(ctx context.Context, userID uuid.UUID, currentPassword, newPassword string) error {
+// ChangePassword sets a new PIN after checking the current one (wrong guesses count toward the
+// lockout, like logins) and signs out every other session. keepSessionID stays signed in.
+// The new PIN has the current length, so any pending PIN upgrade is done.
+func (s *Service) ChangePassword(ctx context.Context, userID, keepSessionID uuid.UUID, currentPassword, newPassword string) error {
 	var user models.User
 	if err := s.db.WithContext(ctx).First(&user, "id = ?", userID).Error; err != nil {
 		return err
 	}
-	if currentPassword != "" {
-		ok, err := VerifyPassword(currentPassword, user.PasswordHash)
-		if err != nil || !ok {
-			return ErrInvalidCredentials
-		}
+	if err := s.checkPIN(ctx, &user, currentPassword); err != nil {
+		return err
 	}
 	hash, err := HashPassword(newPassword)
 	if err != nil {
 		return err
 	}
-	return s.db.WithContext(ctx).Model(&user).Update("password_hash", hash).Error
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&user).Updates(map[string]interface{}{
+			"password_hash":        hash,
+			"pin_upgrade_required": false,
+		}).Error; err != nil {
+			return err
+		}
+		return tx.Model(&models.Session{}).
+			Where("user_id = ? AND id <> ? AND is_revoked = ?", userID, keepSessionID, false).
+			Updates(map[string]interface{}{"is_revoked": true, "revoked_at": time.Now()}).Error
+	})
 }
 
 func (s *Service) GetUserByID(ctx context.Context, id uuid.UUID) (*models.User, error) {

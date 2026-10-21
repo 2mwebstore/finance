@@ -15,6 +15,19 @@ export default defineNuxtConfig({
       { from: '~/stores/permissions', imports: ['usePermissionsStore'] },
     ],
   },
+  // Browser security headers on every page (the API adds its own to its responses).
+  routeRules: {
+    '/**': {
+      headers: {
+        'X-Frame-Options': 'DENY',
+        'X-Content-Type-Options': 'nosniff',
+        'Referrer-Policy': 'strict-origin-when-cross-origin',
+        'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+        // Browsers only honour it over HTTPS, so local http://localhost is unaffected.
+        'Strict-Transport-Security': 'max-age=31536000',
+      },
+    },
+  },
   css: ['vuetify/styles', '@mdi/font/css/materialdesignicons.css', '~/assets/css/main.css'],
   vite: {
     ssr: {

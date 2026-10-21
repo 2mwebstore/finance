@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/cambodia-finance/income-expense/internal/accounting"
 	"github.com/cambodia-finance/income-expense/internal/audit"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -13,10 +14,11 @@ import (
 type AuditController struct {
 	svc *audit.Service
 	db  *gorm.DB
+	loc *time.Location
 }
 
-func NewAuditController(svc *audit.Service, db *gorm.DB) *AuditController {
-	return &AuditController{svc: svc, db: db}
+func NewAuditController(svc *audit.Service, db *gorm.DB, timezone string) *AuditController {
+	return &AuditController{svc: svc, db: db, loc: accounting.LoadLocation(timezone)}
 }
 
 func (ac *AuditController) List(c *gin.Context) {
@@ -35,17 +37,7 @@ func (ac *AuditController) List(c *gin.Context) {
 	}
 	f.Page, _ = strconv.Atoi(c.DefaultQuery("page", "1"))
 	f.PageSize, _ = strconv.Atoi(c.DefaultQuery("page_size", "50"))
-	if v := c.Query("date_from"); v != "" {
-		if t, err := time.Parse("2006-01-02", v); err == nil {
-			f.DateFrom = &t
-		}
-	}
-	if v := c.Query("date_to"); v != "" {
-		if t, err := time.Parse("2006-01-02", v); err == nil {
-			end := t.Add(24 * time.Hour)
-			f.DateTo = &end
-		}
-	}
+	f.DateFrom, f.DateTo = dayRange(c, ac.loc)
 
 	items, total, err := ac.svc.List(c.Request.Context(), f)
 	if err != nil {

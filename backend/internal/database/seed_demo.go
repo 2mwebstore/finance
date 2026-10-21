@@ -17,13 +17,13 @@ import (
 // (or when APP_ENV=development and no branches exist yet).
 // Idempotent: skips existing demo records unless SEED_DEMO=true.
 //
-// Demo logins (PIN for all non-admin demo users: 2468)
+// Demo logins (PIN for all non-admin demo users: 246810)
 //
-//	manager1 / 2468     — Owner @ Phnom Penh
-//	cashier1 / 2468     — Cashier @ Phnom Penh
-//	accountant1 / 2468  — Accountant @ all branches
-//	viewer1 / 2468      — Viewer @ Phnom Penh
-//	manager_sr / 2468   — Manager @ Siem Reap
+//	manager1 / 246810     — Owner @ Phnom Penh
+//	cashier1 / 246810     — Cashier @ Phnom Penh
+//	accountant1 / 246810  — Accountant @ all branches
+//	viewer1 / 246810      — Viewer @ Phnom Penh
+//	manager_sr / 246810   — Manager @ Siem Reap
 //
 // Super admin is created via /auth/setup (not by this seed).
 func SeedDemoData(db *gorm.DB) error {
@@ -60,7 +60,7 @@ func SeedDemoData(db *gorm.DB) error {
 			return err
 		}
 		log.Println("demo seed: complete (branches, users, opening balances, transactions, reconciliation)")
-		log.Println("demo seed: logins → manager1, cashier1, accountant1, viewer1, manager_sr / 2468")
+		log.Println("demo seed: logins → manager1, cashier1, accountant1, viewer1, manager_sr / 246810")
 		return nil
 	})
 }
@@ -132,7 +132,7 @@ func seedDemoUsers(tx *gorm.DB, branches map[string]models.Branch, resetPIN bool
 		{"manager_sr", "manager.sr@demo.local", "Rithy SR Manager", "manager", []string{"SR-01"}},
 	}
 
-	hash, err := auth.HashPassword("2468")
+	hash, err := auth.HashPassword("246810")
 	if err != nil {
 		return nil, err
 	}
@@ -157,8 +157,11 @@ func seedDemoUsers(tx *gorm.DB, branches map[string]models.Branch, resetPIN bool
 			return nil, err
 		} else if resetPIN {
 			// A forced demo seed restores the documented demo PIN for existing
-			// accounts too, including databases seeded before PINs became 4 digits.
-			if err := tx.Model(&u).Update("password_hash", hash).Error; err != nil {
+			// accounts too, including databases seeded before PINs became 6 digits.
+			if err := tx.Model(&u).Updates(map[string]interface{}{
+				"password_hash":        hash,
+				"pin_upgrade_required": false,
+			}).Error; err != nil {
 				return nil, fmt.Errorf("reset demo PIN for %s: %w", d.Username, err)
 			}
 		}

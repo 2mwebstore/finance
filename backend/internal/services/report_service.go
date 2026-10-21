@@ -2,7 +2,8 @@ package services
 
 import (
 	"context"
-	"fmt"
+	"encoding/csv"
+	"strings"
 	"time"
 
 	"github.com/cambodia-finance/income-expense/internal/accounting"
@@ -358,7 +359,9 @@ func (s *ReportService) ExportCSV(ctx context.Context, actorID uuid.UUID, period
 		return "", err
 	}
 
-	csv := "transaction_number,type,status,date,branch_code,category,payment_method,currency,amount,description,counterparty\n"
+	var b strings.Builder
+	w := csv.NewWriter(&b)
+	_ = w.Write([]string{"transaction_number", "type", "status", "date", "branch_code", "category", "payment_method", "currency", "amount", "description", "counterparty"})
 	for _, t := range items {
 		branchCode, catName, pmName := "", "", ""
 		if t.Branch != nil {
@@ -370,13 +373,23 @@ func (s *ReportService) ExportCSV(ctx context.Context, actorID uuid.UUID, period
 		if t.PaymentMethod != nil {
 			pmName = t.PaymentMethod.Name
 		}
-		csv += fmt.Sprintf("%s,%s,%s,%s,%s,%s,%s,%s,%s,%q,%q\n",
+		_ = w.Write([]string{
 			t.TransactionNumber, t.Type, t.Status,
-			t.TransactionDate.Format("2006-01-02"),
-			branchCode, catName, pmName, t.Currency,
+			t.TransactionDate.In(accounting.LoadLocation(s.timezone)).Format("2006-01-02"),
+			csvText(branchCode), csvText(catName), csvText(pmName), t.Currency,
 			t.Amount.StringFixed(4),
-			richtext.ToText(t.Description), t.Counterparty,
-		)
+			csvText(richtext.ToText(t.Description)), csvText(t.Counterparty),
+		})
 	}
-	return csv, nil
+	w.Flush()
+	return b.String(), w.Error()
+}
+
+// csvText keeps typed text from running as a spreadsheet formula when the export is opened
+// in Excel or Sheets (cells starting with = + - @ are formulas there).
+func csvText(v string) string {
+	if v != "" && strings.ContainsRune("=+-@\t\r", rune(v[0])) {
+		return "'" + v
+	}
+	return v
 }

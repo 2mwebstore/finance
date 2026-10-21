@@ -5,9 +5,9 @@ When `APP_ENV=development` (or `test`), the API runs `SeedDemoData` after permis
 ## Enable / force
 
 - Runs automatically in development if branch `PP-01` does not exist.
-- Set `SEED_DEMO=true` for a forced demo seed. This restores the documented `2468` PIN for existing demo accounts as well as creating missing demo data.
+- Set `SEED_DEMO=true` for a forced demo seed. This restores the documented `246810` PIN for existing demo accounts as well as creating missing demo data.
 
-## Demo users (PIN: `2468`)
+## Demo users (PIN: `246810`)
 
 | Username | Role | Branches |
 |----------|------|----------|
@@ -20,6 +20,8 @@ When `APP_ENV=development` (or `test`), the API runs `SeedDemoData` after permis
 Super Admin is **not** created by demo seed — use `POST /api/v1/auth/setup` with `SETUP_TOKEN`.
 
 To repair demo logins in an existing development database, restart the API once with `SEED_DEMO=true` in its environment. Remove the variable after the seed completes so demo PINs do not get reset on every restart.
+
+Demo accounts created before PINs became 6 digits still sign in with `2468`; the app then asks for a new 6-digit PIN. A forced seed sets them back to `246810`.
 
 ## Demo content
 

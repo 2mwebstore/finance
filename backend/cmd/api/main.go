@@ -35,7 +35,7 @@ func main() {
 		if err := database.SeedCategoriesAndPaymentMethods(db); err != nil {
 			log.Fatalf("seed finance: %v", err)
 		}
-		// Demo branches/users (PIN 2468) only in development, or when explicitly requested.
+		// Demo branches/users (PIN 246810) only in development, or when explicitly requested.
 		seedDemo := os.Getenv("SEED_DEMO") == "true" || os.Getenv("SEED_DEMO") == "1"
 		if cfg.AppEnv == "development" || cfg.AppEnv == "test" || seedDemo {
 			if err := database.SeedDemoData(db); err != nil {
@@ -49,24 +49,35 @@ func main() {
 	}
 
 	r := gin.New()
+	// Without this gin believes any X-Forwarded-For header, so anyone could pick a fresh "IP"
+	// per request and walk past the login rate limit.
+	if err := r.SetTrustedProxies(cfg.TrustedProxies); err != nil {
+		log.Fatalf("TRUSTED_PROXIES: %v", err)
+	}
 	r.Use(gin.Logger(), gin.Recovery())
 	r.Use(middleware.SecurityHeaders())
-	// Global IP rate limit (e.g. 120 req/min). Login has a tighter limiter in routes.
-	r.Use(middleware.RateLimitByIP(middleware.NewRateLimiter(120)))
+	// Per-IP limit for every request. Login has a tighter limiter in routes.
+	r.Use(middleware.RateLimitByIP(middleware.NewRateLimiter(cfg.RateLimitPerMinute)))
 
-	// Basic CORS for development
+	// CORS, for setups where the web app runs on another origin (the default proxies /api/v1 same-origin).
 	r.Use(func(c *gin.Context) {
 		origin := c.GetHeader("Origin")
-		allowed := false
+		allowed, wildcard := false, false
 		for _, o := range cfg.CORSOrigins {
-			if o == origin || o == "*" {
+			if o == origin {
 				allowed = true
 				break
 			}
+			wildcard = wildcard || o == "*"
 		}
 		if allowed {
 			c.Header("Access-Control-Allow-Origin", origin)
 			c.Header("Access-Control-Allow-Credentials", "true")
+		} else if wildcard && origin != "" {
+			// "*" opens the API to any site, but never with cookies: that would let any page act as the signed-in user.
+			c.Header("Access-Control-Allow-Origin", origin)
+		}
+		if allowed || (wildcard && origin != "") {
 			c.Header("Access-Control-Allow-Headers", "Authorization, Content-Type")
 			c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		}

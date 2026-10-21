@@ -431,7 +431,9 @@ async function onApprovalDone(updated: Transaction) {
 async function onTransactionSaved(saved: Transaction) {
   const label = saved.type === 'income' ? 'Income' : 'Expense'
   const amount = formatMoney(saved.amount, saved.currency)
-  if (modalMode.value === 'edit') toast.success(`${saved.transaction_number} is up to date.`, { title: 'Changes saved' })
+  if (modalMode.value === 'edit' && saved.status === 'pending' && selectedTransaction.value?.status === 'approved') {
+    toast.info(`${saved.transaction_number} counts again once a manager approves the change.`, { title: 'Sent for approval again' })
+  } else if (modalMode.value === 'edit') toast.success(`${saved.transaction_number} is up to date.`, { title: 'Changes saved' })
   else if (saved.status === 'pending') toast.info(`${amount} ${saved.type} counts once a manager approves it.`, { title: 'Sent for approval' })
   else toast.success(`${amount} recorded as ${saved.transaction_number}.`, { title: `${label} saved` })
   selectedTransaction.value = null

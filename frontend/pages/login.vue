@@ -31,7 +31,7 @@
         />
       </div>
       <p v-if="showDemoCredentials" class="text-center text-xs text-muted">
-        Demo login: <span class="font-medium text-navy">manager1</span> / PIN <span class="font-medium text-navy">2468</span>
+        Demo login: <span class="font-medium text-navy">manager1</span> / PIN <span class="font-medium text-navy">246810</span>
       </p>
       <AppAlert v-if="error || loginCheck.messages.length" title="Couldn’t sign you in" :message="error" :items="loginCheck.messages" />
       <button
@@ -69,6 +69,7 @@ onMounted(() => {
 })
 
 function defaultLandingPath() {
+  if (user.value?.pin_upgrade_required) return '/profile'
   const mobile = window.matchMedia('(max-width: 760px)').matches
   if (mobile && canViewTransactions.value) return '/transactions'
   if (canViewDashboard.value) return '/dashboard'

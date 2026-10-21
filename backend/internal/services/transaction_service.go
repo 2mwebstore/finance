@@ -27,6 +27,7 @@ var (
 	ErrCategoryBranch       = errors.New("this category belongs to another branch")
 	ErrNotApprover          = errors.New("only this user's managers can approve or reject it")
 	ErrDescriptionTooLong   = errors.New("description must be at most 1000 characters")
+	ErrTypeNotAllowed       = errors.New("you don't have permission for this type of transaction")
 )
 
 // DescriptionMaxChars matches the counter on the transaction form.
@@ -44,13 +45,23 @@ func cleanDescription(in string) (string, error) {
 type TransactionService struct {
 	db      *gorm.DB
 	numbers *accounting.NumberGenerator
+	loc     *time.Location
 }
 
 func NewTransactionService(db *gorm.DB, timezone string) *TransactionService {
 	return &TransactionService{
 		db:      db,
 		numbers: accounting.NewNumberGenerator(db, timezone),
+		loc:     accounting.LoadLocation(timezone),
 	}
+}
+
+// Location is the business time zone: transaction dates and date filters are days in it.
+func (s *TransactionService) Location() *time.Location {
+	if s.loc == nil {
+		return accounting.LoadLocation("Asia/Phnom_Penh")
+	}
+	return s.loc
 }
 
 type CreateTransactionInput struct {
@@ -95,6 +106,10 @@ func (s *TransactionService) Create(ctx context.Context, in CreateTransactionInp
 	}
 	if err := accounting.ValidateTxnType(in.Type); err != nil {
 		return nil, err
+	}
+	// The route accepts income.create or expense.create; each type needs its own.
+	if !s.hasPermission(ctx, actorID, in.Type+".create") {
+		return nil, ErrTypeNotAllowed
 	}
 	amount, err := accounting.ParseAmount(in.Amount)
 	if err != nil {
@@ -324,6 +339,9 @@ func (s *TransactionService) Update(ctx context.Context, id uuid.UUID, in Update
 	if err != nil {
 		return nil, err
 	}
+	if !s.hasPermission(ctx, actorID, txn.Type+".edit") {
+		return nil, ErrTypeNotAllowed
+	}
 	// Only pending or approved (non-voided) can be edited; voided/reversed locked
 	if txn.Status == models.TxnStatusVoided || txn.Status == models.TxnStatusReversed {
 		return nil, ErrInvalidStatus
@@ -351,14 +369,18 @@ func (s *TransactionService) Update(ctx context.Context, id uuid.UUID, in Update
 		if cat.BranchID != nil && *cat.BranchID != txn.BranchID {
 			return nil, ErrCategoryBranch
 		}
-		updates["category_id"] = cid
+		if txn.CategoryID == nil || *txn.CategoryID != cid {
+			updates["category_id"] = cid
+		}
 	}
 	if in.PaymentMethodID != nil {
 		pid, err := uuid.Parse(*in.PaymentMethodID)
 		if err != nil {
 			return nil, fmt.Errorf("invalid payment_method_id")
 		}
-		updates["payment_method_id"] = pid
+		if pid != txn.PaymentMethodID {
+			updates["payment_method_id"] = pid
+		}
 	}
 	if in.Amount != nil {
 		if strings.TrimSpace(*in.Amount) == "" {
@@ -368,7 +390,9 @@ func (s *TransactionService) Update(ctx context.Context, id uuid.UUID, in Update
 		if err != nil {
 			return nil, err
 		}
-		updates["amount"] = amt
+		if !amt.Equal(txn.Amount) {
+			updates["amount"] = amt
+		}
 	}
 	if in.TransactionDate != nil {
 		if strings.TrimSpace(*in.TransactionDate) == "" {
@@ -378,7 +402,10 @@ func (s *TransactionService) Update(ctx context.Context, id uuid.UUID, in Update
 		if err != nil {
 			return nil, fieldError("transaction_date", "date is not valid")
 		}
-		updates["transaction_date"] = d
+		// The form sends the day only; keep the stored time when the day is unchanged.
+		if d.In(s.Location()).Format("2006-01-02") != txn.TransactionDate.In(s.Location()).Format("2006-01-02") {
+			updates["transaction_date"] = d
+		}
 	}
 	if in.Description != nil {
 		description, err := cleanDescription(*in.Description)
@@ -389,6 +416,19 @@ func (s *TransactionService) Update(ctx context.Context, id uuid.UUID, in Update
 	}
 	if in.Counterparty != nil {
 		updates["counterparty"] = *in.Counterparty
+	}
+	// Changing what counts in the books (amount, day, category, payment method) of an approved
+	// transaction sends it back for approval, unless the editor may approve; otherwise anyone with
+	// edit rights could raise an amount after a manager approved it.
+	_, amountChanged := updates["amount"]
+	_, dateChanged := updates["transaction_date"]
+	_, categoryChanged := updates["category_id"]
+	_, methodChanged := updates["payment_method_id"]
+	if txn.Status == models.TxnStatusApproved && (amountChanged || dateChanged || categoryChanged || methodChanged) &&
+		!s.canApproveTransactions(ctx, actorID) {
+		updates["status"] = models.TxnStatusPending
+		updates["approved_by_id"] = nil
+		updates["approved_at"] = nil
 	}
 	// Currency and type and branch are immutable after create
 	if len(updates) > 0 {
@@ -403,6 +443,9 @@ func (s *TransactionService) Void(ctx context.Context, id uuid.UUID, reason stri
 	txn, err := s.GetByID(ctx, id, actorID)
 	if err != nil {
 		return nil, err
+	}
+	if !s.hasPermission(ctx, actorID, txn.Type+".void") {
+		return nil, ErrTypeNotAllowed
 	}
 	if txn.Status == models.TxnStatusVoided || txn.Status == models.TxnStatusReversed {
 		return nil, ErrInvalidStatus
@@ -532,12 +575,18 @@ func (s *TransactionService) Approve(ctx context.Context, id uuid.UUID, notes st
 	}
 	now := time.Now()
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(txn).Updates(map[string]interface{}{
-			"status":         models.TxnStatusApproved,
-			"approved_by_id": actorID,
-			"approved_at":    now,
-		}).Error; err != nil {
-			return err
+		// Conditional on still being pending, so two people deciding at once can't both win.
+		res := tx.Model(&models.Transaction{}).Where("id = ? AND status = ?", id, models.TxnStatusPending).
+			Updates(map[string]interface{}{
+				"status":         models.TxnStatusApproved,
+				"approved_by_id": actorID,
+				"approved_at":    now,
+			})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return ErrInvalidStatus
 		}
 		return tx.Create(&models.TransactionApproval{
 			ID: uuid.New(), TransactionID: id, ActorID: actorID,
@@ -566,10 +615,13 @@ func (s *TransactionService) Reject(ctx context.Context, id uuid.UUID, notes str
 	}
 	now := time.Now()
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(txn).Updates(map[string]interface{}{
-			"status": models.TxnStatusRejected,
-		}).Error; err != nil {
-			return err
+		res := tx.Model(&models.Transaction{}).Where("id = ? AND status = ?", id, models.TxnStatusPending).
+			Update("status", models.TxnStatusRejected)
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return ErrInvalidStatus
 		}
 		return tx.Create(&models.TransactionApproval{
 			ID: uuid.New(), TransactionID: id, ActorID: actorID,
@@ -787,6 +839,11 @@ func (s *TransactionService) CanWriteType(ctx context.Context, actorID uuid.UUID
 
 // canApproveTransactions: Super Admin or anyone holding transactions.approve.
 func (s *TransactionService) canApproveTransactions(ctx context.Context, actorID uuid.UUID) bool {
+	return s.hasPermission(ctx, actorID, permissions.TransactionsApprove)
+}
+
+// hasPermission: Super Admin, or one of the actor's roles grants the code.
+func (s *TransactionService) hasPermission(ctx context.Context, actorID uuid.UUID, code string) bool {
 	var actor models.User
 	if err := s.db.WithContext(ctx).Preload("Roles.Permissions").First(&actor, "id = ?", actorID).Error; err != nil {
 		return false
@@ -796,7 +853,7 @@ func (s *TransactionService) canApproveTransactions(ctx context.Context, actorID
 	}
 	for _, r := range actor.Roles {
 		for _, p := range r.Permissions {
-			if p.Code == permissions.TransactionsApprove {
+			if p.Code == code {
 				return true
 			}
 		}

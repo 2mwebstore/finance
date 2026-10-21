@@ -83,10 +83,10 @@ railway variable set --service api CORS_ORIGINS=https://<your-web-domain>
 Read the token with `railway variable list --service api --kv | grep SETUP_TOKEN`, then:
 
 ```bash
-curl -X POST https://<your-web-domain>/api/v1/auth/setup -H 'Content-Type: application/json' -d '{"setup_token":"<SETUP_TOKEN>","username":"admin","email":"you@example.com","password":"1234","full_name":"Your Name"}'
+curl -X POST https://<your-web-domain>/api/v1/auth/setup -H 'Content-Type: application/json' -d '{"setup_token":"<SETUP_TOKEN>","username":"admin","email":"you@example.com","password":"123456","full_name":"Your Name"}'
 ```
 
-`password` is the 4-digit PIN. Setup works only while no Super Admin exists. Afterwards remove the
+`password` is the 6-digit PIN. Setup works only while no Super Admin exists. Afterwards remove the
 token so it can't be reused:
 
 ```bash
@@ -97,7 +97,7 @@ Sign in at `https://<your-web-domain>`, then create branches, users and roles in
 
 ## Optional: demo data
 
-Set `SEED_DEMO=true` on **api** to load the demo branches and users (PIN `2468`, see `docs/DEMO_DATA.md`).
+Set `SEED_DEMO=true` on **api** to load the demo branches and users (PIN `246810`, see `docs/DEMO_DATA.md`).
 Those PINs are public, so only do this for a private test project, and remove the variable afterwards.
 
 ## Attachments in Cloudflare R2

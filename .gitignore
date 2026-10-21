@@ -1,0 +1,17 @@
+# Secrets: real values live in the host's environment (e.g. Railway variables), never in git.
+.env
+.env.*
+!.env.example
+!.env.prod.example
+
+# Dependencies and build output (rebuilt by `npm ci` / `nuxt build` / Docker)
+node_modules/
+frontend/.nuxt/
+frontend/.output/
+frontend/dist/
+
+# Attachments saved on local disk in development
+backend/uploads/
+
+# OS files
+.DS_Store

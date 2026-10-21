@@ -47,7 +47,7 @@ func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config) {
 	attachmentSvc := services.NewAttachmentService(db, txnSvc, store)
 	txnCtrl := controllers.NewTransactionController(txnSvc, attachmentSvc, auditSvc)
 	reportCtrl := controllers.NewReportController(reportSvc, auditSvc)
-	auditCtrl := controllers.NewAuditController(auditSvc, db)
+	auditCtrl := controllers.NewAuditController(auditSvc, db, cfg.Timezone)
 	notifyCtrl := controllers.NewNotificationController(tg)
 	settingsCtrl := controllers.NewSettingsController(settingsSvc, auditSvc)
 	cashCtrl := controllers.NewCashController(cashSvc)

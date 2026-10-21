@@ -33,14 +33,14 @@ type setupRequest struct {
 	SetupToken string `json:"setup_token" binding:"required"`
 	Username   string `json:"username" binding:"required,min=3,max=64"`
 	Email      string `json:"email" binding:"required,email"`
-	Password   string `json:"password" binding:"required,len=4"`
+	Password   string `json:"password" binding:"required,len=6,numeric"`
 	FullName   string `json:"full_name" binding:"required,min=2"`
 }
 
 type changePasswordRequest struct {
-	// Optional: the app only asks for the new PIN. When sent, it is still verified.
-	CurrentPassword string `json:"current_password"`
-	NewPassword     string `json:"new_password" binding:"required,len=4,numeric"`
+	// Required so a stolen session can't quietly take over the account.
+	CurrentPassword string `json:"current_password" binding:"required"`
+	NewPassword     string `json:"new_password" binding:"required,len=6,numeric"`
 }
 
 func (ac *AuthController) Login(c *gin.Context) {
@@ -93,6 +93,8 @@ func (ac *AuthController) Login(c *gin.Context) {
 			"full_name":      result.User.FullName,
 			"is_super_admin": result.User.IsSuperAdmin,
 			"roles":          roleCodes(result.User),
+			// Signed in with an old 4-digit PIN: the app sends them to choose a 6-digit one.
+			"pin_upgrade_required": result.User.PINUpgradeRequired,
 		},
 	})
 }
@@ -196,16 +198,17 @@ func (ac *AuthController) Me(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"id":             user.ID,
-		"username":       user.Username,
-		"email":          user.Email,
-		"full_name":      user.FullName,
-		"is_active":      user.IsActive,
-		"is_super_admin": user.IsSuperAdmin,
-		"roles":          roleCodes(user),
-		"permissions":    perms,
-		"branches":       branches,
-		"last_login_at":  user.LastLoginAt,
+		"id":                   user.ID,
+		"username":             user.Username,
+		"email":                user.Email,
+		"full_name":            user.FullName,
+		"is_active":            user.IsActive,
+		"is_super_admin":       user.IsSuperAdmin,
+		"roles":                roleCodes(user),
+		"permissions":          perms,
+		"branches":             branches,
+		"last_login_at":        user.LastLoginAt,
+		"pin_upgrade_required": user.PINUpgradeRequired,
 	})
 }
 
@@ -259,12 +262,19 @@ func (ac *AuthController) ChangePassword(c *gin.Context) {
 		return
 	}
 
-	if err := ac.svc.ChangePassword(c.Request.Context(), userID, req.CurrentPassword, req.NewPassword); err != nil {
-		if err == auth.ErrInvalidCredentials {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "current password is incorrect"})
-			return
+	sessionID, _ := c.Get(middleware.ContextSessionIDKey)
+	keep, _ := sessionID.(uuid.UUID)
+	if err := ac.svc.ChangePassword(c.Request.Context(), userID, keep, req.CurrentPassword, req.NewPassword); err != nil {
+		switch err {
+		case auth.ErrInvalidCredentials:
+			// 400, not 401: the session is fine, only the PIN typed was wrong.
+			msg := "current PIN is incorrect"
+			c.JSON(http.StatusBadRequest, gin.H{"error": msg, "fields": gin.H{"current_password": msg}})
+		case auth.ErrAccountLocked:
+			c.JSON(http.StatusForbidden, gin.H{"error": "too many wrong PINs; the account is temporarily locked"})
+		default:
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		}
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "password changed"})

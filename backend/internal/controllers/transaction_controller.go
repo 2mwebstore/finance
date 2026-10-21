@@ -102,18 +102,7 @@ func (tc *TransactionController) List(c *gin.Context) {
 	} else if f.PageSize > 100 {
 		f.PageSize = 100
 	}
-	if v := c.Query("date_from"); v != "" {
-		if t, err := time.Parse("2006-01-02", v); err == nil {
-			f.DateFrom = &t
-		}
-	}
-	if v := c.Query("date_to"); v != "" {
-		if t, err := time.Parse("2006-01-02", v); err == nil {
-			// half-open: include entire end day
-			end := t.Add(24 * time.Hour)
-			f.DateTo = &end
-		}
-	}
+	f.DateFrom, f.DateTo = dayRange(c, tc.svc.Location())
 
 	items, total, err := tc.svc.List(c.Request.Context(), f, actorID)
 	if err != nil {
@@ -209,18 +198,7 @@ func (tc *TransactionController) Totals(c *gin.Context) {
 		}
 		branchID = &id
 	}
-	var from, to *time.Time
-	if v := c.Query("date_from"); v != "" {
-		if t, err := time.Parse("2006-01-02", v); err == nil {
-			from = &t
-		}
-	}
-	if v := c.Query("date_to"); v != "" {
-		if t, err := time.Parse("2006-01-02", v); err == nil {
-			end := t.Add(24 * time.Hour)
-			to = &end
-		}
-	}
+	from, to := dayRange(c, tc.svc.Location())
 	totals, err := tc.svc.TotalsByCurrency(c.Request.Context(), actorID, branchID, from, to, c.Query("type"), c.Query("currency"), c.Query("search"))
 	if err != nil {
 		writeTxnError(c, err)
@@ -234,6 +212,24 @@ func (tc *TransactionController) Totals(c *gin.Context) {
 		"expense_khr": decStr(totals["expense_khr"]),
 		"net_khr":     decStr(totals["net_khr"]),
 	})
+}
+
+// dayRange reads ?date_from=&date_to= (YYYY-MM-DD) as whole days in the business time zone:
+// [start of date_from, start of the day after date_to). Parsing them as UTC would shift every
+// range by the zone offset, so a transaction dated the 1st showed up in the previous month.
+func dayRange(c *gin.Context, loc *time.Location) (from, to *time.Time) {
+	if v := c.Query("date_from"); v != "" {
+		if t, err := time.ParseInLocation("2006-01-02", v, loc); err == nil {
+			from = &t
+		}
+	}
+	if v := c.Query("date_to"); v != "" {
+		if t, err := time.ParseInLocation("2006-01-02", v, loc); err == nil {
+			end := t.AddDate(0, 0, 1)
+			to = &end
+		}
+	}
+	return from, to
 }
 
 func decStr(d decimal.Decimal) string {
@@ -288,7 +284,7 @@ func writeTxnError(c *gin.Context, err error) {
 	case "transaction not found":
 		status = http.StatusNotFound
 	case "no access to this branch", "forbidden", "cannot approve your own transaction", "cannot reject your own transaction",
-		services.ErrNotApprover.Error():
+		services.ErrNotApprover.Error(), services.ErrTypeNotAllowed.Error():
 		status = http.StatusForbidden
 	case "":
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})

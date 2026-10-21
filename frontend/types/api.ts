@@ -9,6 +9,8 @@ export interface User {
   permissions: string[]
   branches: { id: string; code: string; name: string }[]
   last_login_at?: string
+  /** Still signed in with an old 4-digit PIN: must choose a 6-digit one on the profile page. */
+  pin_upgrade_required?: boolean
 }
 
 export interface LoginResponse {
@@ -21,6 +23,7 @@ export interface LoginResponse {
     full_name: string
     is_super_admin: boolean
     roles: string[]
+    pin_upgrade_required?: boolean
   }
 }
 

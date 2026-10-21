@@ -33,7 +33,7 @@ func NewUserService(db *gorm.DB) *UserService {
 type CreateUserInput struct {
 	Username        string   `json:"username" binding:"required,min=3,max=64"`
 	Email           string   `json:"email" binding:"required,email"`
-	Password        string   `json:"password" binding:"required,len=4,numeric"`
+	Password        string   `json:"password" binding:"required,len=6,numeric"`
 	FullName        string   `json:"full_name" binding:"required,min=2"`
 	RoleCodes       []string `json:"role_codes"`
 	BranchIDs       []string `json:"branch_ids"`
@@ -251,7 +251,11 @@ func (s *UserService) SetPassword(ctx context.Context, id uuid.UUID, password st
 		return err
 	}
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&user).Update("password_hash", hash).Error; err != nil {
+		// The new PIN is 6 digits, so an old 4-digit one no longer needs replacing.
+		if err := tx.Model(&user).Updates(map[string]interface{}{
+			"password_hash":        hash,
+			"pin_upgrade_required": false,
+		}).Error; err != nil {
 			return err
 		}
 		now := time.Now()
