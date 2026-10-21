@@ -100,6 +100,30 @@ Sign in at `https://<your-web-domain>`, then create branches, users and roles in
 Set `SEED_DEMO=true` on **api** to load the demo branches and users (PIN `2468`, see `docs/DEMO_DATA.md`).
 Those PINs are public, so only do this for a private test project, and remove the variable afterwards.
 
+## Sharing a MySQL service with another app
+
+If the MySQL service already holds another app's tables (its default database is `railway`), give
+this API its own database so `AUTO_MIGRATE` never touches the other app:
+
+```bash
+railway ssh --service MySQL -- sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -e "CREATE DATABASE IF NOT EXISTS income_expense CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"'
+```
+
+```bash
+railway variable set --service api DB_NAME=income_expense
+```
+
+The `finance` project is set up this way: `fortunate-education` keeps using `railway`, and this
+app's **api** uses `income_expense` on the same MySQL server.
+
+## Troubleshooting
+
+- **The page loads but every `/api/v1` call returns 502:** the web service can't reach the API.
+  `railway logs --service web` shows a `[api proxy] … failed: <reason>` line. Check that
+  `NUXT_API_PROXY_TARGET` is `http://<api service name>.railway.internal:8080` and that the API
+  deployment is healthy. The web image is Debian-based on purpose: Alpine's resolver can fail on
+  `*.railway.internal` names.
+
 ## Updating
 
 Run the two `railway up …` commands again. Schema changes are applied by `AUTO_MIGRATE` on start.

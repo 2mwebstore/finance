@@ -9,16 +9,17 @@ ENV NUXT_PUBLIC_API_BASE=$NUXT_PUBLIC_API_BASE
 ENV NODE_ENV=production
 RUN npm run build
 
-FROM node:22-alpine
+# Debian (glibc) runtime: the server proxies /api/v1 to the API by host name
+# (e.g. api.railway.internal), which Alpine's musl resolver can fail to look up.
+FROM node:22-bookworm-slim
 WORKDIR /app
-RUN adduser -D -u 10001 appuser
-COPY --from=builder /app/.output ./.output
-COPY --from=builder /app/package.json ./package.json
-USER appuser
+COPY --from=builder --chown=node:node /app/.output ./.output
+COPY --from=builder --chown=node:node /app/package.json ./package.json
+USER node
 ENV HOST=0.0.0.0
 ENV PORT=3000
 ENV NODE_ENV=production
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD wget -qO- http://127.0.0.1:3000/ || exit 1
+  CMD node -e "fetch('http://127.0.0.1:' + (process.env.PORT || 3000) + '/').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
 CMD ["node", ".output/server/index.mjs"]

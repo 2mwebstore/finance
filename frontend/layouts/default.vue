@@ -79,19 +79,25 @@
       <NuxtLink to="/profile" class="drawer-profile" @click="mobileMenuOpen = false"><div class="profile-avatar">{{ initials }}</div><span><strong>{{ user?.full_name || 'Account' }}</strong><small>{{ profileRole }}</small></span><ChevronRight :size="16" /></NuxtLink>
     </aside>
 
-    <nav class="mobile-nav" aria-label="Mobile navigation">
-      <NuxtLink v-for="item in mobileNav" :key="item.label" :to="item.to" :class="[isActive(item) ? 'is-active' : '', item.center ? 'mobile-nav-center' : '']">
-        <span v-if="item.center" class="mobile-nav-fab"><component :is="item.icon" :size="22" /></span>
-        <component :is="item.icon" v-else :size="19" />
-        <span>{{ item.label }}</span>
+    <nav ref="mobileNavEl" class="mobile-nav" :class="{ 'is-ready': lensReady }" aria-label="Mobile navigation">
+      <!-- Telegram-style selection "lens" that springs to the active tab. -->
+      <span class="mobile-nav-lens" :class="{ 'is-moving': lensMoving, 'is-hidden': !lens.width }" :style="{ translate: `${lens.x}px 0`, width: `${lens.width}px` }" aria-hidden="true"></span>
+      <NuxtLink v-for="item in mobileNav" :key="item.label" :to="item.to" :data-nav-key="item.label" :class="[activeNavKey === item.label ? 'is-active' : '', item.center ? 'mobile-nav-center' : '']" @click="onNavTap(item.label)">
+        <span v-if="item.center" class="mobile-nav-fab" :class="{ 'is-popping': popping === item.label }"><component :is="item.icon" :size="22" /></span>
+        <span v-else class="mobile-nav-icon" :class="{ 'is-popping': popping === item.label }"><component :is="item.icon" :size="20" /></span>
+        <span class="mobile-nav-label">{{ item.label }}</span>
       </NuxtLink>
-      <button type="button" class="mobile-nav-menu" :class="mobileMenuOpen || menuRouteActive ? 'is-active' : ''" :aria-expanded="mobileMenuOpen" @click="mobileMenuOpen = true"><LayoutGrid :size="19" /><span>Menu</span></button>
+      <button type="button" class="mobile-nav-menu" data-nav-key="Menu" :class="activeNavKey === 'Menu' ? 'is-active' : ''" :aria-expanded="mobileMenuOpen" @click="mobileMenuOpen = true; onNavTap('Menu')">
+        <span class="mobile-nav-icon" :class="{ 'is-popping': popping === 'Menu' }"><LayoutGrid :size="20" /></span>
+        <span class="mobile-nav-label">Menu</span>
+      </button>
     </nav>
   </div>
 </template>
 
 <script setup lang="ts">
 import type { Component } from 'vue'
+import { useResizeObserver } from '@vueuse/core'
 import {
   Building2,
   ChartNoAxesCombined,
@@ -169,7 +175,77 @@ const menuSections = computed(() => [
   { caption: 'MORE', items: canViewReports.value ? [{ label: 'Reports', to: '/reports', icon: FileChartColumnIncreasing }] : [] },
 ].filter((section) => section.items.length))
 
-const menuRouteActive = computed(() => !mobileNav.value.some(isActive))
+// The highlighted bottom-bar tab: the open Menu sheet, else the route's tab, else Menu
+// (pages that only live in the Menu grid).
+const activeNavKey = computed(() => {
+  if (mobileMenuOpen.value) return 'Menu'
+  return mobileNav.value.find(isActive)?.label || 'Menu'
+})
+
+// Telegram-style tab bar: a "lens" springs to the active tab (stretching while it moves)
+// and the chosen icon pops. Positions are measured, so any number of tabs works.
+const mobileNavEl = ref<HTMLElement | null>(null)
+const lens = reactive({ x: 0, width: 0 })
+const lensReady = ref(false)
+const lensMoving = ref(false)
+const popping = ref('')
+let lensTimer: ReturnType<typeof setTimeout> | undefined
+let popTimer: ReturnType<typeof setTimeout> | undefined
+
+function placeLens() {
+  const nav = mobileNavEl.value
+  const tab = nav?.querySelector<HTMLElement>(`[data-nav-key="${activeNavKey.value}"]`)
+  if (!nav || !tab || !nav.offsetWidth) return
+  lens.x = tab.offsetLeft
+  lens.width = tab.offsetWidth
+}
+
+// Force a layout so a CSS animation removed in the last render can start again.
+function reflow() {
+  void mobileNavEl.value?.offsetWidth
+}
+
+async function pop(key: string) {
+  // Remove the class first so tapping the same tab again restarts the bounce.
+  popping.value = ''
+  await nextTick()
+  reflow()
+  popping.value = key
+  if (popTimer) clearTimeout(popTimer)
+  popTimer = setTimeout(() => { popping.value = '' }, 650)
+}
+
+function onNavTap(key: string) {
+  if (key === activeNavKey.value) pop(key)
+  try { navigator.vibrate?.(8) } catch { /* not supported (iOS) */ }
+}
+
+watch(activeNavKey, async (key, previous) => {
+  await nextTick()
+  placeLens()
+  if (!previous || key === previous) return
+  lensMoving.value = false
+  await nextTick()
+  reflow()
+  lensMoving.value = true
+  if (lensTimer) clearTimeout(lensTimer)
+  lensTimer = setTimeout(() => { lensMoving.value = false }, 560)
+  pop(key)
+})
+
+useResizeObserver(mobileNavEl, placeLens)
+onMounted(async () => {
+  await nextTick()
+  placeLens()
+  // Turn transitions on after the first placement so the lens doesn't slide in from the left.
+  await nextTick()
+  reflow()
+  lensReady.value = true
+})
+onBeforeUnmount(() => {
+  if (lensTimer) clearTimeout(lensTimer)
+  if (popTimer) clearTimeout(popTimer)
+})
 
 watch(() => route.fullPath, () => { mobileMenuOpen.value = false })
 
@@ -264,20 +340,31 @@ async function onLogout() {
   .mobile-logout { display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; border: 1px solid #e1e9f4; border-radius: 10px; color: #607898; background: #fff; cursor: pointer; }
   .page-content { padding: 18px 14px calc(92px + env(safe-area-inset-bottom)); }
   .mobile-nav { position: fixed; right: 10px; bottom: calc(8px + env(safe-area-inset-bottom)); left: 10px; z-index: 40; display: flex; justify-content: space-around; gap: 3px; padding: 7px; border: 1px solid #dfe8f4; border-radius: 17px; background: rgb(255 255 255 / 97%); box-shadow: 0 9px 28px rgb(26 58 100 / 15%); backdrop-filter: blur(12px); }
-  .mobile-nav a, .mobile-nav button { display: flex; flex: 1 1 0; min-width: 0; flex-direction: column; align-items: center; justify-content: center; gap: 3px; border: 0; border-radius: 12px; padding: 7px 3px; color: #8998ad; background: transparent; font: inherit; font-size: 10px; font-weight: 650; text-decoration: none; white-space: nowrap; cursor: pointer; }
-  .mobile-nav a.is-active, .mobile-nav button.is-active { color: #1769e8; background: #f0f6ff; }
+  .mobile-nav a, .mobile-nav button { position: relative; z-index: 1; display: flex; flex: 1 1 0; min-width: 0; flex-direction: column; align-items: center; justify-content: center; gap: 3px; border: 0; border-radius: 12px; padding: 7px 3px; color: #8998ad; background: transparent; font: inherit; font-size: 10px; font-weight: 650; text-decoration: none; white-space: nowrap; cursor: pointer; transition: color .25s ease; -webkit-tap-highlight-color: transparent; }
+  .mobile-nav a.is-active, .mobile-nav button.is-active { color: #1769e8; }
+  /* Telegram-style selection lens: springs between tabs and stretches while it travels. */
+  .mobile-nav-lens { position: absolute; top: 7px; bottom: 7px; left: 0; z-index: 0; border-radius: 13px; background: linear-gradient(180deg, #f1f7ff, #e2edff); box-shadow: inset 0 0 0 1px rgb(23 105 232 / 9%), 0 3px 10px rgb(23 105 232 / 12%); pointer-events: none; }
+  .mobile-nav.is-ready .mobile-nav-lens { transition: translate .55s cubic-bezier(.3, 1.4, .45, 1), width .55s cubic-bezier(.3, 1.4, .45, 1), opacity .2s ease; }
+  .mobile-nav-lens.is-hidden { opacity: 0; }
+  .mobile-nav-lens.is-moving { animation: nav-lens-stretch .55s cubic-bezier(.3, .7, .4, 1); }
+  .mobile-nav-icon { display: grid; place-items: center; transition: scale .2s cubic-bezier(.3, 1.4, .45, 1); }
+  .mobile-nav a:active .mobile-nav-icon, .mobile-nav button:active .mobile-nav-icon { scale: .82; transition-duration: .08s; }
+  .mobile-nav-icon.is-popping { animation: nav-icon-pop .6s cubic-bezier(.3, .7, .4, 1); }
+  .mobile-nav-label { transition: color .25s ease, translate .3s cubic-bezier(.3, 1.4, .45, 1); }
+  .mobile-nav .is-active .mobile-nav-label { font-weight: 750; }
   .mobile-nav .mobile-nav-menu { color: #5c759a; }
   .mobile-nav .mobile-nav-menu.is-active { color: #1769e8; }
   /* Activity: a raised round button that sits on top of the bar. */
   .mobile-nav a.mobile-nav-center, .mobile-nav a.mobile-nav-center.is-active { justify-content: flex-end; padding-top: 0; color: #1b3156; background: transparent; }
   .mobile-nav a.mobile-nav-center.is-active { color: #1769e8; }
-  .mobile-nav-fab { display: grid; width: 52px; height: 52px; margin-top: -30px; place-items: center; border: 4px solid #fff; border-radius: 50%; color: #fff; background: linear-gradient(140deg, #2f86ff, #1263df); box-shadow: 0 8px 18px rgb(23 105 232 / 32%); transition: transform .15s ease, box-shadow .15s ease; }
-  .mobile-nav a.mobile-nav-center:active .mobile-nav-fab { transform: scale(.94); }
+  .mobile-nav-fab { display: grid; width: 52px; height: 52px; margin-top: -30px; place-items: center; border: 4px solid #fff; border-radius: 50%; color: #fff; background: linear-gradient(140deg, #2f86ff, #1263df); box-shadow: 0 8px 18px rgb(23 105 232 / 32%); transition: scale .2s cubic-bezier(.3, 1.4, .45, 1), box-shadow .25s ease; }
+  .mobile-nav a.mobile-nav-center:active .mobile-nav-fab { scale: .9; transition-duration: .08s; }
+  .mobile-nav-fab.is-popping { animation: nav-fab-pop .65s cubic-bezier(.3, .7, .4, 1); }
   .mobile-nav a.mobile-nav-center.is-active .mobile-nav-fab { box-shadow: 0 0 0 3px #cfe1ff, 0 8px 18px rgb(23 105 232 / 32%); }
   .mobile-menu-backdrop { position: fixed; inset: 0; z-index: 50; display: block; background: rgb(10 35 75 / 42%); backdrop-filter: blur(2px); }
   /* Menu: a bottom sheet with a grid of everything not in the bar. */
-  .mobile-sheet { position: fixed; right: 0; bottom: 0; left: 0; z-index: 60; display: flex; max-height: calc(100dvh - 48px); flex-direction: column; border-radius: 22px 22px 0 0; color: #162a4d; background: #fff; box-shadow: 0 -12px 32px rgb(20 48 86 / 18%); transform: translateY(105%); visibility: hidden; transition: transform .24s ease, visibility 0s linear .24s; }
-  .mobile-sheet.is-open { transform: translateY(0); visibility: visible; transition: transform .24s ease; }
+  .mobile-sheet { position: fixed; right: 0; bottom: 0; left: 0; z-index: 60; display: flex; max-height: calc(100dvh - 48px); flex-direction: column; border-radius: 22px 22px 0 0; color: #162a4d; background: #fff; box-shadow: 0 -12px 32px rgb(20 48 86 / 18%); transform: translateY(105%); visibility: hidden; transition: transform .26s cubic-bezier(.4, 0, .8, .4), visibility 0s linear .26s; }
+  .mobile-sheet.is-open { transform: translateY(0); visibility: visible; transition: transform .38s cubic-bezier(.2, .9, .25, 1); }
   .mobile-sheet-header { position: relative; display: flex; flex-direction: column; align-items: center; padding: 8px 16px 10px; }
   .sheet-handle { width: 38px; height: 4px; margin-bottom: 10px; border-radius: 999px; background: #d6dfeb; }
   .mobile-sheet-header strong { font-size: 16px; font-weight: 750; }
@@ -296,5 +383,28 @@ async function onLogout() {
   .drawer-profile strong { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
   .drawer-profile small { color: #7b8eaa; font-size: 11px; }
   .drawer-profile > svg { color: #8293ad; }
+}
+@keyframes nav-lens-stretch {
+  0% { scale: 1 1; }
+  30% { scale: 1.2 .86; }
+  62% { scale: .96 1.05; }
+  100% { scale: 1 1; }
+}
+@keyframes nav-icon-pop {
+  0% { scale: 1; translate: 0 0; }
+  22% { scale: .7; translate: 0 2px; }
+  52% { scale: 1.22; translate: 0 -3px; }
+  76% { scale: .95; translate: 0 0; }
+  100% { scale: 1; translate: 0 0; }
+}
+@keyframes nav-fab-pop {
+  0% { scale: 1; rotate: 0deg; }
+  22% { scale: .8; rotate: 0deg; }
+  52% { scale: 1.12; rotate: -10deg; }
+  78% { scale: .97; rotate: 4deg; }
+  100% { scale: 1; rotate: 0deg; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mobile-nav-lens, .mobile-nav-icon, .mobile-nav-fab, .mobile-nav-label, .mobile-sheet { animation: none !important; transition: none !important; }
 }
 </style>

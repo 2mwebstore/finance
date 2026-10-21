@@ -2207,7 +2207,22 @@ const plugins = [
 _wH6JrtIxmaSoA8lCPWFnE9z4lQeXW6H5z3l5aymEQw
 ];
 
-const assets = {};
+const assets = {
+  "/index.mjs": {
+    "type": "text/javascript; charset=utf-8",
+    "etag": "\"1b98d-9Bqmg9vB/Recy+Pf/vyL3kO7vZM\"",
+    "mtime": "2026-10-19T08:47:19.456Z",
+    "size": 113037,
+    "path": "index.mjs"
+  },
+  "/index.mjs.map": {
+    "type": "application/json",
+    "etag": "\"6e767-IQYODjYYkK7M+0E66eLm8p0OCOw\"",
+    "mtime": "2026-10-19T08:47:19.456Z",
+    "size": 452455,
+    "path": "index.mjs.map"
+  }
+};
 
 function readAsset (id) {
   const serverDir = dirname$1(fileURLToPath(globalThis._importMeta_.url));
@@ -3227,9 +3242,15 @@ const styles$1 = /*#__PURE__*/Object.freeze(/*#__PURE__*/Object.defineProperty({
   default: styles
 }, Symbol.toStringTag, { value: 'Module' }));
 
-const ____path_ = defineEventHandler((event) => {
-  const target = useRuntimeConfig(event).apiProxyTarget;
-  return proxyRequest(event, joinURL(target, event.path));
+const ____path_ = defineEventHandler(async (event) => {
+  var _a, _b, _c;
+  const target = joinURL(useRuntimeConfig(event).apiProxyTarget, event.path);
+  try {
+    return await proxyRequest(event, target);
+  } catch (error) {
+    console.error(`[api proxy] ${event.method} ${target} failed:`, ((_b = (_a = error == null ? void 0 : error.cause) == null ? void 0 : _a.cause) == null ? void 0 : _b.code) || ((_c = error == null ? void 0 : error.cause) == null ? void 0 : _c.message) || (error == null ? void 0 : error.message));
+    throw error;
+  }
 });
 
 const ____path_$1 = /*#__PURE__*/Object.freeze(/*#__PURE__*/Object.defineProperty({

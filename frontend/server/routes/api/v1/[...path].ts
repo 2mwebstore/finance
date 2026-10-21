@@ -5,7 +5,13 @@ import { joinURL } from 'ufo'
  * (dev and production). One origin keeps the HttpOnly refresh cookie first-party in every browser.
  * The target is read at runtime: NUXT_API_PROXY_TARGET (e.g. http://api.railway.internal:8080).
  */
-export default defineEventHandler((event) => {
-  const target = useRuntimeConfig(event).apiProxyTarget
-  return proxyRequest(event, joinURL(target, event.path))
+export default defineEventHandler(async (event) => {
+  const target = joinURL(useRuntimeConfig(event).apiProxyTarget, event.path)
+  try {
+    return await proxyRequest(event, target)
+  } catch (error: any) {
+    // A 502 here means the API could not be reached; log why (DNS, refused, timeout…).
+    console.error(`[api proxy] ${event.method} ${target} failed:`, error?.cause?.cause?.code || error?.cause?.message || error?.message)
+    throw error
+  }
 })
