@@ -14,7 +14,7 @@
         <textarea v-model.trim="reason" rows="2" maxlength="512" placeholder="Add a short reason" />
       </label>
 
-      <p v-if="error" class="delete-error" role="alert">{{ error }}</p>
+      <AppAlert v-if="error" class="delete-error" compact :message="error" />
       <div class="delete-actions">
         <button type="button" class="cancel-button" :disabled="deleting" @click="close">Cancel</button>
         <button type="button" class="confirm-button" :disabled="deleting" @click="confirmDelete">
@@ -86,7 +86,7 @@ async function confirmDelete() {
 .reason-field span small { margin-left: 4px; color: #93a0b2; font-size: 9px; font-weight: 450; }
 .reason-field textarea { width: 100%; resize: vertical; border: 1px solid #e0e7f0; border-radius: 8px; outline: none; padding: 9px 10px; color: #344d70; font: inherit; font-size: 10px; font-weight: 450; }
 .reason-field textarea:focus { border-color: #97bafa; box-shadow: 0 0 0 3px rgb(37 99 235 / 9%); }
-.delete-error { margin: 12px 0 0; border-radius: 8px; padding: 9px 10px; color: #b33d50; background: #fff0f2; font-size: 10px; }
+.delete-error { margin-top: 12px; }
 .delete-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; padding-top: 14px; border-top: 1px solid #edf1f7; }
 .delete-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 36px; border-radius: 8px; padding: 0 12px; font-size: 10px; font-weight: 700; cursor: pointer; }
 .cancel-button { border: 1px solid #dfe6ef; color: #657993; background: #fff; }

@@ -35,8 +35,7 @@ func (pc *PaymentMethodController) List(c *gin.Context) {
 
 func (pc *PaymentMethodController) Create(c *gin.Context) {
 	var in services.CreatePaymentMethodInput
-	if err := c.ShouldBindJSON(&in); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if !bindJSON(c, &in) {
 		return
 	}
 	pm, err := pc.svc.Create(c.Request.Context(), in)
@@ -56,8 +55,7 @@ func (pc *PaymentMethodController) Update(c *gin.Context) {
 		return
 	}
 	var in services.UpdatePaymentMethodInput
-	if err := c.ShouldBindJSON(&in); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if !bindJSON(c, &in) {
 		return
 	}
 	pm, err := pc.svc.Update(c.Request.Context(), id, in)

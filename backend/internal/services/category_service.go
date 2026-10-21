@@ -33,8 +33,8 @@ type CreateCategoryInput struct {
 }
 
 type UpdateCategoryInput struct {
-	Code        *string `json:"code"`
-	Name        *string `json:"name"`
+	Code        *string `json:"code" binding:"omitempty,min=2,max=64"`
+	Name        *string `json:"name" binding:"omitempty,min=2,max=128"`
 	Description *string `json:"description"`
 	IsActive    *bool   `json:"is_active"`
 }

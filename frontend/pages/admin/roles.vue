@@ -2,27 +2,29 @@
   <section class="space-y-4">
     <header class="flex items-center justify-between gap-3">
       <div><p class="text-[10px] font-bold tracking-[0.14em] text-slate-400">ACCESS CONTROL</p><h1 class="text-xl font-bold text-navy">Roles &amp; permissions</h1><p class="mt-1 text-xs text-muted">Create roles and choose what each role can access.</p></div>
-      <button v-if="canManage" class="rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white hover:bg-primary-hover" @click="openCreate">+ Role</button>
+      <button v-if="canManage" class="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white hover:bg-primary-hover" @click="openCreate"><Plus :size="16" /> Add role</button>
     </header>
 
-    <p v-if="notice" class="rounded-lg bg-green-50 px-3 py-2 text-sm text-income">{{ notice }}</p>
     <div v-if="loading" class="text-sm text-muted">Loading roles…</div>
-    <div v-else-if="error" class="rounded-lg bg-red-50 px-3 py-3 text-sm text-expense">{{ error }}</div>
+    <AppAlert v-else-if="error" title="Couldn’t load roles" :message="error"><template #action><button type="button" @click="load">Try again</button></template></AppAlert>
     <div v-else class="space-y-3">
       <article v-for="role in roles" :key="role.id" class="rounded-xl border border-border bg-white p-4">
         <div class="flex items-start justify-between gap-3">
           <div class="min-w-0">
             <div class="flex flex-wrap items-center gap-2"><h2 class="text-sm font-semibold text-navy">{{ role.name }}</h2><span v-if="role.is_system" class="rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-bold uppercase text-muted">System</span></div>
             <p class="mt-1 font-mono text-[10px] text-muted">{{ role.code }}</p>
-            <p v-if="role.description" class="mt-1 text-xs text-muted">{{ role.description }}</p>
           </div>
           <div v-if="canManage" class="flex shrink-0 gap-1.5">
             <button class="action-chip action-edit" @click="openEdit(role)"><Pencil :size="13" /> Edit</button>
             <button v-if="!role.is_system" class="action-chip action-danger" @click="deleteTarget = role"><Trash2 :size="13" /> Delete</button>
           </div>
         </div>
+        <p v-if="role.description" class="mt-2 text-xs text-muted">{{ role.description }}</p>
         <div v-if="role.permissions?.length" class="mt-3 flex flex-wrap gap-1.5">
-          <span v-for="permission in role.permissions" :key="permission.id || permission.code" class="rounded-md border border-border bg-canvas px-2 py-1 font-mono text-[9px] text-navy">{{ permission.code || permission.name }}</span>
+          <span v-for="permission in shownPermissions(role)" :key="permission.id || permission.code" class="rounded-md border border-border bg-canvas px-2 py-1 font-mono text-[9px] text-navy">{{ permission.code || permission.name }}</span>
+          <button v-if="role.permissions.length > PERMISSION_PREVIEW" type="button" class="rounded-md bg-blue-50 px-2 py-1 text-[10px] font-semibold text-primary" :aria-expanded="!!expandedRoles[role.id]" @click="expandedRoles[role.id] = !expandedRoles[role.id]">
+            {{ expandedRoles[role.id] ? 'Show less' : `+${role.permissions.length - PERMISSION_PREVIEW} more` }}
+          </button>
         </div>
         <p v-else class="mt-3 text-xs text-muted">No permissions assigned.</p>
       </article>
@@ -35,10 +37,10 @@
           <div><p class="text-[9px] font-extrabold tracking-[0.14em] text-slate-400">{{ formMode === 'create' ? 'NEW ROLE' : 'UPDATE ROLE' }}</p><h2 class="mt-1 text-base font-bold text-navy">{{ formMode === 'create' ? 'Create role' : `Edit ${editingRole?.name}` }}</h2></div>
           <button class="grid h-8 w-8 place-items-center rounded-lg bg-canvas text-muted hover:text-navy" aria-label="Close" @click="close"><X :size="17" /></button>
         </header>
-        <form class="space-y-4 p-5" @submit.prevent="save">
+        <form class="space-y-4 p-5" novalidate @submit.prevent="save">
           <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <label class="space-y-1.5 text-xs font-semibold text-navy">Name<input v-model.trim="form.name" required minlength="2" maxlength="128" class="w-full rounded-lg border border-border px-3 py-2.5 text-sm font-normal" /></label>
-            <label v-if="formMode === 'create'" class="space-y-1.5 text-xs font-semibold text-navy">Code<input v-model.trim="form.code" required minlength="2" maxlength="64" class="w-full rounded-lg border border-border px-3 py-2.5 font-mono text-sm font-normal" placeholder="e.g. store-manager" /></label>
+            <label class="space-y-1.5 text-xs font-semibold text-navy">Name<input v-model.trim="form.name" required minlength="2" maxlength="128" :aria-invalid="formCheck.invalid('name')" class="w-full rounded-lg border border-border px-3 py-2.5 text-sm font-normal" /></label>
+            <label v-if="formMode === 'create'" class="space-y-1.5 text-xs font-semibold text-navy">Code<input v-model.trim="form.code" required minlength="2" maxlength="64" :aria-invalid="formCheck.invalid('code')" class="w-full rounded-lg border border-border px-3 py-2.5 font-mono text-sm font-normal" placeholder="e.g. store-manager" /></label>
             <label class="space-y-1.5 text-xs font-semibold text-navy sm:col-span-2">Description<textarea v-model.trim="form.description" rows="2" maxlength="512" class="w-full rounded-lg border border-border px-3 py-2.5 text-sm font-normal" /></label>
           </div>
           <div>
@@ -46,7 +48,7 @@
             <p class="mb-3 text-xs text-muted">Tick what this role can do. Use a module's top checkbox to give or remove the whole module.</p>
             <PermissionPanel v-model="form.permission_codes" :permissions="permissions" :disabled="saving" />
           </div>
-          <p v-if="formError" class="rounded-lg bg-red-50 px-3 py-2 text-xs text-expense" role="alert">{{ formError }}</p>
+          <AppAlert v-if="formError || formCheck.messages.length" :title="formError ? 'Couldn’t save this role' : 'Check the highlighted fields'" :message="formError" :items="formCheck.messages" dismissible @dismiss="formError = ''; formCheck.reset()" />
           <footer class="flex justify-end gap-2 border-t border-border pt-4">
             <button type="button" class="rounded-lg border border-border px-4 py-2 text-xs font-semibold text-muted" :disabled="saving" @click="close">Cancel</button>
             <button type="submit" class="rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-white disabled:opacity-60" :disabled="saving">{{ saving ? 'Saving…' : 'Save role' }}</button>
@@ -59,7 +61,7 @@
       <section class="w-full max-w-sm rounded-2xl border border-border bg-white p-5 shadow-2xl" role="alertdialog" aria-modal="true" aria-labelledby="delete-role-title">
         <h2 id="delete-role-title" class="text-base font-bold text-navy">Delete {{ deleteTarget.name }}?</h2>
         <p class="mt-2 text-sm text-muted">This role can be deleted only after it is removed from every user.</p>
-        <p v-if="deleteError" class="mt-3 rounded-lg bg-red-50 px-3 py-2 text-xs text-expense">{{ deleteError }}</p>
+        <AppAlert v-if="deleteError" class="mt-3" compact :message="deleteError" />
         <footer class="mt-5 flex justify-end gap-2"><button class="rounded-lg border border-border px-3 py-2 text-xs font-semibold text-muted" :disabled="saving" @click="closeDelete">Cancel</button><button class="rounded-lg bg-expense px-3 py-2 text-xs font-semibold text-white disabled:opacity-60" :disabled="saving" @click="removeRole">{{ saving ? 'Deleting…' : 'Delete role' }}</button></footer>
       </section>
     </div>
@@ -67,8 +69,11 @@
 </template>
 
 <script setup lang="ts">
-import { Pencil, Trash2, X } from 'lucide-vue-next'
+import { Pencil, Plus, Trash2, X } from 'lucide-vue-next'
 import type { Permission, Role } from '~/types/api'
+import { useToast } from '~/composables/useToast'
+import { rule } from '~/utils/validation'
+import { useFormErrors } from '~/composables/useFormErrors'
 
 const { api } = useApi()
 const { can, hasFullAccess } = usePermissions()
@@ -81,12 +86,28 @@ const saving = ref(false)
 const error = ref('')
 const formError = ref('')
 const deleteError = ref('')
-const notice = ref('')
+const toast = useToast()
 const modalOpen = ref(false)
 const formMode = ref<'create' | 'edit'>('create')
 const editingRole = ref<Role | null>(null)
 const deleteTarget = ref<Role | null>(null)
 const form = reactive({ code: '', name: '', description: '', permission_codes: [] as string[] })
+// Same rules as the API (CreateRoleInput / UpdateRoleInput); the code is set only when creating.
+const formCheck = reactive(useFormErrors(
+  () => ({ ...form }),
+  () => ({
+    name: [rule.required('name'), rule.minLength('name', 2), rule.maxLength('name', 128)],
+    ...(formMode.value === 'create' ? { code: [rule.required('code'), rule.minLength('code', 2), rule.maxLength('code', 64)] } : {}),
+  }),
+))
+// Long permission lists are cut to a preview so a role card stays short on phones.
+const PERMISSION_PREVIEW = 8
+const expandedRoles = reactive<Record<string, boolean>>({})
+
+function shownPermissions(role: Role) {
+  const list = role.permissions || []
+  return expandedRoles[role.id] ? list : list.slice(0, PERMISSION_PREVIEW)
+}
 
 async function load() {
   loading.value = true
@@ -110,6 +131,7 @@ function openCreate() {
   editingRole.value = null
   Object.assign(form, { code: '', name: '', description: '', permission_codes: [] })
   formError.value = ''
+  formCheck.reset()
   modalOpen.value = true
 }
 
@@ -123,6 +145,7 @@ function openEdit(role: Role) {
     permission_codes: (role.permissions || []).map((permission) => permission.code),
   })
   formError.value = ''
+  formCheck.reset()
   modalOpen.value = true
 }
 
@@ -131,8 +154,9 @@ function close() {
 }
 
 async function save() {
-  saving.value = true
   formError.value = ''
+  if (!formCheck.check()) return
+  saving.value = true
   try {
     if (formMode.value === 'create') {
       await api('/roles', { method: 'POST', body: { code: form.code, name: form.name, description: form.description, permission_codes: form.permission_codes } })
@@ -140,10 +164,10 @@ async function save() {
       await api(`/roles/${editingRole.value.id}`, { method: 'PATCH', body: { name: form.name, description: form.description, permission_codes: form.permission_codes } })
     }
     modalOpen.value = false
-    notice.value = 'Role saved.'
+    toast.success(`${form.name} is ready to assign.`, { title: formMode.value === 'create' ? 'Role created' : 'Role updated' })
     await load()
   } catch (e: any) {
-    formError.value = e?.data?.error || 'Could not save this role.'
+    if (!formCheck.fromApi(e)) formError.value = e?.data?.error || 'Could not save this role.'
   } finally {
     saving.value = false
   }
@@ -162,8 +186,8 @@ async function removeRole() {
   deleteError.value = ''
   try {
     await api(`/roles/${deleteTarget.value.id}`, { method: 'DELETE' })
+    toast.success(`${deleteTarget.value.name} was removed.`, { title: 'Role deleted' })
     deleteTarget.value = null
-    notice.value = 'Role deleted.'
     await load()
   } catch (e: any) {
     deleteError.value = e?.data?.error || 'Could not delete this role.'

@@ -46,7 +46,11 @@ func writeServiceError(c *gin.Context, err error) {
 			c.JSON(http.StatusForbidden, gin.H{"error": msg})
 		default:
 			if len(msg) > 0 {
-				c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+				body := gin.H{"error": msg}
+				if fields := errorFields(err); fields != nil {
+					body["fields"] = fields
+				}
+				c.JSON(http.StatusBadRequest, body)
 			} else {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
 			}

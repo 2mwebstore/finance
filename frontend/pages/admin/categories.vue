@@ -30,13 +30,13 @@
     <div v-else class="overflow-hidden rounded-xl border border-border bg-white">
       <article v-for="category in visibleCategories" :key="category.id" class="flex items-start justify-between gap-4 border-b border-border p-4 last:border-0">
         <div class="min-w-0">
-          <div class="flex flex-wrap items-center gap-2">
-            <h2 class="text-sm font-semibold text-navy">{{ category.name }}</h2>
+          <h2 class="truncate text-sm font-semibold text-navy">{{ category.name }}</h2>
+          <div class="mt-1.5 flex flex-wrap items-center gap-1.5">
             <span class="rounded-full px-2 py-0.5 text-[9px] font-bold uppercase" :class="category.is_active ? 'bg-green-50 text-income' : 'bg-slate-100 text-muted'">{{ category.is_active ? 'Active' : 'Inactive' }}</span>
             <span v-if="category.is_system" class="rounded-full bg-blue-50 px-2 py-0.5 text-[9px] font-bold uppercase text-primary">System</span>
             <span class="rounded-full px-2 py-0.5 text-[9px] font-bold uppercase" :class="category.branch_id ? 'bg-amber-50 text-amber-700' : 'bg-indigo-50 text-indigo-600'">{{ category.branch_id ? (category.branch_name || 'Branch') : 'Shared' }}</span>
           </div>
-          <p class="mt-1 font-mono text-[10px] text-muted">{{ category.code }} · {{ category.type }}</p>
+          <p class="mt-1.5 font-mono text-[10px] text-muted">{{ category.code }} · {{ category.type }}</p>
           <p v-if="category.description" class="mt-1 text-xs text-muted">{{ category.description }}</p>
         </div>
         <button v-if="canEdit(category)" class="action-chip action-edit shrink-0" @click="openEdit(category)"><Pencil :size="13" /> Edit</button>
@@ -51,12 +51,12 @@
           <div><p class="text-[9px] font-extrabold tracking-[0.14em] text-slate-400">{{ formMode === 'create' ? 'NEW CATEGORY' : 'UPDATE CATEGORY' }}</p><h2 class="mt-1 text-base font-bold text-navy">{{ formMode === 'create' ? 'Add category' : 'Edit category' }}</h2></div>
           <button class="grid h-8 w-8 place-items-center rounded-lg bg-canvas text-muted hover:text-navy" aria-label="Close" @click="close"><X :size="17" /></button>
         </header>
-        <form class="space-y-3 p-5" @submit.prevent="save">
+        <form class="space-y-3 p-5" novalidate @submit.prevent="save">
           <label class="block space-y-1.5 text-xs font-semibold text-navy">
-            <span>Name</span><input v-model.trim="form.name" required minlength="2" maxlength="128" class="w-full rounded-lg border border-border px-3 py-2.5 font-normal" placeholder="e.g. Office supplies" />
+            <span>Name</span><input v-model.trim="form.name" required minlength="2" maxlength="128" :aria-invalid="formCheck.invalid('name')" class="w-full rounded-lg border border-border px-3 py-2.5 font-normal" placeholder="e.g. Office supplies" />
           </label>
           <label class="block space-y-1.5 text-xs font-semibold text-navy">
-            <span>Code</span><input v-model.trim="form.code" required minlength="2" maxlength="64" class="w-full rounded-lg border border-border px-3 py-2.5 font-mono font-normal" placeholder="e.g. office-supplies" />
+            <span>Code</span><input v-model.trim="form.code" required minlength="2" maxlength="64" :aria-invalid="formCheck.invalid('code')" class="w-full rounded-lg border border-border px-3 py-2.5 font-mono font-normal" placeholder="e.g. office-supplies" />
             <small class="block font-normal text-muted">{{ formMode === 'create' ? 'Generated from the name; you can adjust it before saving.' : 'Changing the code keeps existing transactions linked to this category.' }}</small>
           </label>
           <div class="block space-y-1.5 text-xs font-semibold text-navy">
@@ -70,7 +70,7 @@
           <label v-if="formMode === 'edit'" class="flex items-center gap-2 rounded-lg border border-border bg-canvas px-3 py-2.5 text-xs text-navy">
             <input v-model="form.is_active" type="checkbox" class="accent-primary" /> Category is active and available on new forms
           </label>
-          <p v-if="formError" class="rounded-lg bg-red-50 px-3 py-2 text-xs text-expense" role="alert">{{ formError }}</p>
+          <AppAlert v-if="formError || formCheck.messages.length" :title="formError ? 'Couldn’t save this category' : 'Check the highlighted fields'" :message="formError" :items="formCheck.messages" dismissible @dismiss="formError = ''; formCheck.reset()" />
           <footer class="flex justify-end gap-2 border-t border-border pt-4">
             <button type="button" class="rounded-lg border border-border px-4 py-2 text-xs font-semibold text-muted" :disabled="saving" @click="close">Cancel</button>
             <button type="submit" class="rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-white disabled:opacity-60" :disabled="saving">{{ saving ? 'Saving…' : 'Save category' }}</button>
@@ -84,6 +84,9 @@
 <script setup lang="ts">
 import { Pencil, Plus, RotateCcw, X } from 'lucide-vue-next'
 import type { Branch, Category } from '~/types/api'
+import { useToast } from '~/composables/useToast'
+import { rule } from '~/utils/validation'
+import { useFormErrors } from '~/composables/useFormErrors'
 
 const { api } = useApi()
 const { user } = useAuth()
@@ -136,8 +139,17 @@ const formMode = ref<'create' | 'edit'>('create')
 const editing = ref<Category | null>(null)
 const saving = ref(false)
 const formError = ref('')
+const toast = useToast()
 const codeEdited = ref(false)
 const form = reactive({ name: '', code: '', description: '', is_active: true, branch_id: SHARED })
+// Same rules as the API (CreateCategoryInput / UpdateCategoryInput).
+const formCheck = reactive(useFormErrors(
+  () => ({ ...form }),
+  () => ({
+    name: [rule.required('name'), rule.minLength('name', 2), rule.maxLength('name', 128)],
+    code: [rule.required('code'), rule.minLength('code', 2), rule.maxLength('code', 64)],
+  }),
+))
 
 watch(() => form.name, (name) => {
   if (formMode.value === 'create' && !codeEdited.value) form.code = slugify(name)
@@ -172,6 +184,7 @@ function openCreate() {
   Object.assign(form, { name: '', code: '', description: '', is_active: true, branch_id: hasFullAccess.value ? SHARED : branches.value[0]?.id || SHARED })
   codeEdited.value = false
   formError.value = ''
+  formCheck.reset()
   modalOpen.value = true
 }
 
@@ -180,6 +193,7 @@ function openEdit(category: Category) {
   editing.value = category
   Object.assign(form, { name: category.name, code: category.code, description: category.description || '', is_active: category.is_active })
   formError.value = ''
+  formCheck.reset()
   modalOpen.value = true
 }
 
@@ -188,8 +202,9 @@ function close() {
 }
 
 async function save() {
-  saving.value = true
   formError.value = ''
+  if (!formCheck.check()) return
+  saving.value = true
   try {
     if (formMode.value === 'create') {
       await api('/categories', { method: 'POST', body: { type: 'expense', name: form.name, code: form.code, description: form.description, branch_id: form.branch_id || undefined } })
@@ -197,9 +212,10 @@ async function save() {
       await api(`/categories/${editing.value.id}`, { method: 'PATCH', body: { code: form.code, name: form.name, description: form.description, is_active: form.is_active } })
     }
     modalOpen.value = false
+    toast.success(`${form.name} is available on expense forms.`, { title: formMode.value === 'create' ? 'Category created' : 'Category updated' })
     await load()
   } catch (e: any) {
-    formError.value = e?.data?.error || 'Could not save this category.'
+    if (!formCheck.fromApi(e)) formError.value = e?.data?.error || 'Could not save this category.'
   } finally {
     saving.value = false
   }

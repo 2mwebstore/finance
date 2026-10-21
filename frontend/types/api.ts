@@ -44,6 +44,7 @@ export interface Transaction {
   can_approve?: boolean
   can_reject?: boolean
   created_by?: { id: string; name: string }
+  created_at?: string
   branch?: { id: string; code: string; name: string }
   category?: { id: string; code: string; name: string; type: string }
   payment_method?: { id: string; code: string; name: string }

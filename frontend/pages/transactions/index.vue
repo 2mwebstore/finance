@@ -56,7 +56,7 @@
       <span>{{ emptyCopy }}</span>
     </div>
     <div v-else class="transaction-list">
-      <article v-for="transaction in items" :key="transaction.id" class="transaction-row">
+      <article v-for="transaction in items" :key="transaction.id" class="transaction-row" :class="{ 'is-pending': transaction.status === 'pending' }">
         <div class="transaction-type-icon" :class="transaction.type === 'income' ? 'income-tone' : 'expense-tone'">
           <ArrowDownLeft v-if="transaction.type === 'income'" :size="18" />
           <ArrowUpRight v-else :size="18" />
@@ -64,34 +64,45 @@
         <div class="transaction-info">
           <div class="transaction-title-line">
             <strong>{{ transactionTitle(transaction) }}</strong>
-            <span class="status-badge" :class="statusClass(transaction.status)">{{ displayStatus(transaction.status) }}</span>
-            <button v-if="transaction.attachment" type="button" class="attachment-pill" :title="`View ${transaction.attachment.name}`" :aria-label="`View attachment ${transaction.attachment.name}`" @click="openAttachment(transaction)">
+            <span class="status-badge wide-only" :class="statusClass(transaction.status)">{{ displayStatus(transaction.status) }}</span>
+            <button v-if="transaction.attachment" type="button" class="attachment-pill wide-only" :title="`View ${transaction.attachment.name}`" :aria-label="`View attachment ${transaction.attachment.name}`" @click="openAttachment(transaction)">
               <ImageIcon v-if="transaction.attachment.type.startsWith('image/')" :size="12" /><FileText v-else :size="12" />
               <span>View</span>
             </button>
           </div>
           <div class="transaction-meta">
-            <span>{{ transaction.transaction_number }}</span>
-            <template v-if="transaction.type === 'expense'"><i></i><span>{{ transaction.category?.name || 'Uncategorized' }}</span></template>
-            <i></i>
-            <span>{{ transaction.branch?.name || transaction.branch?.code || 'No branch' }}</span><i></i>
-            <span>{{ formatDate(transaction.transaction_date) }}</span>
+            <span class="meta-number">{{ transaction.transaction_number }}</span>
+            <span v-if="transaction.type === 'expense'">{{ transaction.category?.name || 'Uncategorized' }}</span>
+            <span>{{ transaction.branch?.name || transaction.branch?.code || 'No branch' }}</span>
+            <span class="meta-date">{{ formatDate(transaction.transaction_date) }}</span>
           </div>
+          <p v-if="transaction.status === 'pending'" class="pending-hint" :class="{ 'is-yours': isMyDecision(transaction) }">
+            <Clock3 :size="12" :stroke-width="2.4" aria-hidden="true" />
+            <strong>{{ isMyDecision(transaction) ? 'Needs your approval' : 'Waiting for approval' }}</strong>
+            <span v-if="pendingSource(transaction)" class="pending-by">{{ pendingSource(transaction) }}</span>
+          </p>
         </div>
         <div class="transaction-amount" :class="transaction.type === 'income' ? 'income-text' : 'expense-text'">
           <span>{{ transaction.type === 'income' ? '+' : '−' }}{{ formatMoney(transaction.amount, transaction.currency) }}</span>
-          <small>{{ transaction.type }}</small>
+          <small class="amount-type">{{ transaction.type }}</small>
+          <small class="amount-date">{{ formatDate(transaction.transaction_date) }}</small>
         </div>
-        <div class="row-actions">
-          <button v-if="transaction.status === 'pending' && transaction.can_approve" class="row-action approve-action" :aria-label="`Approve ${transaction.transaction_number}`" title="Approve" @click="openApproval(transaction, 'approve')"><Check :size="16" :stroke-width="2.6" /></button>
-          <button v-if="transaction.status === 'pending' && transaction.can_reject" class="row-action reject-action" :aria-label="`Reject ${transaction.transaction_number}`" title="Reject" @click="openApproval(transaction, 'reject')"><X :size="16" :stroke-width="2.6" /></button>
-          <button v-if="canEdit(transaction)" class="row-action edit-action" :aria-label="`Edit ${transaction.transaction_number}`" title="Edit" @click="openEdit(transaction)"><Pencil :size="15" /></button>
-          <button v-if="canDelete(transaction)" class="row-action delete-action" :aria-label="`Delete ${transaction.transaction_number}`" title="Delete" @click="openDelete(transaction)"><Trash2 :size="15" /></button>
+        <!-- On wide screens this wrapper disappears (display: contents); on phones it's the row's bottom bar. -->
+        <div class="row-footer">
+          <div class="row-tags">
+            <span class="status-badge" :class="statusClass(transaction.status)">{{ displayStatus(transaction.status) }}</span>
+            <button v-if="transaction.attachment" type="button" class="attachment-pill" :aria-label="`View attachment ${transaction.attachment.name}`" @click="openAttachment(transaction)">
+              <ImageIcon v-if="transaction.attachment.type.startsWith('image/')" :size="12" /><FileText v-else :size="12" />
+              <span>View file</span>
+            </button>
+          </div>
+          <div class="row-actions">
+            <button v-if="transaction.status === 'pending' && transaction.can_approve" class="row-action approve-action" :aria-label="`Approve ${transaction.transaction_number}`" title="Approve" @click="openApproval(transaction, 'approve')"><Check :size="16" :stroke-width="2.6" /></button>
+            <button v-if="transaction.status === 'pending' && transaction.can_reject" class="row-action reject-action" :aria-label="`Reject ${transaction.transaction_number}`" title="Reject" @click="openApproval(transaction, 'reject')"><X :size="16" :stroke-width="2.6" /></button>
+            <button v-if="canEdit(transaction)" class="row-action edit-action" :aria-label="`Edit ${transaction.transaction_number}`" title="Edit" @click="openEdit(transaction)"><Pencil :size="15" /></button>
+            <button v-if="canDelete(transaction)" class="row-action delete-action" :aria-label="`Delete ${transaction.transaction_number}`" title="Delete" @click="openDelete(transaction)"><Trash2 :size="15" /></button>
+          </div>
         </div>
-        <p v-if="transaction.status === 'pending'" class="pending-note" :class="{ 'is-yours': transaction.can_approve || transaction.can_reject }">
-          <Clock3 :size="13" />
-          {{ transaction.can_approve || transaction.can_reject ? 'Waiting for your approval' : 'Waiting for approval' }}<template v-if="transaction.created_by?.name"> · by {{ transaction.created_by.name }}</template>
-        </p>
       </article>
     </div>
 
@@ -139,6 +150,7 @@ import { formatMoney } from '~/utils/money'
 import { richTextToPlain } from '~/utils/richText'
 import { currentMonthRange, formatDateKey } from '~/utils/dateRanges'
 import { useBranchOptions } from '~/composables/useBranchOptions'
+import { useToast } from '~/composables/useToast'
 
 const { api } = useApi()
 const route = useRoute()
@@ -150,6 +162,7 @@ const {
   canVoidIncome,
   canVoidExpense,
 } = usePermissions()
+const { user } = useAuth()
 const typeFilter = ref(typeof route.query.type === 'string' ? route.query.type : '')
 const searchTerm = ref(typeof route.query.search === 'string' ? route.query.search : '')
 const dateRange = ref(currentMonthRange())
@@ -222,6 +235,28 @@ const pageSizeOptions = [10, 20, 50].map(value => ({ value: String(value), label
 function formatDate(value: string) {
   const date = new Date(value)
   return Number.isNaN(date.valueOf()) ? value : new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(date)
+}
+
+function timeAgo(value?: string) {
+  if (!value) return ''
+  const seconds = (Date.now() - new Date(value).valueOf()) / 1000
+  if (Number.isNaN(seconds)) return ''
+  if (seconds < 60) return 'just now'
+  if (seconds < 3600) return `${Math.floor(seconds / 60)} min ago`
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)} h ago`
+  if (seconds < 7 * 86400) return `${Math.floor(seconds / 86400)} d ago`
+  return formatDate(value)
+}
+
+function isMyDecision(transaction: Transaction) {
+  return !!(transaction.can_approve || transaction.can_reject)
+}
+
+// "by Dara Cashier · 2 h ago" ("you" for your own submissions).
+function pendingSource(transaction: Transaction) {
+  const creator = transaction.created_by
+  const who = !creator?.name ? '' : creator.id === user.value?.id ? 'you' : creator.name
+  return [who && `by ${who}`, timeAgo(transaction.created_at)].filter(Boolean).join(' · ')
 }
 
 function displayStatus(value: string) {
@@ -381,17 +416,30 @@ function openApproval(transaction: Transaction, action: 'approve' | 'reject') {
   approvalAction.value = action
   approvalOpen.value = true
 }
-async function onApprovalDone() {
+const toast = useToast()
+
+async function onApprovalDone(updated: Transaction) {
+  const approved = updated.status === 'approved'
+  toast.success(
+    approved ? `${updated.transaction_number} now counts toward totals and reports.` : `${updated.transaction_number} stays in the history but won’t count.`,
+    { title: approved ? 'Transaction approved' : 'Transaction rejected' },
+  )
   approvalTransaction.value = null
   await load()
 }
 
-async function onTransactionSaved() {
+async function onTransactionSaved(saved: Transaction) {
+  const label = saved.type === 'income' ? 'Income' : 'Expense'
+  const amount = formatMoney(saved.amount, saved.currency)
+  if (modalMode.value === 'edit') toast.success(`${saved.transaction_number} is up to date.`, { title: 'Changes saved' })
+  else if (saved.status === 'pending') toast.info(`${amount} ${saved.type} counts once a manager approves it.`, { title: 'Sent for approval' })
+  else toast.success(`${amount} recorded as ${saved.transaction_number}.`, { title: `${label} saved` })
   selectedTransaction.value = null
   await load()
 }
 
-async function onTransactionDeleted() {
+async function onTransactionDeleted(deleted: Transaction) {
+  toast.success(`${deleted.transaction_number} no longer counts toward totals.`, { title: 'Transaction deleted' })
   transactionToDelete.value = null
   await load()
 }
@@ -453,8 +501,16 @@ onMounted(load)
 .transaction-row { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; min-width: 0; padding: 14px 16px; border-bottom: 1px solid #edf1f7; transition: background .15s ease; }
 .attachment-pill { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 4px; border: 1px solid #d6e4fb; border-radius: 999px; padding: 3px 9px; color: #1769e8; background: #f2f7ff; font-size: 11px; font-weight: 700; cursor: pointer; transition: background .15s ease; }
 .attachment-pill:hover { background: #e4eeff; }
-.pending-note { display: flex; flex: 1 0 100%; align-items: center; gap: 6px; margin: -4px 0 0; color: #9a6c12; font-size: 12px; }
-.pending-note.is-yours { width: fit-content; flex-basis: auto; margin-left: 56px; border-radius: 999px; padding: 4px 10px; background: #fff6e0; font-weight: 650; }
+/* One quiet line under the details: "Waiting for approval · by Dara · 2 h ago". */
+.pending-hint { display: flex; align-items: center; gap: 5px; min-width: 0; margin: 5px 0 0; overflow: hidden; color: #a0732a; font-size: 11px; line-height: 1.3; white-space: nowrap; }
+.pending-hint svg { flex: 0 0 auto; }
+.pending-hint strong { flex: 0 0 auto; font-weight: 700; }
+.pending-by { overflow: hidden; color: #9a8a6c; text-overflow: ellipsis; }
+.pending-by::before { content: '·'; margin-right: 5px; color: #c9b890; }
+.pending-hint.is-yours { color: #c2570c; }
+.pending-hint.is-yours strong { color: #b4480a; }
+.row-footer { display: contents; }
+.row-tags, .amount-date { display: none; }
 .transaction-row:last-child { border-bottom: 0; }
 .transaction-row:hover { background: #fbfcfe; }
 .transaction-type-icon { display: flex; flex: 0 0 auto; align-items: center; justify-content: center; width: 42px; height: 42px; border-radius: 12px; }
@@ -470,7 +526,7 @@ onMounted(load)
 .status-reversed { color: #6d59b7; background: #f0edff; }
 .transaction-meta { display: flex; align-items: center; gap: 8px; min-width: 0; margin-top: 6px; overflow: hidden; color: #8294b0; font-size: 11px; white-space: nowrap; }
 .transaction-meta span { overflow: hidden; text-overflow: ellipsis; }
-.transaction-meta i { flex: 0 0 auto; width: 3px; height: 3px; border-radius: 50%; background: #bbc5d2; }
+.transaction-meta span + span::before { content: ''; display: inline-block; width: 3px; height: 3px; margin: 0 8px 0 0; border-radius: 50%; background: #bbc5d2; vertical-align: middle; }
 .transaction-amount { display: flex; flex: 0 0 130px; flex-direction: column; align-items: flex-end; gap: 4px; text-align: right; font-variant-numeric: tabular-nums; }
 .transaction-amount > span { font-size: 14px; font-weight: 750; white-space: nowrap; }
 .transaction-amount small { color: #8796ab; font-size: 10px; text-transform: capitalize; }
@@ -511,22 +567,29 @@ onMounted(load)
   .pagination-controls { width: 100%; justify-content: space-between; gap: 4px; }
   .page-size-control span { display: none; }
   .transaction-list { border-radius: 14px; }
-  .transaction-row { align-items: flex-start; gap: 10px; padding: 13px 12px; }
-  .transaction-type-icon { width: 36px; height: 36px; border-radius: 10px; }
-  .transaction-title-line { flex-wrap: wrap; gap: 6px; }
-  .transaction-title-line strong { max-width: 100%; font-size: 13px; }
-  .transaction-meta { flex-wrap: wrap; gap: 6px; line-height: 1.45; white-space: normal; }
-  .transaction-meta span { max-width: 130px; }
-  .transaction-amount { flex-basis: auto; margin-left: auto; padding-top: 1px; }
-  .transaction-amount > span { font-size: 13px; }
-  /* Up to four actions: a 2×2 grid keeps rows compact on phones. */
-  .row-actions { display: grid; align-self: center; grid-template-columns: repeat(2, 32px); gap: 5px; }
-  .row-actions > :only-child, .row-actions:has(> :nth-child(2):last-child) { grid-template-columns: 32px; }
-        .row-action { width: 32px; height: 32px; }
-  .pending-note.is-yours { margin-left: 46px; }
-}
-@media (max-width: 420px) {
-  .transaction-meta span:nth-of-type(1), .transaction-meta i:nth-of-type(1) { display: none; }
-  .transaction-amount { max-width: 92px; }
+  /* Phone row: icon | title + details (+ pending line) | amount + date, then a bar with status and actions. */
+  .transaction-row { display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; column-gap: 12px; row-gap: 0; align-items: start; padding: 14px 14px 12px; }
+  .transaction-row.is-pending { background: #fffdf7; }
+  .transaction-type-icon { grid-column: 1; grid-row: 1; width: 38px; height: 38px; border-radius: 11px; }
+  .transaction-info { grid-column: 2; grid-row: 1; padding-top: 1px; }
+  .transaction-title-line { display: block; }
+  .transaction-title-line strong { display: -webkit-box; overflow: hidden; color: #1d365c; font-size: 14px; line-height: 1.3; white-space: normal; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+  .wide-only, .amount-type, .meta-number, .meta-date, .transaction-meta .meta-number + span::before { display: none; }
+  /* One line that trims at the end, rather than trimming every part. */
+  .transaction-meta { display: block; margin-top: 5px; overflow: hidden; font-size: 12px; text-overflow: ellipsis; }
+  .transaction-meta span { overflow: visible; }
+  .transaction-meta span + span::before { margin: 0 7px; }
+  .transaction-amount { grid-column: 3; grid-row: 1; max-width: 132px; gap: 4px; padding-top: 1px; }
+  .transaction-amount > span { font-size: 15px; }
+  .amount-date { display: block; color: #8796ab; font-size: 11px; white-space: nowrap; }
+  /* Narrow column: "by … · time" drops under the status, lined up with its text. */
+  .pending-hint { flex-wrap: wrap; row-gap: 2px; margin-top: 6px; font-size: 11.5px; }
+  .pending-by { flex: 1 0 100%; padding-left: 17px; white-space: nowrap; }
+  .pending-by::before { content: none; }
+  .row-footer { display: flex; grid-column: 2 / -1; grid-row: 2; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; }
+  .row-tags { display: flex; min-width: 0; align-items: center; gap: 6px; }
+  .row-tags .attachment-pill { padding: 5px 10px; }
+  .row-actions { gap: 6px; }
+  .row-action { width: 34px; height: 34px; }
 }
 </style>

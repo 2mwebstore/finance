@@ -17,9 +17,9 @@
       </header>
 
       <div v-if="loadingOptions" class="modal-loading">Loading form options…</div>
-      <form v-else class="transaction-form" @submit.prevent="submit">
+      <form v-else class="transaction-form" novalidate @submit.prevent="submit">
         <div class="form-body">
-          <div class="amount-card">
+          <div class="amount-card" :class="{ 'has-error': errors.amount }">
             <div class="amount-card-top">
               <span class="field-label">Amount</span>
               <div class="currency-toggle" role="radiogroup" aria-label="Currency">
@@ -37,33 +37,38 @@
             </div>
             <div class="amount-input">
               <span class="amount-symbol" aria-hidden="true">{{ currencySymbol }}</span>
-              <MoneyInput v-model="form.amount" :currency="form.currency" aria-label="Transaction amount" required />
+              <MoneyInput v-model="form.amount" :currency="form.currency" aria-label="Transaction amount" required :aria-invalid="invalid('amount')" />
             </div>
+            <small v-if="errors.amount" class="field-error">{{ errors.amount }}</small>
             <small v-if="amountAtLimit" class="field-hint">Maximum is {{ form.currency === 'USD' ? '$999,999,999.99' : '៛999,999,999,999' }}.</small>
             <small v-if="mode === 'edit'" class="field-hint">The currency can't be changed after a transaction is created.</small>
           </div>
 
           <div class="form-grid">
-            <div class="form-field" :class="{ 'full-field': mode === 'edit' && transactionType === 'income' }">
-              <span>Date</span>
+            <div class="form-field" :class="{ 'full-field': mode === 'edit' && transactionType === 'income', 'has-error': errors.transaction_date }">
+              <span>Date <b class="required-mark" aria-hidden="true">*</b></span>
               <DatePicker v-model="form.transaction_date" aria-label="Transaction date" />
+              <small v-if="errors.transaction_date" class="field-error">{{ errors.transaction_date }}</small>
             </div>
 
-            <div v-if="mode === 'create'" class="form-field">
-              <span>Branch</span>
+            <div v-if="mode === 'create'" class="form-field" :class="{ 'has-error': errors.branch_id }">
+              <span>Branch <b class="required-mark" aria-hidden="true">*</b></span>
               <SearchSelect v-model="form.branch_id" :options="branchOptions" placeholder="Select a branch" search-placeholder="Search branches…" aria-label="Branch" />
-              <small v-if="!branches.length" class="field-hint">No accessible branches are available.</small>
+              <small v-if="errors.branch_id" class="field-error">{{ errors.branch_id }}</small>
+              <small v-else-if="!branches.length" class="field-hint">No accessible branches are available.</small>
             </div>
 
-            <div v-if="transactionType === 'expense'" class="form-field" :class="{ 'full-field': mode === 'create' }">
-              <span>Category</span>
+            <div v-if="transactionType === 'expense'" class="form-field" :class="{ 'full-field': mode === 'create', 'has-error': errors.category_id }">
+              <span>Category <b class="required-mark" aria-hidden="true">*</b></span>
               <SearchSelect v-model="form.category_id" :options="categoryOptions" placeholder="Select a category" search-placeholder="Search categories…" aria-label="Expense category" :disabled="!categories.length" />
-              <small v-if="!categories.length && !categoryLoading" class="field-hint">There are no expense categories available.</small>
+              <small v-if="errors.category_id" class="field-error">{{ errors.category_id }}</small>
+              <small v-else-if="!categories.length && !categoryLoading" class="field-hint">There are no expense categories available.</small>
             </div>
 
-            <div class="form-field full-field">
+            <div class="form-field full-field" :class="{ 'has-error': errors.description }">
               <span>Description <small>Optional</small></span>
               <RichText v-model="form.description" placeholder="What is this transaction for?" aria-label="Description" :max-length="DESCRIPTION_MAX" />
+              <small v-if="errors.description" class="field-error">{{ errors.description }}</small>
             </div>
 
             <div class="form-field full-field">
@@ -105,13 +110,23 @@
           </label>
           <!-- Without approve permission the API always saves it as pending. -->
           <div v-else-if="mode === 'create'" class="pending-option is-locked" role="note">
-            <span class="pending-icon"><Clock3 :size="16" /></span>
+            <i class="pending-icon" aria-hidden="true"><Clock3 :size="17" :stroke-width="2.3" /></i>
             <span><strong>Sent for approval</strong><small>It stays pending until a manager approves it.</small></span>
           </div>
-
-          <p v-if="error" class="form-error" role="alert">{{ error }}</p>
         </div>
 
+        <!-- Pinned above the buttons so it is visible however far the form is scrolled. -->
+        <div v-if="error || fieldMessages.length" class="form-alert">
+          <AppAlert
+            compact
+            :type="partialSave ? 'warning' : 'error'"
+            :title="alertTitle"
+            :message="error"
+            :items="fieldMessages"
+            dismissible
+            @dismiss="dismissAlert"
+          />
+        </div>
         <footer class="modal-actions">
           <button type="button" class="cancel-button" :disabled="saving" @click="close">Cancel</button>
           <button type="submit" class="save-button" :disabled="submitDisabled">
@@ -127,6 +142,8 @@
 import { ArrowDownLeft, ArrowUpRight, Clock3, FileText, ImageIcon, Paperclip, X } from 'lucide-vue-next'
 import type { Branch, Category, Transaction } from '~/types/api'
 import { richTextToPlain } from '~/utils/richText'
+import { rule } from '~/utils/validation'
+import { useFormErrors } from '~/composables/useFormErrors'
 
 type TransactionType = 'income' | 'expense'
 type TransactionCurrency = 'USD' | 'KHR'
@@ -176,6 +193,8 @@ const loadingOptions = ref(true)
 const categoryLoading = ref(false)
 const saving = ref(false)
 const error = ref('')
+// The record was saved but its file upload failed.
+const partialSave = ref(false)
 const branchOptions = computed(() => branches.value.map(branch => ({ value: branch.id, label: `${branch.code} — ${branch.name}` })))
 const categoryOptions = computed(() => categories.value.map(category => ({
   value: category.id,
@@ -193,10 +212,36 @@ const transactionType = computed<TransactionType>(() => props.mode === 'edit'
   ? props.transaction?.type || props.type
   : props.type)
 const actionLabel = computed(() => props.mode === 'edit' ? 'Edit' : 'Add')
-const submitDisabled = computed(() => saving.value
-  || richTextToPlain(form.description).length > DESCRIPTION_MAX
-  || (props.mode === 'create' && (!branches.value.length || !form.branch_id))
-  || (transactionType.value === 'expense' && (!categories.value.length || !form.category_id)))
+// The button stays enabled: pressing it explains what is missing instead of silently doing nothing.
+const submitDisabled = computed(() => saving.value)
+
+// Same required fields as the API (CreateTransactionInput / UpdateTransactionInput).
+const { errors, messages: fieldMessages, check, fromApi, reset: resetErrors, invalid } = useFormErrors(
+  () => ({
+    amount: form.amount,
+    transaction_date: form.transaction_date,
+    branch_id: form.branch_id,
+    category_id: form.category_id,
+    description: richTextToPlain(form.description),
+  }),
+  () => ({
+    amount: [rule.required('amount'), rule.positiveAmount('amount')],
+    transaction_date: [rule.required('date')],
+    ...(props.mode === 'create' ? { branch_id: [rule.required('branch')] } : {}),
+    ...(transactionType.value === 'expense' ? { category_id: [rule.required('category')] } : {}),
+    description: [rule.maxLength('description', DESCRIPTION_MAX)],
+  }),
+)
+const alertTitle = computed(() => {
+  if (partialSave.value) return 'Saved, but without the file'
+  if (!error.value) return 'Check the highlighted fields'
+  return props.mode === 'edit' ? 'Couldn’t update this transaction' : 'Couldn’t save this transaction'
+})
+
+function dismissAlert() {
+  error.value = ''
+  resetErrors()
+}
 
 function localDate() {
   const now = new Date()
@@ -269,6 +314,7 @@ function initializeForm() {
   form.description = txn?.description || ''
   form.pending = false
   error.value = ''
+  resetErrors()
   resetAttachment()
 }
 
@@ -324,6 +370,8 @@ async function prepareModal() {
 
 async function submit() {
   error.value = ''
+  partialSave.value = false
+  if (!createdTransaction.value && !check()) return
   saving.value = true
   let recordSaved = false
   try {
@@ -371,9 +419,10 @@ async function submit() {
     emit('saved', saved)
   } catch (e: any) {
     const reason = e?.data?.error || e?.message || ''
-    error.value = recordSaved
-      ? `The ${transactionType.value} was saved, but the file couldn't be uploaded${reason ? `: ${reason}` : ''}. Try again, or remove the file and save.`
-      : reason || (props.mode === 'edit' ? 'Could not update this transaction.' : 'Could not save this transaction.')
+    partialSave.value = recordSaved
+    if (recordSaved) error.value = `The file couldn't be uploaded${reason ? ` (${reason})` : ''}. Try again, or remove the file and save.`
+    // When the API names the fields, the list says it all; otherwise show its message.
+    else if (!fromApi(e)) error.value = reason || (props.mode === 'edit' ? 'Could not update this transaction.' : 'Could not save this transaction.')
   } finally {
     saving.value = false
   }
@@ -408,7 +457,7 @@ onMounted(() => {
 .icon-button { display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; border: 0; border-radius: 10px; color: #73849d; background: #f3f6fb; cursor: pointer; }
 .icon-button:hover { color: #1e3b66; background: #e9eff8; }
 .transaction-form { display: flex; min-height: 0; flex: 1; flex-direction: column; }
-.form-body { overflow-y: auto; padding: 20px 24px 6px; }
+.form-body { min-height: 0; flex: 1 1 auto; overflow-y: auto; padding: 20px 24px 6px; }
 
 /* Amount: the main input, so it gets the most room. */
 .amount-card { margin-bottom: 18px; border: 1px solid var(--accent-border); border-radius: 14px; padding: 14px 16px 12px; background: var(--accent-soft); transition: box-shadow .15s ease, border-color .15s ease; }
@@ -453,7 +502,14 @@ onMounted(() => {
 .attachment-action { flex: 0 0 auto; border: 1px solid #dfe7f1; border-radius: 8px; padding: 6px 10px; color: #3d5a82; background: #fff; font-size: 12px; font-weight: 650; cursor: pointer; }
 .attachment-remove { display: grid; flex: 0 0 auto; width: 32px; height: 32px; place-items: center; border: 0; border-radius: 8px; color: #8193ab; background: #f3f6fb; cursor: pointer; }
 .attachment-remove:hover { color: #c93449; background: #fff0f2; }
-.field-error { color: #c33d50; font-size: 12px; font-weight: 500; }
+.field-error { display: block; margin-top: 2px; color: #c33d50; font-size: 12px; font-weight: 550; }
+.amount-card .field-error { margin-top: 6px; }
+.required-mark { margin-left: 3px; color: #d94357; font-weight: 700; }
+.form-field > span .required-mark { margin-right: auto; }
+.amount-card.has-error { border-color: #ef8a98; background: #fff6f7; }
+.amount-card.has-error:focus-within { border-color: #e2445c; box-shadow: 0 0 0 4px rgb(226 68 92 / 12%); }
+.amount-card input[aria-invalid="true"] { border: 0 !important; box-shadow: none !important; }
+.has-error :deep(.search-select-trigger), .has-error :deep(.date-trigger), .has-error :deep(.rich-text) { border-color: #e2445c; box-shadow: 0 0 0 3px rgb(226 68 92 / 10%); }
 .pending-option { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 18px; border: 1px solid #e5ebf4; border-radius: 12px; padding: 13px 14px; background: #f8fafd; cursor: pointer; }
 .pending-option > span { display: flex; flex-direction: column; gap: 3px; }
 .pending-option strong { color: #2c4468; font-size: 13px; font-weight: 700; }
@@ -461,14 +517,17 @@ onMounted(() => {
 .pending-option.is-locked { justify-content: flex-start; gap: 12px; border-color: #f6dfb8; background: #fff8ec; cursor: default; }
 .pending-option.is-locked strong { color: #8a5310; }
 .pending-option.is-locked small { color: #9b7440; }
-.pending-icon { display: grid; flex: 0 0 auto; width: 32px; height: 32px; place-items: center; border-radius: 9px; color: #b86e0c; background: #fdecd0; }
+.pending-icon { display: grid; flex: 0 0 auto; width: 34px; height: 34px; place-items: center; border-radius: 10px; color: #b86e0c; background: #fdecd0; font-style: normal; }
+.pending-icon svg { display: block; }
 .pending-switch { position: relative; flex: 0 0 auto; width: 42px; height: 24px; margin: 0; border-radius: 999px; background: #cfd9e6; cursor: pointer; appearance: none; transition: background .15s ease; }
 .pending-switch::before { content: ''; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgb(16 40 80 / 25%); transition: transform .15s ease; }
 .pending-switch:checked { background: #1769e8; }
 .pending-switch:checked::before { transform: translateX(18px); }
 .pending-switch:focus-visible { outline: 0; box-shadow: 0 0 0 3px rgb(37 99 235 / 20%); }
 
-.form-error { margin: 14px 0 0; border-radius: 10px; padding: 10px 12px; color: #b9384c; background: #fff0f2; font-size: 13px; }
+.form-alert { flex: 0 0 auto; max-height: 30vh; overflow-y: auto; padding: 10px 24px 0; border-top: 1px solid #edf1f7; }
+.form-alert :deep(.app-alert.is-compact) { align-items: flex-start; }
+.form-alert + .modal-actions { border-top: 0; padding-top: 10px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; padding: 14px 24px 18px; border-top: 1px solid #edf1f7; background: #fff; }
 .modal-actions button { min-width: 120px; min-height: 44px; border-radius: 10px; padding: 10px 18px; font-size: 14px; font-weight: 700; cursor: pointer; }
 .cancel-button { border: 1px solid #dfe7f1; color: #536984; background: #fff; }
@@ -487,6 +546,7 @@ onMounted(() => {
   .modal-header { padding: 20px 18px 14px; }
   .modal-header h2 { font-size: 18px; }
   .form-body { padding: 16px 18px 6px; }
+  .form-alert { padding: 10px 18px 0; }
   .form-grid { grid-template-columns: minmax(0, 1fr); gap: 15px; }
   .full-field { grid-column: auto; }
   .form-field input, .form-field textarea, .form-field :deep(.search-select-trigger) { min-height: 48px; font-size: 15px; }

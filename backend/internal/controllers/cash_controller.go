@@ -18,8 +18,7 @@ func NewCashController(svc *services.CashService) *CashController {
 
 func (cc *CashController) CreateOpeningBalance(c *gin.Context) {
 	var in services.CreateOpeningBalanceInput
-	if err := c.ShouldBindJSON(&in); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if !bindJSON(c, &in) {
 		return
 	}
 	actorID, ok := getActorID(c)
@@ -72,8 +71,7 @@ func (cc *CashController) ListOpeningBalances(c *gin.Context) {
 
 func (cc *CashController) CreateReconciliation(c *gin.Context) {
 	var in services.CreateReconciliationInput
-	if err := c.ShouldBindJSON(&in); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if !bindJSON(c, &in) {
 		return
 	}
 	actorID, ok := getActorID(c)

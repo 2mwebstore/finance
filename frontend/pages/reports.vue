@@ -57,6 +57,7 @@ import type { DashboardSummary } from '~/types/api'
 import { formatMoney } from '~/utils/money'
 import { currentMonthRange } from '~/utils/dateRanges'
 import { useBranchOptions } from '~/composables/useBranchOptions'
+import { useToast } from '~/composables/useToast'
 
 const { api, apiBase } = useApi()
 const { getToken } = useAuth()
@@ -68,6 +69,7 @@ const data = ref<DashboardSummary | null>(null)
 const loading = ref(true)
 const err = ref('')
 const exporting = ref(false)
+const toast = useToast()
 
 async function load() {
   loading.value = true
@@ -93,7 +95,7 @@ async function doExport() {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
       credentials: 'include',
     })
-    if (!res.ok) throw new Error('Export denied')
+    if (!res.ok) throw new Error(res.status === 403 ? 'You don’t have permission to export reports.' : 'The server couldn’t build the file. Please try again.')
     const blob = await res.blob()
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -101,8 +103,10 @@ async function doExport() {
     a.download = `report-${dateRange.value.from}-to-${dateRange.value.to}.csv`
     a.click()
     URL.revokeObjectURL(url)
+    toast.success(`${a.download} is in your downloads.`, { title: 'Report exported' })
   } catch (e: any) {
-    err.value = e?.message || 'Export failed'
+    // Keep the report on screen; just say the export failed.
+    toast.error(e?.message || 'Please try again.', { title: 'Export failed' })
   } finally {
     exporting.value = false
   }

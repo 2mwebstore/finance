@@ -16,38 +16,42 @@
       </dl>
     </article>
 
-    <form class="space-y-4 rounded-xl border border-border bg-white p-4 sm:p-5" @submit.prevent="changePassword">
+    <form class="space-y-4 rounded-xl border border-border bg-white p-4 sm:p-5" novalidate @submit.prevent="changePassword">
       <div><h2 class="text-sm font-semibold text-navy">Change PIN</h2><p class="mt-1 text-xs text-muted">Enter your new 4-digit PIN. Tap the eye to check it before saving.</p></div>
-      <div class="block max-w-xs space-y-1 text-xs font-medium text-muted"><span>New PIN</span><PinInput v-model="newPin" aria-label="New PIN" /></div>
-      <p v-if="error" class="rounded-lg bg-red-50 px-3 py-2 text-xs text-expense" role="alert">{{ error }}</p>
-      <p v-if="notice" class="rounded-lg bg-green-50 px-3 py-2 text-xs text-income" role="status">{{ notice }}</p>
-      <button type="submit" :disabled="saving || newPin.length !== 4" class="w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60 sm:w-auto">{{ saving ? 'Updating…' : 'Update PIN' }}</button>
+      <div class="block max-w-xs space-y-1 text-xs font-medium text-muted"><span>New PIN</span><PinInput v-model="newPin" aria-label="New PIN" :aria-invalid="pinCheck.invalid('new_password')" /></div>
+      <AppAlert v-if="error || pinCheck.messages.length" class="max-w-md" compact :message="error || pinCheck.messages[0]" />
+      <button type="submit" :disabled="saving" class="w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60 sm:w-auto">{{ saving ? 'Updating…' : 'Update PIN' }}</button>
     </form>
   </section>
 </template>
 
 <script setup lang="ts">
+import { useToast } from '~/composables/useToast'
+import { rule } from '~/utils/validation'
+import { useFormErrors } from '~/composables/useFormErrors'
 const { api } = useApi()
 const { user } = useAuth()
 const newPin = ref('')
 const saving = ref(false)
 const error = ref('')
-const notice = ref('')
+const toast = useToast()
+// Same rule as the API (changePasswordRequest: required, 4 digits).
+const pinCheck = reactive(useFormErrors(
+  () => ({ new_password: newPin.value }),
+  () => ({ new_password: [rule.required('new PIN'), rule.pin('new PIN')] }),
+))
 
 async function changePassword() {
   error.value = ''
-  notice.value = ''
-  if (!/^\d{4}$/.test(newPin.value)) {
-    error.value = 'Your PIN must be exactly 4 digits.'
-    return
-  }
+  if (!pinCheck.check()) return
   saving.value = true
   try {
     await api('/auth/change-password', { method: 'POST', body: { new_password: newPin.value } })
     newPin.value = ''
-    notice.value = 'Your PIN was updated.'
+    pinCheck.reset()
+    toast.success('Use it the next time you sign in.', { title: 'Your PIN was updated' })
   } catch (e: any) {
-    error.value = e?.data?.error || 'Could not change your PIN.'
+    if (!pinCheck.fromApi(e)) error.value = e?.data?.error || 'Could not change your PIN.'
   } finally {
     saving.value = false
   }

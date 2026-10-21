@@ -169,8 +169,7 @@ func (uc *UserController) Create(c *gin.Context) {
 		return
 	}
 	var in services.CreateUserInput
-	if err := c.ShouldBindJSON(&in); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if !bindJSON(c, &in) {
 		return
 	}
 	if !scope.Full && len(in.BranchIDs) == 0 {
@@ -216,8 +215,7 @@ func (uc *UserController) Update(c *gin.Context) {
 		return
 	}
 	var in services.UpdateUserInput
-	if err := c.ShouldBindJSON(&in); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if !bindJSON(c, &in) {
 		return
 	}
 	if in.DefaultBranchID != nil && *in.DefaultBranchID != "" && !uc.checkAssignableBranches(c, scope, []string{*in.DefaultBranchID}) {
@@ -243,8 +241,7 @@ func (uc *UserController) SetActive(c *gin.Context) {
 	var body struct {
 		IsActive *bool `json:"is_active" binding:"required"`
 	}
-	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if !bindJSON(c, &body) {
 		return
 	}
 	if target.ID == scope.ActorID && !*body.IsActive {
@@ -273,10 +270,9 @@ func (uc *UserController) SetPassword(c *gin.Context) {
 		return
 	}
 	var body struct {
-		Password string `json:"password" binding:"required,len=4"`
+		Password string `json:"password" binding:"required,len=4,numeric"`
 	}
-	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if !bindJSON(c, &body) {
 		return
 	}
 	if err := uc.svc.SetPassword(c.Request.Context(), target.ID, body.Password); err != nil {
@@ -372,8 +368,7 @@ func (uc *UserController) AssignRoles(c *gin.Context) {
 	var body struct {
 		RoleCodes []string `json:"role_codes" binding:"required"`
 	}
-	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if !bindJSON(c, &body) {
 		return
 	}
 	// Prevent self role assignment
@@ -404,8 +399,7 @@ func (uc *UserController) AssignBranches(c *gin.Context) {
 	var body struct {
 		BranchIDs []string `json:"branch_ids" binding:"required"`
 	}
-	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if !bindJSON(c, &body) {
 		return
 	}
 	if !uc.checkAssignableBranches(c, scope, body.BranchIDs) {
@@ -445,8 +439,7 @@ func (uc *UserController) AssignManagers(c *gin.Context) {
 	var body struct {
 		ManagerIDs []string `json:"manager_ids"`
 	}
-	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if !bindJSON(c, &body) {
 		return
 	}
 	targetBranches := make([]uuid.UUID, 0, len(target.Branches))

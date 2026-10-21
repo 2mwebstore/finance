@@ -45,8 +45,7 @@ type changePasswordRequest struct {
 
 func (ac *AuthController) Login(c *gin.Context) {
 	var req loginRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if !bindJSON(c, &req) {
 		return
 	}
 
@@ -212,8 +211,7 @@ func (ac *AuthController) Me(c *gin.Context) {
 
 func (ac *AuthController) Setup(c *gin.Context) {
 	var req setupRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if !bindJSON(c, &req) {
 		return
 	}
 
@@ -257,8 +255,7 @@ func (ac *AuthController) ChangePassword(c *gin.Context) {
 	userID := userIDVal.(uuid.UUID)
 
 	var req changePasswordRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if !bindJSON(c, &req) {
 		return
 	}
 

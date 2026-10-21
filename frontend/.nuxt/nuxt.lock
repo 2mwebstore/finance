@@ -1,9 +1,0 @@
-{
-  "pid": 41240,
-  "startedAt": 1792399638491,
-  "command": "dev",
-  "cwd": "/Users/sila/Downloads/income-expense-source (1)/frontend",
-  "port": 3000,
-  "hostname": "::1",
-  "url": "http://[::1]:3000"
-}

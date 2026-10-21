@@ -58,8 +58,7 @@ func (cc *CategoryController) Create(c *gin.Context) {
 		return
 	}
 	var in services.CreateCategoryInput
-	if err := c.ShouldBindJSON(&in); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if !bindJSON(c, &in) {
 		return
 	}
 	var branchID *uuid.UUID
@@ -113,8 +112,7 @@ func (cc *CategoryController) Update(c *gin.Context) {
 		}
 	}
 	var in services.UpdateCategoryInput
-	if err := c.ShouldBindJSON(&in); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if !bindJSON(c, &in) {
 		return
 	}
 	cat, err := cc.svc.Update(c.Request.Context(), id, in)

@@ -34,7 +34,7 @@ type CreateRoleInput struct {
 }
 
 type UpdateRoleInput struct {
-	Name            *string  `json:"name"`
+	Name            *string  `json:"name" binding:"omitempty,min=2,max=128"`
 	Description     *string  `json:"description"`
 	PermissionCodes []string `json:"permission_codes"`
 }

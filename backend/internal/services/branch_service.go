@@ -31,13 +31,13 @@ type CreateBranchInput struct {
 	Name      string  `json:"name" binding:"required,min=2,max=128"`
 	Address   string  `json:"address"`
 	Phone     string  `json:"phone"`
-	Email     string  `json:"email"`
+	Email     string  `json:"email" binding:"omitempty,email,max=255"`
 	ManagerID *string `json:"manager_id"`
 }
 
 type UpdateBranchInput struct {
-	Code      *string `json:"code"`
-	Name      *string `json:"name"`
+	Code      *string `json:"code" binding:"omitempty,min=2,max=32"`
+	Name      *string `json:"name" binding:"omitempty,min=2,max=128"`
 	Address   *string `json:"address"`
 	Phone     *string `json:"phone"`
 	Email     *string `json:"email"`

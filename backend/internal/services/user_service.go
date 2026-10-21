@@ -33,7 +33,7 @@ func NewUserService(db *gorm.DB) *UserService {
 type CreateUserInput struct {
 	Username        string   `json:"username" binding:"required,min=3,max=64"`
 	Email           string   `json:"email" binding:"required,email"`
-	Password        string   `json:"password" binding:"required,len=4"`
+	Password        string   `json:"password" binding:"required,len=4,numeric"`
 	FullName        string   `json:"full_name" binding:"required,min=2"`
 	RoleCodes       []string `json:"role_codes"`
 	BranchIDs       []string `json:"branch_ids"`
@@ -43,8 +43,8 @@ type CreateUserInput struct {
 }
 
 type UpdateUserInput struct {
-	Email           *string `json:"email"`
-	FullName        *string `json:"full_name"`
+	Email           *string `json:"email" binding:"omitempty,email"`
+	FullName        *string `json:"full_name" binding:"omitempty,min=2"`
 	DefaultBranchID *string `json:"default_branch_id"`
 }
 

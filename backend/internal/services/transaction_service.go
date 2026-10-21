@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"html"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/cambodia-finance/income-expense/internal/accounting"
 	"github.com/cambodia-finance/income-expense/internal/middleware"
@@ -24,13 +26,16 @@ var (
 	ErrCategoryTypeMismatch = errors.New("category type does not match transaction type")
 	ErrCategoryBranch       = errors.New("this category belongs to another branch")
 	ErrNotApprover          = errors.New("only this user's managers can approve or reject it")
-	ErrDescriptionTooLong   = errors.New("description is too long")
+	ErrDescriptionTooLong   = errors.New("description must be at most 1000 characters")
 )
+
+// DescriptionMaxChars matches the counter on the transaction form.
+const DescriptionMaxChars = 1000
 
 // cleanDescription keeps the allowed rich-text subset and enforces the size limit.
 func cleanDescription(in string) (string, error) {
 	out := richtext.Sanitize(in)
-	if len(out) > richtext.MaxHTMLLength {
+	if len(out) > richtext.MaxHTMLLength || utf8.RuneCountInString(richtext.ToText(out)) > DescriptionMaxChars {
 		return "", ErrDescriptionTooLong
 	}
 	return out, nil
@@ -98,7 +103,7 @@ func (s *TransactionService) Create(ctx context.Context, in CreateTransactionInp
 
 	branchID, err := uuid.Parse(in.BranchID)
 	if err != nil {
-		return nil, fmt.Errorf("invalid branch_id")
+		return nil, fieldError("branch_id", "choose a valid branch")
 	}
 	if err := s.assertBranchAccess(ctx, actorID, branchID); err != nil {
 		return nil, err
@@ -107,15 +112,15 @@ func (s *TransactionService) Create(ctx context.Context, in CreateTransactionInp
 	var categoryID *uuid.UUID
 	if in.CategoryID != "" {
 		if in.Type == models.TxnTypeIncome {
-			return nil, errors.New("income transactions cannot have a category")
+			return nil, fieldError("category_id", "income transactions cannot have a category")
 		}
 		parsedCategoryID, parseErr := uuid.Parse(in.CategoryID)
 		if parseErr != nil {
-			return nil, fmt.Errorf("invalid category_id")
+			return nil, fieldError("category_id", "choose a valid category")
 		}
 		categoryID = &parsedCategoryID
 	} else if in.Type == models.TxnTypeExpense {
-		return nil, fmt.Errorf("category_id is required for expenses")
+		return nil, fieldError("category_id", "category is required")
 	}
 	var paymentMethodID uuid.UUID
 	if in.PaymentMethodID == "" {
@@ -134,7 +139,7 @@ func (s *TransactionService) Create(ctx context.Context, in CreateTransactionInp
 	if categoryID != nil {
 		var cat models.Category
 		if err := s.db.WithContext(ctx).First(&cat, "id = ? AND is_active = ?", *categoryID, true).Error; err != nil {
-			return nil, fmt.Errorf("category not found or inactive")
+			return nil, fieldError("category_id", "this category was not found or is inactive")
 		}
 		if cat.Type != in.Type {
 			return nil, ErrCategoryTypeMismatch
@@ -150,10 +155,10 @@ func (s *TransactionService) Create(ctx context.Context, in CreateTransactionInp
 	}
 
 	txnDate := time.Now()
-	if in.TransactionDate != "" {
+	if strings.TrimSpace(in.TransactionDate) != "" {
 		txnDate, err = parseFlexibleDate(in.TransactionDate)
 		if err != nil {
-			return nil, fmt.Errorf("invalid transaction_date: %w", err)
+			return nil, fieldError("transaction_date", "date is not valid")
 		}
 	}
 
@@ -327,15 +332,18 @@ func (s *TransactionService) Update(ctx context.Context, id uuid.UUID, in Update
 	updates := map[string]interface{}{}
 	if in.CategoryID != nil {
 		if txn.Type == models.TxnTypeIncome {
-			return nil, errors.New("income transactions cannot have a category")
+			return nil, fieldError("category_id", "income transactions cannot have a category")
+		}
+		if strings.TrimSpace(*in.CategoryID) == "" {
+			return nil, fieldError("category_id", "category is required")
 		}
 		cid, err := uuid.Parse(*in.CategoryID)
 		if err != nil {
-			return nil, fmt.Errorf("invalid category_id")
+			return nil, fieldError("category_id", "choose a valid category")
 		}
 		var cat models.Category
 		if err := s.db.WithContext(ctx).First(&cat, "id = ?", cid).Error; err != nil {
-			return nil, fmt.Errorf("category not found")
+			return nil, fieldError("category_id", "this category was not found")
 		}
 		if cat.Type != txn.Type {
 			return nil, ErrCategoryTypeMismatch
@@ -353,6 +361,9 @@ func (s *TransactionService) Update(ctx context.Context, id uuid.UUID, in Update
 		updates["payment_method_id"] = pid
 	}
 	if in.Amount != nil {
+		if strings.TrimSpace(*in.Amount) == "" {
+			return nil, fieldError("amount", "amount is required")
+		}
 		amt, err := accounting.ParseAmount(*in.Amount)
 		if err != nil {
 			return nil, err
@@ -360,9 +371,12 @@ func (s *TransactionService) Update(ctx context.Context, id uuid.UUID, in Update
 		updates["amount"] = amt
 	}
 	if in.TransactionDate != nil {
+		if strings.TrimSpace(*in.TransactionDate) == "" {
+			return nil, fieldError("transaction_date", "date is required")
+		}
 		d, err := parseFlexibleDate(*in.TransactionDate)
 		if err != nil {
-			return nil, fmt.Errorf("invalid transaction_date")
+			return nil, fieldError("transaction_date", "date is not valid")
 		}
 		updates["transaction_date"] = d
 	}

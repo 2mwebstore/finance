@@ -28,8 +28,7 @@ func (sc *SettingsController) Get(c *gin.Context) {
 
 func (sc *SettingsController) Update(c *gin.Context) {
 	var body map[string]string
-	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if !bindJSON(c, &body) {
 		return
 	}
 	actorID, ok := getActorID(c)

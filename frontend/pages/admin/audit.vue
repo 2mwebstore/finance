@@ -25,7 +25,6 @@
       <button type="button" class="filter-reset" :disabled="!filtersActive" @click="resetFilters"><RotateCcw :size="15" /> Reset</button>
     </FilterCard>
 
-    <p v-if="notice" class="notice" role="status"><CheckCircle2 :size="17" /> {{ notice }}</p>
 
     <div v-if="loading" class="audit-state">Loading audit events…</div>
     <div v-else-if="err" class="audit-state is-error">{{ err }}</div>
@@ -41,9 +40,9 @@
               <span class="outcome-badge" :class="entry.outcome === 'success' ? 'is-success' : 'is-failure'">{{ entry.outcome }}</span>
             </div>
             <p class="audit-meta">
-              <span>{{ formatTime(entry.created_at) }}</span>
-              <i>•</i><span>{{ actorLabel(entry) }}</span>
-              <template v-if="entry.ip_address"><i>•</i><span>{{ entry.ip_address }}</span></template>
+              <span class="meta-time">{{ formatTime(entry.created_at) }}</span>
+              <i>•</i><span class="meta-actor">{{ actorLabel(entry) }}</span>
+              <template v-if="entry.ip_address"><i class="meta-ip">•</i><span class="meta-ip">{{ entry.ip_address }}</span></template>
             </p>
             <p v-if="entry.entity_type" class="audit-entity">{{ entry.entity_type }}<template v-if="entry.entity_id"> #{{ entry.entity_id.slice(0, 8) }}</template></p>
           </div>
@@ -91,7 +90,7 @@
           <template v-else-if="preview && preview.would_delete > 0"><strong>{{ preview.would_delete.toLocaleString() }}</strong> {{ preview.would_delete === 1 ? 'event' : 'events' }} will be deleted.</template>
           <template v-else-if="preview">Nothing to delete. Every event is newer than {{ selectedOption.cutoffLabel }}.</template>
         </p>
-        <p v-if="cleanupError" class="cleanup-error" role="alert">{{ cleanupError }}</p>
+        <AppAlert v-if="cleanupError" class="cleanup-error" compact :message="cleanupError" />
 
         <div class="cleanup-actions">
           <button type="button" class="cancel-button" :disabled="cleaning" @click="closeCleanup">Cancel</button>
@@ -108,7 +107,6 @@
 import type { Component } from 'vue'
 import {
   Building2,
-  CheckCircle2,
   FileDown,
   KeyRound,
   ReceiptText,
@@ -123,6 +121,7 @@ import {
 import type { AuditEntry } from '~/types/api'
 import { currentMonthRange, formatDateKey } from '~/utils/dateRanges'
 import { useBranchOptions } from '~/composables/useBranchOptions'
+import { useToast } from '~/composables/useToast'
 
 const PAGE_SIZE = 50
 
@@ -134,7 +133,7 @@ const page = ref(1)
 const loading = ref(true)
 const loadingMore = ref(false)
 const err = ref('')
-const notice = ref('')
+const toast = useToast()
 const actionFilter = ref('')
 const branchFilter = ref('')
 const dateRange = ref(currentMonthRange())
@@ -334,7 +333,7 @@ async function runCleanup() {
       method: 'POST',
       body: { keep_months: keepMonths.value },
     })
-    notice.value = `Deleted ${res.deleted.toLocaleString()} ${res.deleted === 1 ? 'event' : 'events'} older than ${selectedOption.value.cutoffLabel}.`
+    toast.success(`Deleted ${res.deleted.toLocaleString()} ${res.deleted === 1 ? 'event' : 'events'} older than ${selectedOption.value.cutoffLabel}.`, { title: 'Audit log cleaned up' })
     cleanupOpen.value = false
     await load()
   } catch (e: any) {
@@ -356,7 +355,6 @@ onMounted(load)
 .heading-copy { margin: 7px 0 0; color: #7083a2; font-size: 13px; }
 .cleanup-button { display: inline-flex; flex: 0 0 auto; min-height: 42px; white-space: nowrap; align-items: center; gap: 7px; border: 1px solid #f3cdd3; border-radius: 10px; padding: 0 16px; color: #c93449; background: #fff; font-size: 13px; font-weight: 700; cursor: pointer; transition: background .15s ease; }
 .cleanup-button:hover { background: #fff4f5; }
-.notice { display: flex; align-items: center; gap: 8px; margin: 0 0 14px; border: 1px solid #c9ecdc; border-radius: 12px; padding: 11px 14px; color: #12795a; background: #effaf5; font-size: 13px; font-weight: 600; }
 .audit-state { border: 1px solid #e2eaf4; border-radius: 14px; padding: 36px 16px; color: #8091a9; background: #fff; font-size: 13px; text-align: center; }
 .audit-state.is-error { color: #c33d50; }
 .audit-list { margin: 0; overflow: hidden; border: 1px solid #e2eaf4; border-radius: 14px; padding: 0; background: #fff; box-shadow: 0 4px 16px rgb(24 60 110 / 4%); list-style: none; }
@@ -405,7 +403,7 @@ onMounted(load)
 .keep-copy small { color: #7b8ca5; font-size: 12px; }
 .cleanup-preview { min-height: 20px; margin: 14px 0 0; border-radius: 10px; padding: 10px 12px; color: #5f7391; background: #f5f8fc; font-size: 13px; }
 .cleanup-preview.has-events { color: #a8323f; background: #fff3f5; }
-.cleanup-error { margin: 10px 0 0; color: #c33d50; font-size: 13px; }
+.cleanup-error { margin-top: 12px; }
 .cleanup-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; padding-top: 16px; border-top: 1px solid #edf1f7; }
 .cleanup-actions button { display: inline-flex; min-height: 44px; align-items: center; justify-content: center; gap: 7px; border-radius: 10px; padding: 0 16px; font-size: 14px; font-weight: 700; cursor: pointer; }
 .cancel-button { border: 1px solid #dfe6ef; color: #536984; background: #fff; }
@@ -419,7 +417,12 @@ onMounted(load)
   .cleanup-button { min-height: 40px; padding: 0 13px; }
   .audit-row { gap: 11px; padding: 13px 12px; }
   .audit-icon { width: 34px; height: 34px; border-radius: 10px; }
-  .audit-meta span { max-width: 200px; }
+  /* Phones: who did it on one line, when on the next; no wrapped separators. */
+  .audit-meta { flex-direction: column; align-items: flex-start; gap: 2px; }
+  .audit-meta span { max-width: 100%; }
+  .audit-meta i, .audit-meta .meta-ip { display: none; }
+  .audit-meta .meta-actor { order: -1; color: #4a6085; font-weight: 550; }
+  .audit-meta .meta-time { font-size: 11px; }
   .cleanup-backdrop { align-items: flex-end; padding: 0; }
   .cleanup-dialog { width: 100%; max-height: 92dvh; border: 0; border-radius: 22px 22px 0 0; padding: 22px 18px calc(16px + env(safe-area-inset-bottom)); animation: cleanup-sheet-up .22s ease-out; }
   .sheet-handle { position: absolute; top: 8px; left: 50%; display: block; width: 38px; height: 4px; border-radius: 999px; background: #d6dfeb; transform: translateX(-50%); }

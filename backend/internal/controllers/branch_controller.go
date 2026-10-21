@@ -22,8 +22,7 @@ func NewBranchController(svc *services.BranchService, db *gorm.DB) *BranchContro
 
 func (bc *BranchController) Create(c *gin.Context) {
 	var in services.CreateBranchInput
-	if err := c.ShouldBindJSON(&in); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if !bindJSON(c, &in) {
 		return
 	}
 	branch, err := bc.svc.Create(c.Request.Context(), in)
@@ -41,8 +40,7 @@ func (bc *BranchController) Update(c *gin.Context) {
 		return
 	}
 	var in services.UpdateBranchInput
-	if err := c.ShouldBindJSON(&in); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if !bindJSON(c, &in) {
 		return
 	}
 	branch, err := bc.svc.Update(c.Request.Context(), id, in)
@@ -153,8 +151,7 @@ func (bc *BranchController) AssignUsers(c *gin.Context) {
 	var body struct {
 		UserIDs []string `json:"user_ids" binding:"required"`
 	}
-	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if !bindJSON(c, &body) {
 		return
 	}
 	uids := make([]uuid.UUID, 0, len(body.UserIDs))

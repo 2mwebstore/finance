@@ -2,7 +2,7 @@ package accounting
 
 import (
 	"errors"
-	"fmt"
+	"strings"
 
 	"github.com/cambodia-finance/income-expense/internal/models"
 	"github.com/shopspring/decimal"
@@ -20,9 +20,9 @@ var MaxAmount = decimal.RequireFromString("999999999999")
 
 // ParseAmount parses a string amount into decimal.Decimal and validates it.
 func ParseAmount(s string) (decimal.Decimal, error) {
-	d, err := decimal.NewFromString(s)
+	d, err := decimal.NewFromString(strings.TrimSpace(s))
 	if err != nil {
-		return decimal.Zero, fmt.Errorf("%w: %v", ErrInvalidAmount, err)
+		return decimal.Zero, ErrInvalidAmount
 	}
 	return d, ValidateAmount(d)
 }

@@ -60,3 +60,12 @@ button { -webkit-tap-highlight-color: transparent; }
 .action-danger:hover:not(:disabled) { background: #fbdbe1; }
 .action-success { color: #11815e; background: #e3f6ee; }
 .action-success:hover:not(:disabled) { background: #cfeee1; }
+
+/* Inputs a form check (or the API) rejected: see useFormErrors().invalid(). */
+input[aria-invalid="true"], textarea[aria-invalid="true"], select[aria-invalid="true"],
+input[aria-invalid="true"]:focus, textarea[aria-invalid="true"]:focus, select[aria-invalid="true"]:focus,
+.search-select[aria-invalid="true"] .search-select-trigger, .pin-input[aria-invalid="true"] input,
+.date-picker[aria-invalid="true"] .date-trigger {
+  border-color: #e2445c !important;
+  box-shadow: 0 0 0 3px rgb(226 68 92 / 12%) !important;
+}

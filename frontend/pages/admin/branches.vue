@@ -23,22 +23,21 @@
     >
       <template #icon><Building2 :size="20" /></template>
       <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <label class="space-y-1 text-xs font-medium text-muted">Branch code<input v-model.trim="form.code" required minlength="2" maxlength="32" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" placeholder="PP-01" /></label>
-        <label class="space-y-1 text-xs font-medium text-muted">Branch name<input v-model.trim="form.name" required minlength="2" maxlength="128" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" placeholder="Phnom Penh HQ" /></label>
+        <label class="space-y-1 text-xs font-medium text-muted">Branch code<input v-model.trim="form.code" required minlength="2" maxlength="32" :aria-invalid="formCheck.invalid('code')" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" placeholder="PP-01" /></label>
+        <label class="space-y-1 text-xs font-medium text-muted">Branch name<input v-model.trim="form.name" required minlength="2" maxlength="128" :aria-invalid="formCheck.invalid('name')" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" placeholder="Phnom Penh HQ" /></label>
         <label class="space-y-1 text-xs font-medium text-muted">Address<input v-model.trim="form.address" maxlength="512" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" /></label>
         <label class="space-y-1 text-xs font-medium text-muted">Phone<input v-model.trim="form.phone" maxlength="32" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" /></label>
-        <label class="space-y-1 text-xs font-medium text-muted sm:col-span-2">Email<input v-model.trim="form.email" type="email" maxlength="255" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" /></label>
+        <label class="space-y-1 text-xs font-medium text-muted sm:col-span-2">Email<input v-model.trim="form.email" type="email" maxlength="255" :aria-invalid="formCheck.invalid('email')" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" /></label>
       </div>
-      <p v-if="formError" class="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-expense" role="alert">{{ formError }}</p>
+      <AppAlert v-if="formError || formCheck.messages.length" class="mt-3" :title="formError ? 'Couldn’t save this branch' : 'Check the highlighted fields'" :message="formError" :items="formCheck.messages" dismissible @dismiss="formError = ''; formCheck.reset()" />
       <template #footer>
         <button type="button" class="border border-border bg-white text-muted" :disabled="saving" @click="closeForm">Cancel</button>
         <button type="submit" :disabled="saving" class="bg-primary text-white disabled:opacity-60">{{ saving ? 'Saving…' : editing ? 'Save changes' : 'Create branch' }}</button>
       </template>
     </AppModal>
 
-    <p v-if="notice" class="rounded-lg bg-green-50 px-3 py-2 text-sm text-income" role="status">{{ notice }}</p>
     <div v-if="loading" class="text-sm text-muted">Loading…</div>
-    <div v-else-if="err" class="text-sm text-expense">{{ err }}</div>
+    <AppAlert v-else-if="err" title="Couldn’t load branches" :message="err"><template #action><button type="button" @click="load">Try again</button></template></AppAlert>
     <ul v-else class="divide-y divide-border rounded-xl border border-border bg-white">
       <li v-for="branch in items" :key="branch.id" class="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
         <div class="min-w-0">
@@ -64,7 +63,7 @@
       <section class="w-full max-w-md rounded-t-2xl border border-border bg-white p-5 shadow-2xl sm:rounded-2xl" role="dialog" aria-modal="true" aria-labelledby="archive-branch-title">
         <h2 id="archive-branch-title" class="text-base font-bold text-navy">Delete {{ archiveTarget.name }}?</h2>
         <p class="mt-2 text-sm text-muted">This archives the branch and keeps its transaction history. You can restore it later.</p>
-        <p v-if="archiveError" class="mt-3 text-xs text-expense" role="alert">{{ archiveError }}</p>
+        <AppAlert v-if="archiveError" class="mt-3" compact :message="archiveError" />
         <footer class="mt-5 flex flex-col-reverse gap-2 border-t border-border pt-3 sm:flex-row sm:justify-end">
           <button type="button" class="rounded-lg border border-border px-4 py-2 text-xs font-semibold text-muted" :disabled="saving" @click="archiveTarget = null">Cancel</button>
           <button type="button" class="rounded-lg bg-expense px-4 py-2 text-xs font-semibold text-white disabled:opacity-60" :disabled="saving" @click="deleteBranch">{{ saving ? 'Deleting…' : 'Delete branch' }}</button>
@@ -77,6 +76,9 @@
 <script setup lang="ts">
 import { Building2, Pencil, Plus, RotateCcw, Trash2 } from 'lucide-vue-next'
 import type { Branch } from '~/types/api'
+import { useToast } from '~/composables/useToast'
+import { rule } from '~/utils/validation'
+import { useFormErrors } from '~/composables/useFormErrors'
 
 const { api } = useApi()
 const { can, canCreateBranch } = usePermissions()
@@ -86,7 +88,7 @@ const canManage = computed(() => can('branches.manage'))
 const items = ref<Branch[]>([])
 const loading = ref(true)
 const err = ref('')
-const notice = ref('')
+const toast = useToast()
 const showCreate = ref(false)
 const saving = ref(false)
 const formError = ref('')
@@ -108,9 +110,20 @@ async function load() {
   }
 }
 
+// Same rules as the API (CreateBranchInput / UpdateBranchInput).
+const formCheck = reactive(useFormErrors(
+  () => ({ ...form }),
+  () => ({
+    code: [rule.required('code'), rule.minLength('code', 2), rule.maxLength('code', 32)],
+    name: [rule.required('name'), rule.minLength('name', 2), rule.maxLength('name', 128)],
+    email: [rule.email('email'), rule.maxLength('email', 255)],
+  }),
+))
+
 function resetForm() {
   Object.assign(form, { code: '', name: '', address: '', phone: '', email: '' })
   formError.value = ''
+  formCheck.reset()
 }
 
 function openCreate() {
@@ -130,6 +143,7 @@ function openEdit(branch: Branch) {
     email: branch.email || '',
   })
   formError.value = ''
+  formCheck.reset()
 }
 
 function closeForm() {
@@ -145,20 +159,20 @@ function confirmDelete(branch: Branch) {
 }
 
 async function save() {
-  saving.value = true
   formError.value = ''
-  notice.value = ''
+  if (!formCheck.check()) return
+  saving.value = true
   const body = { code: form.code.trim(), name: form.name.trim(), address: form.address.trim(), phone: form.phone.trim(), email: form.email.trim() }
   try {
     if (editing.value) await api(`/branches/${editing.value.id}`, { method: 'PATCH', body })
     else await api('/branches', { method: 'POST', body })
-    notice.value = editing.value ? 'Branch updated.' : 'Branch created.'
+    toast.success(`${body.name} is saved.`, { title: editing.value ? 'Branch updated' : 'Branch created' })
     showCreate.value = false
     editing.value = null
     resetForm()
     await load()
   } catch (error: any) {
-    formError.value = error?.data?.error || 'Could not save this branch.'
+    if (!formCheck.fromApi(error)) formError.value = error?.data?.error || 'Could not save this branch.'
   } finally {
     saving.value = false
   }
@@ -166,14 +180,12 @@ async function save() {
 
 async function setActive(branch: Branch, isActive: boolean) {
   saving.value = true
-  err.value = ''
-  notice.value = ''
   try {
     await api(`/branches/${branch.id}`, { method: 'PATCH', body: { is_active: isActive } })
-    notice.value = isActive ? 'Branch restored.' : 'Branch deleted.'
+    toast.success(isActive ? `${branch.name} is active again.` : `${branch.name} was deleted.`, { title: isActive ? 'Branch restored' : 'Branch deleted' })
     await load()
   } catch (error: any) {
-    err.value = error?.data?.error || 'Could not update branch status.'
+    toast.error(error?.data?.error || 'Please try again.', { title: 'Couldn’t update the branch' })
   } finally {
     saving.value = false
   }
@@ -185,8 +197,8 @@ async function deleteBranch() {
   archiveError.value = ''
   try {
     await api(`/branches/${archiveTarget.value.id}`, { method: 'DELETE' })
+    toast.success(`${archiveTarget.value.name} was deleted. You can restore it later.`, { title: 'Branch deleted' })
     archiveTarget.value = null
-    notice.value = 'Branch deleted.'
     await load()
   } catch (error: any) {
     archiveError.value = error?.data?.error || 'Could not delete this branch.'

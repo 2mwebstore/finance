@@ -18,8 +18,7 @@ func NewRoleController(svc *services.RoleService) *RoleController {
 
 func (rc *RoleController) Create(c *gin.Context) {
 	var in services.CreateRoleInput
-	if err := c.ShouldBindJSON(&in); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if !bindJSON(c, &in) {
 		return
 	}
 	role, err := rc.svc.Create(c.Request.Context(), in)
@@ -37,8 +36,7 @@ func (rc *RoleController) Update(c *gin.Context) {
 		return
 	}
 	var in services.UpdateRoleInput
-	if err := c.ShouldBindJSON(&in); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if !bindJSON(c, &in) {
 		return
 	}
 	role, err := rc.svc.Update(c.Request.Context(), id, in)
@@ -104,8 +102,7 @@ func (rc *RoleController) SetPermissions(c *gin.Context) {
 	var body struct {
 		PermissionCodes []string `json:"permission_codes" binding:"required"`
 	}
-	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if !bindJSON(c, &body) {
 		return
 	}
 	role, err := rc.svc.SetPermissions(c.Request.Context(), id, body.PermissionCodes)

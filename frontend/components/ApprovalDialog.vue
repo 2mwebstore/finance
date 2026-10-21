@@ -13,7 +13,7 @@
         <span>{{ isApprove ? 'Note' : 'Reason' }} <small>Optional</small></span>
         <textarea v-model.trim="notes" rows="2" maxlength="500" :placeholder="isApprove ? 'Anything to add?' : 'Why is it rejected?'" />
       </label>
-      <p v-if="error" class="approval-error" role="alert">{{ error }}</p>
+      <AppAlert v-if="error" class="approval-error" compact :message="error" />
       <div class="approval-actions">
         <button type="button" class="cancel-button" :disabled="saving" @click="close">Cancel</button>
         <button type="button" class="confirm-button" :disabled="saving" @click="confirm">
@@ -90,7 +90,7 @@ async function confirm() {
 .approval-note small { margin-left: 4px; color: #94a2b7; font-size: 11px; font-weight: 500; }
 .approval-note textarea { width: 100%; min-height: 70px; resize: vertical; border: 1px solid #dfe7f1; border-radius: 10px; outline: none; padding: 10px 12px; color: #263f65; font: inherit; font-size: 14px; font-weight: 450; }
 .approval-note textarea:focus { border-color: #85b4f7; box-shadow: 0 0 0 3px rgb(37 99 235 / 10%); }
-.approval-error { margin: 12px 0 0; border-radius: 10px; padding: 10px 12px; color: #b33d50; background: #fff0f2; font-size: 13px; }
+.approval-error { margin-top: 12px; }
 .approval-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; padding-top: 16px; border-top: 1px solid #edf1f7; }
 .approval-actions button { display: inline-flex; min-height: 44px; align-items: center; justify-content: center; gap: 7px; border-radius: 10px; padding: 0 18px; font-size: 14px; font-weight: 700; cursor: pointer; }
 .cancel-button { border: 1px solid #dfe6ef; color: #536984; background: #fff; }

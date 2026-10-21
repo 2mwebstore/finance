@@ -13,7 +13,8 @@
           <button type="button" class="app-modal-close" aria-label="Close" :disabled="busy" @click="close"><X :size="19" /></button>
         </header>
         <!-- As a form, Enter submits and the footer's submit button works. -->
-        <component :is="form ? 'form' : 'div'" class="app-modal-content" @submit.prevent="emit('submit')">
+        <!-- novalidate: forms check their own fields (useFormErrors) and list problems in an AppAlert. -->
+        <component :is="form ? 'form' : 'div'" class="app-modal-content" :novalidate="form || undefined" @submit.prevent="emit('submit')">
           <div class="app-modal-body"><slot /></div>
           <footer v-if="$slots.footer" class="app-modal-footer"><slot name="footer" /></footer>
         </component>

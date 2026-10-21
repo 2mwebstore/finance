@@ -31,8 +31,7 @@ func NewTransactionController(svc *services.TransactionService, attachments *ser
 
 func (tc *TransactionController) Create(c *gin.Context) {
 	var in services.CreateTransactionInput
-	if err := c.ShouldBindJSON(&in); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if !bindJSON(c, &in) {
 		return
 	}
 	actorID, ok := getActorID(c)
@@ -148,8 +147,7 @@ func (tc *TransactionController) Update(c *gin.Context) {
 		return
 	}
 	var in services.UpdateTransactionInput
-	if err := c.ShouldBindJSON(&in); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if !bindJSON(c, &in) {
 		return
 	}
 	actorID, ok := getActorID(c)
@@ -285,25 +283,22 @@ func txnJSON(t *models.Transaction) gin.H {
 
 func writeTxnError(c *gin.Context, err error) {
 	msg := err.Error()
+	status := http.StatusBadRequest
 	switch msg {
 	case "transaction not found":
-		c.JSON(http.StatusNotFound, gin.H{"error": msg})
+		status = http.StatusNotFound
 	case "no access to this branch", "forbidden", "cannot approve your own transaction", "cannot reject your own transaction",
 		services.ErrNotApprover.Error():
-		c.JSON(http.StatusForbidden, gin.H{"error": msg})
-	case "invalid transaction status for this operation", "opening balance already exists for this branch, currency, and date",
-		"category type does not match transaction type",
-		"currency must be USD or KHR",
-		"amount must be a positive number with at most 4 decimal places",
-		"type must be income or expense":
-		c.JSON(http.StatusBadRequest, gin.H{"error": msg})
-	default:
-		if len(msg) > 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
-		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
-		}
+		status = http.StatusForbidden
+	case "":
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		return
 	}
+	body := gin.H{"error": msg}
+	if fields := errorFields(err); fields != nil {
+		body["fields"] = fields
+	}
+	c.JSON(status, body)
 }
 
 func (tc *TransactionController) Approve(c *gin.Context) {
