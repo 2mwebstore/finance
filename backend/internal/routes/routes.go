@@ -1,6 +1,7 @@
 package routes
 
 import (
+	"log"
 	"net/http"
 
 	"github.com/cambodia-finance/income-expense/internal/audit"
@@ -11,6 +12,7 @@ import (
 	"github.com/cambodia-finance/income-expense/internal/notifications"
 	"github.com/cambodia-finance/income-expense/internal/permissions"
 	"github.com/cambodia-finance/income-expense/internal/services"
+	"github.com/cambodia-finance/income-expense/internal/storage"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
@@ -37,7 +39,13 @@ func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config) {
 	roleCtrl := controllers.NewRoleController(roleSvc)
 	catCtrl := controllers.NewCategoryController(catSvc, db)
 	pmCtrl := controllers.NewPaymentMethodController(pmSvc)
-	txnCtrl := controllers.NewTransactionController(txnSvc, auditSvc)
+	store, err := storage.NewFromEnv()
+	if err != nil {
+		log.Fatalf("storage: %v", err)
+	}
+	log.Printf("attachments: using %s storage", store.Kind())
+	attachmentSvc := services.NewAttachmentService(db, txnSvc, store)
+	txnCtrl := controllers.NewTransactionController(txnSvc, attachmentSvc, auditSvc)
 	reportCtrl := controllers.NewReportController(reportSvc, auditSvc)
 	auditCtrl := controllers.NewAuditController(auditSvc, db)
 	notifyCtrl := controllers.NewNotificationController(tg)
@@ -97,6 +105,7 @@ func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config) {
 				users.POST("/:id/password", middleware.RequireAnyPermission(db, permissions.UsersManage), userCtrl.SetPassword)
 				users.POST("/:id/roles", middleware.RequireAnyPermission(db, permissions.UsersManage), userCtrl.AssignRoles)
 				users.POST("/:id/branches", middleware.RequireAnyPermission(db, permissions.UsersManage), userCtrl.AssignBranches)
+				users.POST("/:id/managers", middleware.RequireAnyPermission(db, permissions.UsersManage), userCtrl.AssignManagers)
 			}
 
 			roles := api.Group("/roles")
@@ -135,6 +144,10 @@ func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config) {
 				txns.POST("/:id/approve", middleware.RequireAnyPermission(db, permissions.TransactionsApprove), txnCtrl.Approve)
 				txns.POST("/:id/reject", middleware.RequireAnyPermission(db, permissions.TransactionsReject), txnCtrl.Reject)
 				txns.POST("/:id/reverse", middleware.RequireAnyPermission(db, permissions.TransactionsReverse), txnCtrl.Reverse)
+				// One image/PDF per transaction (stored in R2, or local disk in development).
+				txns.GET("/:id/attachment", middleware.RequireAnyPermission(db, permissions.TransactionsView, permissions.IncomeView, permissions.ExpenseView), txnCtrl.Attachment)
+				txns.POST("/:id/attachment", middleware.RequireAnyPermission(db, permissions.IncomeCreate, permissions.ExpenseCreate, permissions.IncomeEdit, permissions.ExpenseEdit), txnCtrl.UploadAttachment)
+				txns.DELETE("/:id/attachment", middleware.RequireAnyPermission(db, permissions.IncomeCreate, permissions.ExpenseCreate, permissions.IncomeEdit, permissions.ExpenseEdit), txnCtrl.DeleteAttachment)
 			}
 
 			// Phase 6: cash control

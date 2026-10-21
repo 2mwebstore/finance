@@ -14,6 +14,10 @@
         <label class="space-y-1 text-xs font-medium text-muted">Temporary 4-digit PIN<input v-model="createForm.password" type="password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" minlength="4" required autocomplete="new-password" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" placeholder="4 digits" /></label>
         <div class="space-y-1 text-xs font-medium text-muted"><span class="block">Role</span><SearchSelect v-model="createForm.role_code" :options="roleOptions" placeholder="Select a role" search-placeholder="Search roles…" aria-label="User role" /></div>
         <div class="space-y-1 text-xs font-medium text-muted"><span class="block">Branch</span><SearchSelect v-model="createForm.branch_id" :options="branchOptions" placeholder="Select a branch" search-placeholder="Search branches…" aria-label="User branch" /></div>
+        <div class="space-y-1 text-xs font-medium text-muted sm:col-span-2">
+          <span class="block">Managers <small>(approve or reject this user's transactions · optional)</small></span>
+          <SearchSelect v-model="createForm.manager_ids" :options="managerOptions(null, createForm.branch_id ? [createForm.branch_id] : [])" multiple :disabled="!createForm.branch_id" :placeholder="createForm.branch_id ? 'Anyone with approval rights' : 'Choose a branch first'" search-placeholder="Search people…" aria-label="User managers" />
+        </div>
       </div>
       <p v-if="createError" class="text-sm text-expense">{{ createError }}</p>
       <button type="submit" :disabled="saving || !createForm.role_code || !createForm.branch_id" class="rounded-lg bg-primary px-4 py-2 text-sm text-white disabled:opacity-60">{{ saving ? 'Creating…' : 'Create user' }}</button>
@@ -26,6 +30,10 @@
         <label class="space-y-1 text-xs font-medium text-muted">Email<input v-model.trim="editForm.email" type="email" required class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" /></label>
         <div v-if="canManageUsers && !isEditingSelf" class="space-y-1 text-xs font-medium text-muted"><span class="block">Roles <small>(select one or more)</small></span><SearchSelect v-model="editForm.role_codes" :options="roleOptions" multiple placeholder="Select roles" search-placeholder="Search roles…" aria-label="User roles" /></div>
         <div v-if="canManageUsers && !isEditingSelf && branches.length" class="space-y-1 text-xs font-medium text-muted"><span class="block">Branches <small>(select one or more)</small></span><SearchSelect v-model="editForm.branch_ids" :options="branchOptions" multiple placeholder="Select branches" search-placeholder="Search branches…" aria-label="User branches" /></div>
+        <div v-if="canManageUsers && !isEditingSelf" class="space-y-1 text-xs font-medium text-muted sm:col-span-2">
+          <span class="block">Managers <small>(only they can approve or reject this user's transactions; empty = anyone with approval rights)</small></span>
+          <SearchSelect v-model="editForm.manager_ids" :options="managerOptions(editingUser, editForm.branch_ids)" multiple placeholder="Anyone with approval rights" search-placeholder="Search people…" aria-label="User managers" />
+        </div>
       </div>
       <p v-if="editError" class="text-sm text-expense">{{ editError }}</p>
       <button type="submit" :disabled="saving || (canManageUsers && !isEditingSelf && (!editForm.role_codes.length || (branches.length > 0 && !editForm.branch_ids.length)))" class="rounded-lg bg-primary px-4 py-2 text-sm text-white disabled:opacity-60">{{ saving ? 'Saving…' : 'Save changes' }}</button>
@@ -56,6 +64,7 @@
               <span v-if="!(item.roles || []).length" class="text-xs text-muted">No role assigned</span>
             </div>
             <p class="mt-2 text-xs text-muted">Branches: {{ (item.branches || []).map(branch => branch.code).join(', ') || '—' }}</p>
+            <p v-if="(item.managers || []).length" class="mt-1 text-xs text-muted">Managers: <span class="font-medium text-navy">{{ (item.managers || []).map(manager => manager.full_name || manager.username).join(', ') }}</span></p>
             <div class="mt-2">
               <button type="button" class="text-[10px] font-semibold text-primary" @click="togglePerms(item.id)">{{ expandedPerms[item.id] ? 'Hide permissions' : `Permissions (${permCount(item)})` }}</button>
               <div v-if="expandedPerms[item.id]" class="mt-1.5 flex flex-wrap gap-1">
@@ -124,8 +133,8 @@ const editingUser = ref<AdminUser | null>(null)
 const passwordTarget = ref<AdminUser | null>(null)
 const passwordError = ref('')
 const expandedPerms = ref<Record<string, boolean>>({})
-const createForm = reactive({ username: '', email: '', full_name: '', password: '', role_code: '', branch_id: '' })
-const editForm = reactive({ email: '', full_name: '', role_codes: [] as string[], branch_ids: [] as string[] })
+const createForm = reactive({ username: '', email: '', full_name: '', password: '', role_code: '', branch_id: '', manager_ids: [] as string[] })
+const editForm = reactive({ email: '', full_name: '', role_codes: [] as string[], branch_ids: [] as string[], manager_ids: [] as string[] })
 const passwordForm = reactive({ password: '' })
 // Branch-level managers can only hand out roles whose permissions they hold themselves (the API enforces this too).
 const assignableRoles = computed(() => roles.value.filter((role) => {
@@ -183,14 +192,17 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [userResult, roleResult, branchResult] = await Promise.all([
+    const [userResult, roleResult, branchResult, everyone] = await Promise.all([
       fetchUsers(),
       api<{ items: Role[] }>('/roles').catch(() => ({ items: [] })),
       api<{ items: Branch[] }>('/branches?page_size=100').catch(() => ({ items: [] })),
+      // Unfiltered list for the Managers picker (the visible list may be filtered).
+      api<{ items: AdminUser[] }>('/users', { query: { page_size: 100, is_active: 'true' } }).catch(() => ({ items: [] })),
     ])
     items.value = userResult.items || []
     roles.value = roleResult.items || []
     branches.value = branchResult.items || []
+    allUsers.value = everyone.items || []
   } catch (e: any) {
     error.value = e?.data?.error || 'Could not load users.'
   } finally {
@@ -235,6 +247,34 @@ async function changeUserPassword() {
   }
 }
 
+// Managers: people who may approve/reject (or owners/admins), working in one of the user's branches.
+const allUsers = ref<AdminUser[]>([])
+const APPROVER_CODES = ['transactions.approve', 'transactions.reject']
+function codesOf(user: AdminUser) {
+  return user.permission_codes ?? (user.roles || []).flatMap(role => role.permission_codes || [])
+}
+function managerOptions(forUser: AdminUser | null, branchIds: string[]) {
+  return allUsers.value
+    .filter((candidate) => {
+      if (!candidate.is_active || candidate.id === forUser?.id) return false
+      const codes = codesOf(candidate)
+      const full = candidate.is_super_admin || codes.includes('branches.manage')
+      if (!full && !APPROVER_CODES.some(code => codes.includes(code))) return false
+      return full || (candidate.branches || []).some(branch => branchIds.includes(branch.id))
+    })
+    .map(candidate => ({ value: candidate.id, label: `${candidate.full_name} (@${candidate.username})` }))
+}
+// Drop managers who stop qualifying when the user's branches change.
+watch(() => [...editForm.branch_ids], () => {
+  if (!editingUser.value) return
+  const allowed = new Set(managerOptions(editingUser.value, editForm.branch_ids).map(option => option.value))
+  editForm.manager_ids = editForm.manager_ids.filter(id => allowed.has(id))
+})
+watch(() => createForm.branch_id, () => {
+  const allowed = new Set(managerOptions(null, createForm.branch_id ? [createForm.branch_id] : []).map(option => option.value))
+  createForm.manager_ids = createForm.manager_ids.filter(id => allowed.has(id))
+})
+
 async function create() {
   if (!createForm.role_code || !createForm.branch_id) return
   saving.value = true
@@ -244,8 +284,9 @@ async function create() {
     await api('/users', { method: 'POST', body: {
       username: createForm.username.trim(), email: createForm.email.trim(), full_name: createForm.full_name.trim(),
       password: createForm.password, role_codes: [createForm.role_code], branch_ids: [createForm.branch_id],
+      manager_ids: createForm.manager_ids,
     } })
-    Object.assign(createForm, { username: '', email: '', full_name: '', password: '', role_code: '', branch_id: '' })
+    Object.assign(createForm, { username: '', email: '', full_name: '', password: '', role_code: '', branch_id: '', manager_ids: [] })
     showCreate.value = false
     notice.value = 'User created.'
     await load()
@@ -263,6 +304,7 @@ function beginEdit(item: AdminUser) {
     full_name: item.full_name,
     role_codes: (item.roles || []).map((role) => role.code),
     branch_ids: (item.branches || []).map((branch) => branch.id),
+    manager_ids: (item.managers || []).map((manager) => manager.id),
   })
   editError.value = ''
   notice.value = ''
@@ -285,6 +327,7 @@ async function saveEdit() {
     if (canManageUsers.value && target.id !== currentUserId.value) {
       await api(`/users/${target.id}/roles`, { method: 'POST', body: { role_codes: editForm.role_codes } })
       if (branches.value.length) await api(`/users/${target.id}/branches`, { method: 'POST', body: { branch_ids: editForm.branch_ids } })
+      await api(`/users/${target.id}/managers`, { method: 'POST', body: { manager_ids: editForm.manager_ids } })
     }
     editingUser.value = null
     notice.value = 'User updated.'

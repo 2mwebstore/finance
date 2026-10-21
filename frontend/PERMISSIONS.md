@@ -39,3 +39,14 @@ await store.syncCatalogFromApi(api)
 - **Users:** branch managers see users in their branches only, and can't manage owners/admins or anyone holding a permission they lack. They can only assign roles whose permissions they hold, and only their own branches.
 - **Roles & permissions:** changing them needs full access (`roles.manage` or `permissions.manage` alone is not enough).
 - **Audit log:** branch managers with `audit-logs.view` see events from their branches and their branch users. Cleanup (`POST /audit-logs/cleanup`, keep 1–3 months) needs full access plus `settings.manage`.
+
+## Managers (who approves whose transactions)
+
+On **Users → Edit** (or when creating a user), pick **Managers**. When a user has managers, only those
+managers, or the owner/admin/Super Admin, can approve or reject that user's pending transactions.
+Users without managers keep the old rule: anyone with `transactions.approve` / `transactions.reject`
+and access to the branch. Nobody can approve their own transaction or choose their own managers.
+
+A manager must have approve or reject permission and work in one of the user's branches (owners/admins
+always qualify). The transactions list returns `can_approve` / `can_reject` per row, so Approve/Reject
+buttons only appear for people the API will accept.

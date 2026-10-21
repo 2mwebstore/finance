@@ -61,15 +61,42 @@
               <small v-if="!categories.length && !categoryLoading" class="field-hint">There are no expense categories available.</small>
             </div>
 
-            <label class="form-field full-field">
-              <span>Customer or supplier <small>Optional</small></span>
-              <input v-model.trim="form.counterparty" maxlength="255" placeholder="Name of payer or payee" />
-            </label>
-
-            <label class="form-field full-field">
+            <div class="form-field full-field">
               <span>Description <small>Optional</small></span>
-              <textarea v-model.trim="form.description" rows="2" maxlength="1024" placeholder="What is this transaction for?" />
-            </label>
+              <RichText v-model="form.description" placeholder="What is this transaction for?" aria-label="Description" :max-length="DESCRIPTION_MAX" />
+            </div>
+
+            <div class="form-field full-field">
+              <span>Attachment <small>Optional · image or PDF, up to 10 MB</small></span>
+              <div v-if="attachment.file" class="attachment-chip">
+                <img v-if="attachment.previewUrl" :src="attachment.previewUrl" alt="" class="attachment-thumb" />
+                <span v-else class="attachment-icon"><FileText :size="20" /></span>
+                <span class="attachment-meta"><strong>{{ attachment.file.name }}</strong><small>{{ formatBytes(attachment.file.size) }} · ready to upload</small></span>
+                <button type="button" class="attachment-action" @click="pickFile">Change</button>
+                <button type="button" class="attachment-remove" aria-label="Remove file" @click="clearPicked"><X :size="16" /></button>
+              </div>
+              <div v-else-if="existingAttachment && !attachment.removeExisting" class="attachment-chip">
+                <span class="attachment-icon"><ImageIcon v-if="existingAttachment.type.startsWith('image/')" :size="20" /><FileText v-else :size="20" /></span>
+                <span class="attachment-meta"><strong>{{ existingAttachment.name }}</strong><small>{{ formatBytes(existingAttachment.size) }} · attached</small></span>
+                <button type="button" class="attachment-action" @click="pickFile">Replace</button>
+                <button type="button" class="attachment-remove" aria-label="Remove attachment" @click="attachment.removeExisting = true"><X :size="16" /></button>
+              </div>
+              <button
+                v-else
+                type="button"
+                class="attachment-drop"
+                :class="{ 'is-dragging': dragging }"
+                @click="pickFile"
+                @dragover.prevent="dragging = true"
+                @dragleave="dragging = false"
+                @drop.prevent="onDrop"
+              >
+                <span class="attachment-drop-icon"><Paperclip :size="18" /></span>
+                <span class="attachment-meta"><strong>Attach a receipt or photo</strong><small>{{ attachment.removeExisting ? 'The current file will be removed when you save' : 'Tap to choose, or drop a file here' }}</small></span>
+              </button>
+              <input ref="fileInput" type="file" class="sr-only" :accept="ACCEPTED_TYPES.join(',')" tabindex="-1" aria-hidden="true" @change="onFileChange" />
+              <small v-if="attachment.error" class="field-error" role="alert">{{ attachment.error }}</small>
+            </div>
           </div>
 
           <label v-if="mode === 'create'" class="pending-option">
@@ -92,8 +119,9 @@
 </template>
 
 <script setup lang="ts">
-import { ArrowDownLeft, ArrowUpRight, X } from 'lucide-vue-next'
+import { ArrowDownLeft, ArrowUpRight, FileText, ImageIcon, Paperclip, X } from 'lucide-vue-next'
 import type { Branch, Category, Transaction } from '~/types/api'
+import { richTextToPlain } from '~/utils/richText'
 
 type TransactionType = 'income' | 'expense'
 type TransactionCurrency = 'USD' | 'KHR'
@@ -126,9 +154,19 @@ const form = reactive({
   branch_id: '',
   category_id: '',
   description: '',
-  counterparty: '',
   pending: false,
 })
+
+// One optional attachment, uploaded after the transaction itself is saved.
+const DESCRIPTION_MAX = 1000
+const MAX_FILE_BYTES = 10 * 1024 * 1024
+const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'application/pdf']
+const fileInput = ref<HTMLInputElement | null>(null)
+const dragging = ref(false)
+const attachment = reactive({ file: null as File | null, previewUrl: '', removeExisting: false, error: '' })
+const existingAttachment = computed(() => props.mode === 'edit' ? props.transaction?.attachment || null : null)
+// Set once a new transaction is created, so a failed upload can be retried without creating it twice.
+const createdTransaction = ref<Transaction | null>(null)
 const loadingOptions = ref(true)
 const categoryLoading = ref(false)
 const saving = ref(false)
@@ -151,6 +189,7 @@ const transactionType = computed<TransactionType>(() => props.mode === 'edit'
   : props.type)
 const actionLabel = computed(() => props.mode === 'edit' ? 'Edit' : 'Add')
 const submitDisabled = computed(() => saving.value
+  || richTextToPlain(form.description).length > DESCRIPTION_MAX
   || (props.mode === 'create' && (!branches.value.length || !form.branch_id))
   || (transactionType.value === 'expense' && (!categories.value.length || !form.category_id)))
 
@@ -163,6 +202,57 @@ function close() {
   if (!saving.value) emit('update:modelValue', false)
 }
 
+function formatBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
+function pickFile() {
+  fileInput.value?.click()
+}
+
+function setFile(file: File) {
+  attachment.error = ''
+  if (!ACCEPTED_TYPES.includes(file.type)) {
+    attachment.error = 'Choose an image (JPG, PNG, GIF, WebP) or a PDF.'
+    return
+  }
+  if (file.size > MAX_FILE_BYTES) {
+    attachment.error = 'The file is larger than 10 MB.'
+    return
+  }
+  clearPicked()
+  attachment.file = file
+  attachment.previewUrl = file.type.startsWith('image/') ? URL.createObjectURL(file) : ''
+}
+
+function onFileChange(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (file) setFile(file)
+  input.value = ''
+}
+
+function onDrop(event: DragEvent) {
+  dragging.value = false
+  const file = event.dataTransfer?.files?.[0]
+  if (file) setFile(file)
+}
+
+function clearPicked() {
+  if (attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl)
+  attachment.previewUrl = ''
+  attachment.file = null
+}
+
+function resetAttachment() {
+  clearPicked()
+  attachment.removeExisting = false
+  attachment.error = ''
+  createdTransaction.value = null
+}
+
 function initializeForm() {
   const txn = props.mode === 'edit' ? props.transaction : null
   form.type = transactionType.value
@@ -172,9 +262,9 @@ function initializeForm() {
   form.branch_id = txn?.branch_id || user.value?.branches?.[0]?.id || ''
   form.category_id = txn?.category_id || ''
   form.description = txn?.description || ''
-  form.counterparty = txn?.counterparty || ''
   form.pending = false
   error.value = ''
+  resetAttachment()
 }
 
 async function loadCategories() {
@@ -230,6 +320,7 @@ async function prepareModal() {
 async function submit() {
   error.value = ''
   saving.value = true
+  let recordSaved = false
   try {
     let saved: Transaction
     if (props.mode === 'edit' && props.transaction) {
@@ -240,9 +331,10 @@ async function submit() {
           transaction_date: form.transaction_date,
           ...(transactionType.value === 'expense' ? { category_id: form.category_id } : {}),
           description: form.description,
-          counterparty: form.counterparty,
         },
       })
+    } else if (createdTransaction.value) {
+      saved = createdTransaction.value
     } else {
       saved = await api<Transaction>('/transactions', {
         method: 'POST',
@@ -254,15 +346,29 @@ async function submit() {
           branch_id: form.branch_id,
           ...(transactionType.value === 'expense' ? { category_id: form.category_id } : {}),
           description: form.description,
-          counterparty: form.counterparty,
           pending: form.pending,
         },
       })
+      createdTransaction.value = saved
     }
+    recordSaved = true
+
+    if (attachment.file) {
+      const body = new FormData()
+      body.append('file', attachment.file)
+      saved = await api<Transaction>(`/transactions/${saved.id}/attachment`, { method: 'POST', body })
+    } else if (attachment.removeExisting && existingAttachment.value) {
+      saved = await api<Transaction>(`/transactions/${saved.id}/attachment`, { method: 'DELETE' })
+    }
+
+    resetAttachment()
     emit('update:modelValue', false)
     emit('saved', saved)
   } catch (e: any) {
-    error.value = e?.data?.error || (props.mode === 'edit' ? 'Could not update this transaction.' : 'Could not save this transaction.')
+    const reason = e?.data?.error || e?.message || ''
+    error.value = recordSaved
+      ? `The ${transactionType.value} was saved, but the file couldn't be uploaded${reason ? `: ${reason}` : ''}. Try again, or remove the file and save.`
+      : reason || (props.mode === 'edit' ? 'Could not update this transaction.' : 'Could not save this transaction.')
   } finally {
     saving.value = false
   }
@@ -270,7 +376,9 @@ async function submit() {
 
 watch(() => [props.modelValue, props.mode, props.type, props.transaction?.id], ([isOpen]) => {
   if (isOpen) prepareModal()
+  else resetAttachment()
 })
+onBeforeUnmount(clearPicked)
 // Branch categories differ per branch, so refresh the list when another branch is picked.
 watch(() => form.branch_id, (branchId, previous) => {
   if (props.modelValue && props.mode === 'create' && !loadingOptions.value && branchId && previous && branchId !== previous) void loadCategories()
@@ -329,6 +437,18 @@ onMounted(() => {
 .field-hint { display: block; margin-top: 2px; color: #8e9cb0; font-size: 11px; font-weight: 450; }
 .amount-card .field-hint { margin-top: 6px; }
 
+.attachment-chip, .attachment-drop { display: flex; width: 100%; min-height: 58px; align-items: center; gap: 11px; border: 1px solid #dfe7f1; border-radius: 12px; padding: 9px 10px; background: #fff; text-align: left; }
+.attachment-drop { border-style: dashed; border-color: #c9d6e8; color: #50668a; background: #fafcff; cursor: pointer; transition: border-color .15s ease, background .15s ease; }
+.attachment-drop:hover, .attachment-drop.is-dragging { border-color: var(--accent); background: var(--accent-soft); }
+.attachment-drop-icon, .attachment-icon { display: grid; flex: 0 0 auto; width: 40px; height: 40px; place-items: center; border-radius: 10px; color: var(--accent); background: var(--accent-soft); }
+.attachment-thumb { flex: 0 0 auto; width: 40px; height: 40px; border-radius: 9px; object-fit: cover; background: #f1f5fb; }
+.attachment-meta { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 3px; }
+.attachment-meta strong { overflow: hidden; color: #1d365c; font-size: 13px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.attachment-meta small { color: #7b8ca5; font-size: 12px; font-weight: 450; }
+.attachment-action { flex: 0 0 auto; border: 1px solid #dfe7f1; border-radius: 8px; padding: 6px 10px; color: #3d5a82; background: #fff; font-size: 12px; font-weight: 650; cursor: pointer; }
+.attachment-remove { display: grid; flex: 0 0 auto; width: 32px; height: 32px; place-items: center; border: 0; border-radius: 8px; color: #8193ab; background: #f3f6fb; cursor: pointer; }
+.attachment-remove:hover { color: #c93449; background: #fff0f2; }
+.field-error { color: #c33d50; font-size: 12px; font-weight: 500; }
 .pending-option { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 18px; border: 1px solid #e5ebf4; border-radius: 12px; padding: 13px 14px; background: #f8fafd; cursor: pointer; }
 .pending-option > span { display: flex; flex-direction: column; gap: 3px; }
 .pending-option strong { color: #2c4468; font-size: 13px; font-weight: 700; }

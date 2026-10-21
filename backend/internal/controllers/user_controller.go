@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/cambodia-finance/income-expense/internal/models"
+	"github.com/cambodia-finance/income-expense/internal/permissions"
 	"github.com/cambodia-finance/income-expense/internal/services"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -82,6 +83,86 @@ func (uc *UserController) checkAssignableBranches(c *gin.Context, scope *accessS
 	return true
 }
 
+// checkManagers validates manager IDs for a user: existing active users who can approve or reject,
+// not the user themself, working in one of the user's branches (owners/admins always qualify),
+// and, for branch-level actors, people from the actor's own branches.
+func (uc *UserController) checkManagers(c *gin.Context, scope *accessScope, userID uuid.UUID, userBranches []uuid.UUID, raw []string) ([]uuid.UUID, bool) {
+	ids := make([]uuid.UUID, 0, len(raw))
+	seen := map[uuid.UUID]bool{}
+	for _, r := range raw {
+		id, err := uuid.Parse(r)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid manager id: " + r})
+			return nil, false
+		}
+		if id == userID {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "a user can't be their own manager"})
+			return nil, false
+		}
+		if !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+	for _, id := range ids {
+		manager, err := uc.svc.GetByID(c.Request.Context(), id)
+		if err != nil || !manager.IsActive {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "manager not found or inactive"})
+			return nil, false
+		}
+		if !scope.SharesBranch(manager) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "managers must come from your branches"})
+			return nil, false
+		}
+		approver, full := manager.IsSuperAdmin, manager.IsSuperAdmin
+		for _, role := range manager.Roles {
+			for _, p := range role.Permissions {
+				switch p.Code {
+				case permissions.TransactionsApprove, permissions.TransactionsReject:
+					approver = true
+				case permissions.BranchesManage:
+					full = true
+				}
+			}
+		}
+		if !approver {
+			c.JSON(http.StatusBadRequest, gin.H{"error": manager.FullName + " can't approve or reject transactions (their role lacks that permission)"})
+			return nil, false
+		}
+		if !full && !sharesAny(manager.Branches, userBranches) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": manager.FullName + " doesn't work in any of this user's branches"})
+			return nil, false
+		}
+	}
+	return ids, true
+}
+
+func sharesAny(branches []models.Branch, ids []uuid.UUID) bool {
+	for _, b := range branches {
+		for _, id := range ids {
+			if b.ID == id {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// withManagers adds each user's managers to the JSON rows.
+func (uc *UserController) withManagers(c *gin.Context, rows []gin.H, ids []uuid.UUID) {
+	managers, err := uc.svc.ManagersFor(c.Request.Context(), ids)
+	if err != nil {
+		return
+	}
+	for i := range rows {
+		list := managers[ids[i]]
+		if list == nil {
+			list = []services.ManagerSummary{}
+		}
+		rows[i]["managers"] = list
+	}
+}
+
 func (uc *UserController) Create(c *gin.Context) {
 	scope, ok := loadScope(c, uc.db)
 	if !ok {
@@ -99,12 +180,30 @@ func (uc *UserController) Create(c *gin.Context) {
 	if !uc.checkAssignableBranches(c, scope, in.BranchIDs) || !uc.checkAssignableRoles(c, scope, in.RoleCodes) {
 		return
 	}
+	newBranches := make([]uuid.UUID, 0, len(in.BranchIDs))
+	for _, raw := range in.BranchIDs {
+		if id, err := uuid.Parse(raw); err == nil {
+			newBranches = append(newBranches, id)
+		}
+	}
+	managerIDs, ok := uc.checkManagers(c, scope, uuid.Nil, newBranches, in.ManagerIDs)
+	if !ok {
+		return
+	}
 	user, err := uc.svc.Create(c.Request.Context(), in, scope.ActorID, actorIsSuperAdmin(c, uc.db))
 	if err != nil {
 		writeServiceError(c, err)
 		return
 	}
-	c.JSON(http.StatusCreated, userJSON(user))
+	if len(managerIDs) > 0 {
+		if err := uc.svc.SetManagers(c.Request.Context(), user.ID, managerIDs); err != nil {
+			writeServiceError(c, err)
+			return
+		}
+	}
+	rows := []gin.H{userJSON(user)}
+	uc.withManagers(c, rows, []uuid.UUID{user.ID})
+	c.JSON(http.StatusCreated, rows[0])
 }
 
 func (uc *UserController) Update(c *gin.Context) {
@@ -245,11 +344,14 @@ func (uc *UserController) List(c *gin.Context) {
 		return
 	}
 	items := make([]gin.H, 0, len(users))
+	ids := make([]uuid.UUID, 0, len(users))
 	for i := range users {
 		item := userJSON(&users[i])
 		item["can_manage"] = scope.CanManageUser(&users[i])
 		items = append(items, item)
+		ids = append(ids, users[i].ID)
 	}
+	uc.withManagers(c, items, ids)
 	c.JSON(http.StatusOK, gin.H{
 		"items":     items,
 		"total":     total,
@@ -324,4 +426,43 @@ func (uc *UserController) AssignBranches(c *gin.Context) {
 	}
 	user, _ := uc.svc.GetByID(c.Request.Context(), target.ID)
 	c.JSON(http.StatusOK, userJSON(user))
+}
+
+// AssignManagers sets who approves or rejects this user's pending transactions.
+func (uc *UserController) AssignManagers(c *gin.Context) {
+	scope, ok := loadScope(c, uc.db)
+	if !ok {
+		return
+	}
+	target, ok := uc.manageableUser(c, scope)
+	if !ok {
+		return
+	}
+	if target.ID == scope.ActorID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "you can't choose your own managers"})
+		return
+	}
+	var body struct {
+		ManagerIDs []string `json:"manager_ids"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	targetBranches := make([]uuid.UUID, 0, len(target.Branches))
+	for _, b := range target.Branches {
+		targetBranches = append(targetBranches, b.ID)
+	}
+	managerIDs, ok := uc.checkManagers(c, scope, target.ID, targetBranches, body.ManagerIDs)
+	if !ok {
+		return
+	}
+	if err := uc.svc.SetManagers(c.Request.Context(), target.ID, managerIDs); err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	user, _ := uc.svc.GetByID(c.Request.Context(), target.ID)
+	rows := []gin.H{userJSON(user)}
+	uc.withManagers(c, rows, []uuid.UUID{user.ID})
+	c.JSON(http.StatusOK, rows[0])
 }

@@ -100,6 +100,18 @@ Sign in at `https://<your-web-domain>`, then create branches, users and roles in
 Set `SEED_DEMO=true` on **api** to load the demo branches and users (PIN `2468`, see `docs/DEMO_DATA.md`).
 Those PINs are public, so only do this for a private test project, and remove the variable afterwards.
 
+## Attachments in Cloudflare R2
+
+Each transaction can carry one image or PDF (up to 10 MB). Railway's disk is wiped on every deploy, so
+set R2 on **api** (create an R2 bucket and an API token with Object Read & Write in Cloudflare):
+
+```bash
+railway variable set --service api R2_ACCOUNT_ID=<cloudflare account id> R2_ACCESS_KEY_ID=<key id> R2_SECRET_ACCESS_KEY=<secret> R2_BUCKET=<bucket name>
+```
+
+The API logs `attachments: using r2 storage` on start when R2 is active (`local` means the variables are
+missing). Files stay private: the bucket needs no public access, the app streams them through the API.
+
 ## Sharing a MySQL service with another app
 
 If the MySQL service already holds another app's tables (its default database is `railway`), give

@@ -37,6 +37,7 @@ type CreateUserInput struct {
 	FullName        string   `json:"full_name" binding:"required,min=2"`
 	RoleCodes       []string `json:"role_codes"`
 	BranchIDs       []string `json:"branch_ids"`
+	ManagerIDs      []string `json:"manager_ids"`
 	DefaultBranchID *string  `json:"default_branch_id"`
 	IsActive        *bool    `json:"is_active"`
 }
@@ -378,5 +379,54 @@ func (s *UserService) AssignBranches(ctx context.Context, userID uuid.UUID, bran
 	}
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		return s.setBranchesTx(tx, userID, branchIDs)
+	})
+}
+
+// ManagerSummary is the short form of a manager shown on user rows.
+type ManagerSummary struct {
+	ID       uuid.UUID `json:"id"`
+	Username string    `json:"username"`
+	FullName string    `json:"full_name"`
+}
+
+// ManagersFor returns each user's assigned managers.
+func (s *UserService) ManagersFor(ctx context.Context, userIDs []uuid.UUID) (map[uuid.UUID][]ManagerSummary, error) {
+	out := map[uuid.UUID][]ManagerSummary{}
+	if len(userIDs) == 0 {
+		return out, nil
+	}
+	var rows []struct {
+		UserID   uuid.UUID
+		ID       uuid.UUID
+		Username string
+		FullName string
+	}
+	err := s.db.WithContext(ctx).Table("user_managers um").
+		Select("um.user_id, u.id, u.username, u.full_name").
+		Joins("JOIN users u ON u.id = um.manager_id AND u.deleted_at IS NULL").
+		Where("um.user_id IN ?", userIDs).
+		Order("u.full_name").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range rows {
+		out[r.UserID] = append(out[r.UserID], ManagerSummary{ID: r.ID, Username: r.Username, FullName: r.FullName})
+	}
+	return out, nil
+}
+
+// SetManagers replaces the managers who approve or reject userID's transactions.
+func (s *UserService) SetManagers(ctx context.Context, userID uuid.UUID, managerIDs []uuid.UUID) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("user_id = ?", userID).Delete(&models.UserManager{}).Error; err != nil {
+			return err
+		}
+		for _, m := range managerIDs {
+			if err := tx.Create(&models.UserManager{UserID: userID, ManagerID: m}).Error; err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 }

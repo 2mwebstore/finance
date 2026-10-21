@@ -63,8 +63,12 @@
         </div>
         <div class="transaction-info">
           <div class="transaction-title-line">
-            <strong>{{ transaction.description || (transaction.type === 'expense' ? transaction.category?.name : '') || transaction.transaction_number }}</strong>
+            <strong>{{ transactionTitle(transaction) }}</strong>
             <span class="status-badge" :class="statusClass(transaction.status)">{{ displayStatus(transaction.status) }}</span>
+            <button v-if="transaction.attachment" type="button" class="attachment-pill" :title="`View ${transaction.attachment.name}`" :aria-label="`View attachment ${transaction.attachment.name}`" @click="openAttachment(transaction)">
+              <ImageIcon v-if="transaction.attachment.type.startsWith('image/')" :size="12" /><FileText v-else :size="12" />
+              <span>View</span>
+            </button>
           </div>
           <div class="transaction-meta">
             <span>{{ transaction.transaction_number }}</span>
@@ -82,6 +86,12 @@
           <button v-if="canEdit(transaction)" class="row-action edit-action" :aria-label="`Edit ${transaction.transaction_number}`" title="Edit" @click="openEdit(transaction)"><Pencil :size="15" /></button>
           <button v-if="canDelete(transaction)" class="row-action delete-action" :aria-label="`Delete ${transaction.transaction_number}`" title="Delete" @click="openDelete(transaction)"><Trash2 :size="15" /></button>
         </div>
+        <div v-if="transaction.status === 'pending' && (transaction.can_approve || transaction.can_reject)" class="approval-bar">
+          <span class="approval-bar-copy"><Clock3 :size="14" /> Waiting for your approval<template v-if="transaction.created_by?.name"> · by {{ transaction.created_by.name }}</template></span>
+          <button v-if="transaction.can_reject" type="button" class="approval-reject" @click="openApproval(transaction, 'reject')"><X :size="15" /> Reject</button>
+          <button v-if="transaction.can_approve" type="button" class="approval-approve" @click="openApproval(transaction, 'approve')"><Check :size="15" /> Approve</button>
+        </div>
+        <p v-else-if="transaction.status === 'pending' && transaction.created_by?.name" class="pending-note"><Clock3 :size="13" /> Waiting for approval · by {{ transaction.created_by.name }}</p>
       </article>
     </div>
 
@@ -116,14 +126,17 @@
       :transaction="transactionToDelete"
       @deleted="onTransactionDeleted"
     />
+    <AttachmentViewer v-model="attachmentViewerOpen" :transaction="attachmentTransaction" />
+    <ApprovalDialog v-model="approvalOpen" :transaction="approvalTransaction" :action="approvalAction" @done="onApprovalDone" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ArrowDownLeft, ArrowUpRight, CircleDollarSign, Pencil, Plus, ReceiptText, RotateCcw, Trash2 } from 'lucide-vue-next'
+import { ArrowDownLeft, ArrowUpRight, Check, CircleDollarSign, Clock3, FileText, ImageIcon, Pencil, Plus, ReceiptText, RotateCcw, Trash2, X } from 'lucide-vue-next'
 import { useIntersectionObserver, useMediaQuery } from '@vueuse/core'
 import type { Transaction } from '~/types/api'
 import { formatMoney } from '~/utils/money'
+import { richTextToPlain } from '~/utils/richText'
 import { currentMonthRange, formatDateKey } from '~/utils/dateRanges'
 import { useBranchOptions } from '~/composables/useBranchOptions'
 
@@ -345,6 +358,34 @@ function openDelete(transaction: Transaction) {
   deleteModalOpen.value = true
 }
 
+function transactionTitle(transaction: Transaction) {
+  return richTextToPlain(transaction.description)
+    || (transaction.type === 'expense' ? transaction.category?.name : '')
+    || transaction.transaction_number
+}
+
+// Attachment popup (image or PDF)
+const attachmentViewerOpen = ref(false)
+const attachmentTransaction = ref<Transaction | null>(null)
+function openAttachment(transaction: Transaction) {
+  attachmentTransaction.value = transaction
+  attachmentViewerOpen.value = true
+}
+
+// Approve / reject (only shown when the API says this user may decide)
+const approvalOpen = ref(false)
+const approvalTransaction = ref<Transaction | null>(null)
+const approvalAction = ref<'approve' | 'reject'>('approve')
+function openApproval(transaction: Transaction, action: 'approve' | 'reject') {
+  approvalTransaction.value = transaction
+  approvalAction.value = action
+  approvalOpen.value = true
+}
+async function onApprovalDone() {
+  approvalTransaction.value = null
+  await load()
+}
+
 async function onTransactionSaved() {
   selectedTransaction.value = null
   await load()
@@ -409,7 +450,16 @@ onMounted(load)
 .search-caption { margin: 0; color: #8493a8; font-size: 12px; }
 .search-caption strong { color: #496386; font-weight: 650; }
 .transaction-list { overflow: hidden; border: 1px solid #e2eaf4; border-radius: 14px; background: #fff; box-shadow: 0 4px 16px rgb(24 60 110 / 4%); }
-.transaction-row { display: flex; align-items: center; gap: 14px; min-width: 0; padding: 14px 16px; border-bottom: 1px solid #edf1f7; transition: background .15s ease; }
+.transaction-row { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; min-width: 0; padding: 14px 16px; border-bottom: 1px solid #edf1f7; transition: background .15s ease; }
+.attachment-pill { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 4px; border: 1px solid #d6e4fb; border-radius: 999px; padding: 3px 9px; color: #1769e8; background: #f2f7ff; font-size: 11px; font-weight: 700; cursor: pointer; transition: background .15s ease; }
+.attachment-pill:hover { background: #e4eeff; }
+.approval-bar { display: flex; flex: 1 0 100%; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: -2px; border: 1px solid #f6e2b4; border-radius: 11px; padding: 8px 8px 8px 12px; background: #fffaf0; }
+.approval-bar-copy { display: inline-flex; flex: 1; min-width: 0; align-items: center; gap: 6px; color: #8a5a06; font-size: 12px; font-weight: 600; }
+.approval-bar button { display: inline-flex; min-height: 34px; align-items: center; gap: 5px; border-radius: 9px; padding: 0 12px; font-size: 13px; font-weight: 700; cursor: pointer; }
+.approval-reject { border: 1px solid #f3cdd3; color: #c93449; background: #fff; }
+.approval-approve { border: 0; color: #fff; background: #13966e; box-shadow: 0 3px 8px rgb(19 150 110 / 22%); }
+.approval-bar button:hover { filter: brightness(.96); }
+.pending-note { display: flex; flex: 1 0 100%; align-items: center; gap: 6px; margin: -4px 0 0; color: #9a6c12; font-size: 12px; }
 .transaction-row:last-child { border-bottom: 0; }
 .transaction-row:hover { background: #fbfcfe; }
 .transaction-type-icon { display: flex; flex: 0 0 auto; align-items: center; justify-content: center; width: 42px; height: 42px; border-radius: 12px; }
@@ -469,6 +519,9 @@ onMounted(load)
   .transaction-amount { flex-basis: auto; margin-left: auto; padding-top: 1px; }
   .transaction-amount > span { font-size: 13px; }
   .row-actions { align-self: center; flex-direction: column; }
+  .approval-bar { padding: 10px; }
+  .approval-bar-copy { flex: 1 0 100%; }
+  .approval-bar button { flex: 1; justify-content: center; min-height: 40px; }
   .row-action { width: 32px; height: 32px; }
 }
 @media (max-width: 420px) {

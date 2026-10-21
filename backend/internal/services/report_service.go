@@ -8,6 +8,7 @@ import (
 	"github.com/cambodia-finance/income-expense/internal/accounting"
 	"github.com/cambodia-finance/income-expense/internal/middleware"
 	"github.com/cambodia-finance/income-expense/internal/models"
+	"github.com/cambodia-finance/income-expense/internal/richtext"
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
@@ -374,7 +375,7 @@ func (s *ReportService) ExportCSV(ctx context.Context, actorID uuid.UUID, period
 			t.TransactionDate.Format("2006-01-02"),
 			branchCode, catName, pmName, t.Currency,
 			t.Amount.StringFixed(4),
-			t.Description, t.Counterparty,
+			richtext.ToText(t.Description), t.Counterparty,
 		)
 	}
 	return csv, nil

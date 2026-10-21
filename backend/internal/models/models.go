@@ -90,6 +90,12 @@ type UserBranch struct {
 	BranchID uuid.UUID `gorm:"type:char(36);primaryKey"`
 }
 
+// UserManager links a user to a manager who approves or rejects that user's pending transactions.
+type UserManager struct {
+	UserID    uuid.UUID `gorm:"type:char(36);primaryKey"`
+	ManagerID uuid.UUID `gorm:"type:char(36);primaryKey;index"`
+}
+
 // Session stores refresh token metadata for revocation.
 type Session struct {
 	Base

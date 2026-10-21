@@ -114,7 +114,7 @@
                   <tr v-for="transaction in data.recent_transactions.slice(0, 6)" :key="transaction.id">
                     <td class="date-cell">{{ formatTransactionDate(transaction.transaction_date) }}</td>
                     <td class="type-cell"><span class="type-pill" :class="transaction.type === 'income' ? 'type-income' : 'type-expense'">{{ transaction.type }}</span></td>
-                    <td class="description-cell">{{ transaction.description || (transaction.type === 'expense' ? transaction.category?.name : '') || transaction.transaction_number }}</td>
+                    <td class="description-cell">{{ richTextToPlain(transaction.description) || (transaction.type === 'expense' ? transaction.category?.name : '') || transaction.transaction_number }}</td>
                     <td class="branch-cell">{{ transaction.branch?.name || transaction.branch?.code || '—' }}</td>
                     <td class="amount-cell">{{ formatMoney(transaction.amount, transaction.currency) }}</td>
                     <td class="status-cell"><span class="status-pill"><Check :size="11" /> {{ formatStatus(transaction.status) }}</span></td>
@@ -221,6 +221,7 @@ import {
 import { useMediaQuery } from '@vueuse/core'
 import type { Branch, DashboardSummary } from '~/types/api'
 import { formatMoney } from '~/utils/money'
+import { richTextToPlain } from '~/utils/richText'
 import { currentMonthRange } from '~/utils/dateRanges'
 
 const { api } = useApi()

@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"html"
 	"time"
 
 	"github.com/cambodia-finance/income-expense/internal/accounting"
 	"github.com/cambodia-finance/income-expense/internal/middleware"
 	"github.com/cambodia-finance/income-expense/internal/models"
+	"github.com/cambodia-finance/income-expense/internal/permissions"
+	"github.com/cambodia-finance/income-expense/internal/richtext"
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
@@ -20,7 +23,18 @@ var (
 	ErrBranchAccessDenied   = errors.New("no access to this branch")
 	ErrCategoryTypeMismatch = errors.New("category type does not match transaction type")
 	ErrCategoryBranch       = errors.New("this category belongs to another branch")
+	ErrNotApprover          = errors.New("only this user's managers can approve or reject it")
+	ErrDescriptionTooLong   = errors.New("description is too long")
 )
+
+// cleanDescription keeps the allowed rich-text subset and enforces the size limit.
+func cleanDescription(in string) (string, error) {
+	out := richtext.Sanitize(in)
+	if len(out) > richtext.MaxHTMLLength {
+		return "", ErrDescriptionTooLong
+	}
+	return out, nil
+}
 
 type TransactionService struct {
 	db      *gorm.DB
@@ -159,6 +173,11 @@ func (s *TransactionService) Create(ctx context.Context, in CreateTransactionInp
 		return nil, fmt.Errorf("generate transaction number: %w", err)
 	}
 
+	description, err := cleanDescription(in.Description)
+	if err != nil {
+		return nil, err
+	}
+
 	txn := models.Transaction{
 		Base:              models.Base{ID: uuid.New()},
 		TransactionNumber: number,
@@ -170,7 +189,7 @@ func (s *TransactionService) Create(ctx context.Context, in CreateTransactionInp
 		Currency:          in.Currency,
 		Amount:            amount,
 		TransactionDate:   txnDate,
-		Description:       in.Description,
+		Description:       description,
 		Counterparty:      in.Counterparty,
 		CreatedByID:       actorID,
 		ApprovedByID:      approvedBy,
@@ -347,7 +366,11 @@ func (s *TransactionService) Update(ctx context.Context, id uuid.UUID, in Update
 		updates["transaction_date"] = d
 	}
 	if in.Description != nil {
-		updates["description"] = *in.Description
+		description, err := cleanDescription(*in.Description)
+		if err != nil {
+			return nil, err
+		}
+		updates["description"] = description
 	}
 	if in.Counterparty != nil {
 		updates["counterparty"] = *in.Counterparty
@@ -489,6 +512,9 @@ func (s *TransactionService) Approve(ctx context.Context, id uuid.UUID, notes st
 	if txn.CreatedByID == actorID {
 		return nil, errors.New("cannot approve your own transaction")
 	}
+	if err := s.assertCanDecide(ctx, txn, actorID); err != nil {
+		return nil, err
+	}
 	now := time.Now()
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(txn).Updates(map[string]interface{}{
@@ -519,6 +545,9 @@ func (s *TransactionService) Reject(ctx context.Context, id uuid.UUID, notes str
 	}
 	if txn.CreatedByID == actorID {
 		return nil, errors.New("cannot reject your own transaction")
+	}
+	if err := s.assertCanDecide(ctx, txn, actorID); err != nil {
+		return nil, err
 	}
 	now := time.Now()
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -579,7 +608,7 @@ func (s *TransactionService) Reverse(ctx context.Context, id uuid.UUID, reason s
 			Currency:          orig.Currency,
 			Amount:            orig.Amount,
 			TransactionDate:   now,
-			Description:       "Reversal of " + orig.TransactionNumber + ": " + reason,
+			Description:       html.EscapeString("Reversal of " + orig.TransactionNumber + ": " + reason),
 			Counterparty:      orig.Counterparty,
 			CreatedByID:       actorID,
 			ApprovedByID:      &actorID,
@@ -601,4 +630,142 @@ func (s *TransactionService) Reverse(ctx context.Context, id uuid.UUID, reason s
 		return nil, err
 	}
 	return s.GetByID(ctx, rev.ID, actorID)
+}
+
+// managersOf returns the assigned managers for each of the given users.
+func (s *TransactionService) managersOf(ctx context.Context, userIDs []uuid.UUID) (map[uuid.UUID][]uuid.UUID, error) {
+	out := map[uuid.UUID][]uuid.UUID{}
+	if len(userIDs) == 0 {
+		return out, nil
+	}
+	var links []models.UserManager
+	if err := s.db.WithContext(ctx).Where("user_id IN ?", userIDs).Find(&links).Error; err != nil {
+		return nil, err
+	}
+	for _, l := range links {
+		out[l.UserID] = append(out[l.UserID], l.ManagerID)
+	}
+	return out, nil
+}
+
+// canDecide: when the creator has assigned managers, only those managers (or someone with
+// full access: owner/admin/Super Admin) may approve or reject; otherwise the permission
+// and branch rules alone apply. Nobody decides on their own transaction.
+func canDecide(creatorID, actorID uuid.UUID, managers []uuid.UUID, actorFull bool) bool {
+	if creatorID == actorID {
+		return false
+	}
+	if len(managers) == 0 || actorFull {
+		return true
+	}
+	for _, m := range managers {
+		if m == actorID {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *TransactionService) assertCanDecide(ctx context.Context, txn *models.Transaction, actorID uuid.UUID) error {
+	managers, err := s.managersOf(ctx, []uuid.UUID{txn.CreatedByID})
+	if err != nil {
+		return err
+	}
+	_, full, err := middleware.GetAuthorizedBranchIDs(s.db, actorID)
+	if err != nil {
+		return err
+	}
+	if !canDecide(txn.CreatedByID, actorID, managers[txn.CreatedByID], full) {
+		return ErrNotApprover
+	}
+	return nil
+}
+
+// Decision says what the actor may do with a pending transaction.
+type Decision struct {
+	CanApprove bool
+	CanReject  bool
+}
+
+// Decisions works out approve/reject rights for the pending items in a list, so the UI only
+// shows buttons the API will accept.
+func (s *TransactionService) Decisions(ctx context.Context, actorID uuid.UUID, items []models.Transaction) (map[uuid.UUID]Decision, error) {
+	out := map[uuid.UUID]Decision{}
+	var creators []uuid.UUID
+	for _, t := range items {
+		if t.Status == models.TxnStatusPending {
+			creators = append(creators, t.CreatedByID)
+		}
+	}
+	if len(creators) == 0 {
+		return out, nil
+	}
+	var actor models.User
+	if err := s.db.WithContext(ctx).Preload("Roles.Permissions").First(&actor, "id = ?", actorID).Error; err != nil {
+		return nil, err
+	}
+	perms := map[string]bool{}
+	for _, r := range actor.Roles {
+		for _, p := range r.Permissions {
+			perms[p.Code] = true
+		}
+	}
+	full := actor.IsSuperAdmin || perms[permissions.BranchesManage]
+	approve := actor.IsSuperAdmin || perms[permissions.TransactionsApprove]
+	reject := actor.IsSuperAdmin || perms[permissions.TransactionsReject]
+	managers, err := s.managersOf(ctx, creators)
+	if err != nil {
+		return nil, err
+	}
+	for _, t := range items {
+		if t.Status != models.TxnStatusPending {
+			continue
+		}
+		ok := canDecide(t.CreatedByID, actorID, managers[t.CreatedByID], full)
+		out[t.ID] = Decision{CanApprove: ok && approve, CanReject: ok && reject}
+	}
+	return out, nil
+}
+
+// CreatorNames maps user IDs to display names for list rows.
+func (s *TransactionService) CreatorNames(ctx context.Context, items []models.Transaction) map[uuid.UUID]string {
+	out := map[uuid.UUID]string{}
+	ids := make([]uuid.UUID, 0, len(items))
+	for _, t := range items {
+		ids = append(ids, t.CreatedByID)
+	}
+	if len(ids) == 0 {
+		return out
+	}
+	var users []models.User
+	if err := s.db.WithContext(ctx).Select("id", "full_name", "username").Where("id IN ?", ids).Find(&users).Error; err == nil {
+		for _, u := range users {
+			name := u.FullName
+			if name == "" {
+				name = u.Username
+			}
+			out[u.ID] = name
+		}
+	}
+	return out
+}
+
+// CanWriteType reports whether the actor may create or edit transactions of this type
+// (used for attachments). Owners/admins/Super Admins always can.
+func (s *TransactionService) CanWriteType(ctx context.Context, actorID uuid.UUID, txnType string) bool {
+	var actor models.User
+	if err := s.db.WithContext(ctx).Preload("Roles.Permissions").First(&actor, "id = ?", actorID).Error; err != nil {
+		return false
+	}
+	if actor.IsSuperAdmin {
+		return true
+	}
+	for _, r := range actor.Roles {
+		for _, p := range r.Permissions {
+			if p.Code == txnType+".create" || p.Code == txnType+".edit" || p.Code == permissions.BranchesManage {
+				return true
+			}
+		}
+	}
+	return false
 }

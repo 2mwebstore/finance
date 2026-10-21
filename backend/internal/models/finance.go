@@ -80,8 +80,13 @@ type Transaction struct {
 	Currency          string          `gorm:"size:3;index;not null" json:"currency"` // USD | KHR
 	Amount            decimal.Decimal `gorm:"type:decimal(19,4);not null" json:"amount"`
 	TransactionDate   time.Time       `gorm:"index;not null" json:"transaction_date"`
-	Description       string          `gorm:"size:1024" json:"description"`
-	Counterparty      string          `gorm:"size:255" json:"counterparty"` // payer or payee
+	Description       string          `gorm:"type:text" json:"description"` // sanitized rich text (HTML)
+	Counterparty      string          `gorm:"size:255" json:"counterparty"` // payer or payee (no longer entered in the app)
+	// One optional image/PDF per transaction, kept in object storage (R2) under AttachmentKey.
+	AttachmentKey  string `gorm:"size:255" json:"-"`
+	AttachmentName string `gorm:"size:255" json:"attachment_name,omitempty"`
+	AttachmentType string `gorm:"size:128" json:"attachment_type,omitempty"`
+	AttachmentSize int64  `gorm:"not null;default:0" json:"attachment_size,omitempty"`
 	CreatedByID       uuid.UUID       `gorm:"type:char(36);index;not null" json:"created_by_id"`
 	ApprovedByID      *uuid.UUID      `gorm:"type:char(36);index" json:"approved_by_id,omitempty"`
 	ApprovedAt        *time.Time      `json:"approved_at,omitempty"`

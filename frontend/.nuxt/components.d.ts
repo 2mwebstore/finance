@@ -14,6 +14,8 @@ type HydrationStrategies = {
 type LazyComponent<T> = DefineComponent<HydrationStrategies, {}, {}, {}, {}, {}, {}, { hydrated: () => void }> & T
 
 
+export const ApprovalDialog: typeof import("../components/ApprovalDialog.vue")['default']
+export const AttachmentViewer: typeof import("../components/AttachmentViewer.vue")['default']
 export const Can: typeof import("../components/Can.vue")['default']
 export const DatePicker: typeof import("../components/DatePicker.vue")['default']
 export const DateRangePicker: typeof import("../components/DateRangePicker.vue")['default']
@@ -23,6 +25,7 @@ export const MetricCard: typeof import("../components/MetricCard.vue")['default'
 export const MoneyInput: typeof import("../components/MoneyInput.vue")['default']
 export const PermissionPanel: typeof import("../components/PermissionPanel.vue")['default']
 export const PinInput: typeof import("../components/PinInput.vue")['default']
+export const RichText: typeof import("../components/RichText.vue")['default']
 export const SearchSelect: typeof import("../components/SearchSelect.vue")['default']
 export const TransactionModal: typeof import("../components/TransactionModal.vue")['default']
 export const NuxtWelcome: typeof import("../node_modules/nuxt/dist/app/components/welcome.vue")['default']
@@ -48,6 +51,8 @@ export const Head: typeof import("../node_modules/nuxt/dist/head/runtime/compone
 export const Html: typeof import("../node_modules/nuxt/dist/head/runtime/components")['Html']
 export const Body: typeof import("../node_modules/nuxt/dist/head/runtime/components")['Body']
 export const NuxtIsland: typeof import("../node_modules/nuxt/dist/app/components/nuxt-island")['default']
+export const LazyApprovalDialog: LazyComponent<typeof import("../components/ApprovalDialog.vue")['default']>
+export const LazyAttachmentViewer: LazyComponent<typeof import("../components/AttachmentViewer.vue")['default']>
 export const LazyCan: LazyComponent<typeof import("../components/Can.vue")['default']>
 export const LazyDatePicker: LazyComponent<typeof import("../components/DatePicker.vue")['default']>
 export const LazyDateRangePicker: LazyComponent<typeof import("../components/DateRangePicker.vue")['default']>
@@ -57,6 +62,7 @@ export const LazyMetricCard: LazyComponent<typeof import("../components/MetricCa
 export const LazyMoneyInput: LazyComponent<typeof import("../components/MoneyInput.vue")['default']>
 export const LazyPermissionPanel: LazyComponent<typeof import("../components/PermissionPanel.vue")['default']>
 export const LazyPinInput: LazyComponent<typeof import("../components/PinInput.vue")['default']>
+export const LazyRichText: LazyComponent<typeof import("../components/RichText.vue")['default']>
 export const LazySearchSelect: LazyComponent<typeof import("../components/SearchSelect.vue")['default']>
 export const LazyTransactionModal: LazyComponent<typeof import("../components/TransactionModal.vue")['default']>
 export const LazyNuxtWelcome: LazyComponent<typeof import("../node_modules/nuxt/dist/app/components/welcome.vue")['default']>

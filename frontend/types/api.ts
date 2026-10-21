@@ -37,7 +37,13 @@ export interface Transaction {
   amount_display: string
   transaction_date: string
   description: string
-  counterparty: string
+  counterparty?: string
+  /** One optional image/PDF (served by GET /transactions/:id/attachment) */
+  attachment?: { name: string; type: string; size: number } | null
+  /** List rows only: whether the signed-in user may approve/reject this pending transaction */
+  can_approve?: boolean
+  can_reject?: boolean
+  created_by?: { id: string; name: string }
   branch?: { id: string; code: string; name: string }
   category?: { id: string; code: string; name: string; type: string }
   payment_method?: { id: string; code: string; name: string }
@@ -129,6 +135,8 @@ export interface Permission {
 export interface AdminUser {
   /** false when a branch-level manager may view but not manage this user */
   can_manage?: boolean
+  /** People who approve or reject this user's pending transactions */
+  managers?: { id: string; username: string; full_name: string }[]
   id: string
   username: string
   email: string
