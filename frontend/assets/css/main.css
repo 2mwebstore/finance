@@ -44,3 +44,19 @@ button { -webkit-tap-highlight-color: transparent; }
 .rich-text-content li { margin: .1em 0; }
 .rich-text-content a { color: var(--app-blue); text-decoration: underline; }
 .rich-text-content b, .rich-text-content strong { font-weight: 700; }
+
+/* Forms inside AppModal (rendered outside .page-content). */
+.app-modal input:not([type=checkbox]):not([type=radio]), .app-modal textarea, .app-modal select { transition: border-color .15s ease, box-shadow .15s ease; }
+.app-modal input:not([type=checkbox]):not([type=radio]):focus, .app-modal textarea:focus, .app-modal select:focus { border-color: #8ab6fa; outline: 0; box-shadow: 0 0 0 3px rgb(37 99 235 / 10%); }
+
+/* Tinted action buttons used in admin lists (Edit, Delete, Approve, …). */
+.action-chip { display: inline-flex; align-items: center; gap: 5px; min-height: 30px; border: 0; border-radius: 8px; padding: 0 10px; font-size: 11px; font-weight: 700; cursor: pointer; transition: background .15s ease, filter .15s ease; }
+.action-chip:disabled { opacity: .55; cursor: not-allowed; }
+.action-edit { color: #1769e8; background: #eaf2ff; }
+.action-edit:hover:not(:disabled) { background: #d9e8ff; }
+.action-pin { color: #5b4bd6; background: #efedff; }
+.action-pin:hover:not(:disabled) { background: #e2deff; }
+.action-danger { color: #c93449; background: #fdecef; }
+.action-danger:hover:not(:disabled) { background: #fbdbe1; }
+.action-success { color: #11815e; background: #e3f6ee; }
+.action-success:hover:not(:disabled) { background: #cfeee1; }

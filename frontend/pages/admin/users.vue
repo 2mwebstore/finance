@@ -2,11 +2,11 @@
   <section class="space-y-4">
     <header class="flex items-center justify-between gap-3">
       <div><p class="text-[10px] font-bold tracking-[0.14em] text-slate-400">ACCESS CONTROL</p><h1 class="text-xl font-bold text-navy">Users</h1></div>
-      <button v-if="canCreate" class="rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white hover:bg-primary-hover" @click="toggleCreate">{{ showCreate ? 'Cancel' : '+ User' }}</button>
+      <button v-if="canCreate" class="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white hover:bg-primary-hover" @click="toggleCreate"><UserPlus :size="16" /> Add user</button>
     </header>
 
-    <form v-if="showCreate" class="space-y-3 rounded-xl border border-border bg-white p-4" @submit.prevent="create">
-      <h2 class="text-sm font-semibold text-navy">Create user</h2>
+    <AppModal v-model="showCreate" form title="Create user" eyebrow="NEW USER" subtitle="Give them a role and a branch. Managers are optional." :busy="saving" width="660px" @submit="create">
+      <template #icon><UserPlus :size="20" /></template>
       <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label class="space-y-1 text-xs font-medium text-muted">Username<input v-model.trim="createForm.username" required minlength="3" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" /></label>
         <label class="space-y-1 text-xs font-medium text-muted">Email<input v-model.trim="createForm.email" type="email" required class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" /></label>
@@ -19,12 +19,15 @@
           <SearchSelect v-model="createForm.manager_ids" :options="managerOptions(null, createForm.branch_id ? [createForm.branch_id] : [])" multiple :disabled="!createForm.branch_id" :placeholder="createForm.branch_id ? 'Anyone with approval rights' : 'Choose a branch first'" search-placeholder="Search people…" aria-label="User managers" />
         </div>
       </div>
-      <p v-if="createError" class="text-sm text-expense">{{ createError }}</p>
-      <button type="submit" :disabled="saving || !createForm.role_code || !createForm.branch_id" class="rounded-lg bg-primary px-4 py-2 text-sm text-white disabled:opacity-60">{{ saving ? 'Creating…' : 'Create user' }}</button>
-    </form>
+      <p v-if="createError" class="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-expense" role="alert">{{ createError }}</p>
+      <template #footer>
+        <button type="button" class="border border-border bg-white text-muted" :disabled="saving" @click="showCreate = false">Cancel</button>
+        <button type="submit" :disabled="saving || !createForm.role_code || !createForm.branch_id" class="bg-primary text-white disabled:opacity-60">{{ saving ? 'Creating…' : 'Create user' }}</button>
+      </template>
+    </AppModal>
 
-    <form v-if="editingUser" class="space-y-3 rounded-xl border border-blue-100 bg-white p-4 shadow-sm" @submit.prevent="saveEdit">
-      <div class="flex items-start justify-between gap-3"><div><h2 class="text-sm font-semibold text-navy">Edit {{ editingUser.username }}</h2><p class="mt-1 text-xs text-muted">Update profile and access details.</p></div><button type="button" class="text-xs font-medium text-muted hover:text-navy" @click="cancelEdit">Cancel</button></div>
+    <AppModal :model-value="!!editingUser" form :title="`Edit ${editingUser?.full_name || ''}`" eyebrow="EDIT USER" :subtitle="editingUser ? `@${editingUser.username}` : ''" :busy="saving" width="660px" @update:model-value="(open) => { if (!open) cancelEdit() }" @submit="saveEdit">
+      <template #icon><UserPen :size="20" /></template>
       <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label class="space-y-1 text-xs font-medium text-muted">Full name<input v-model.trim="editForm.full_name" required minlength="2" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" /></label>
         <label class="space-y-1 text-xs font-medium text-muted">Email<input v-model.trim="editForm.email" type="email" required class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" /></label>
@@ -35,9 +38,12 @@
           <SearchSelect v-model="editForm.manager_ids" :options="managerOptions(editingUser, editForm.branch_ids)" multiple placeholder="Anyone with approval rights" search-placeholder="Search people…" aria-label="User managers" />
         </div>
       </div>
-      <p v-if="editError" class="text-sm text-expense">{{ editError }}</p>
-      <button type="submit" :disabled="saving || (canManageUsers && !isEditingSelf && (!editForm.role_codes.length || (branches.length > 0 && !editForm.branch_ids.length)))" class="rounded-lg bg-primary px-4 py-2 text-sm text-white disabled:opacity-60">{{ saving ? 'Saving…' : 'Save changes' }}</button>
-    </form>
+      <p v-if="editError" class="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-expense" role="alert">{{ editError }}</p>
+      <template #footer>
+        <button type="button" class="border border-border bg-white text-muted" :disabled="saving" @click="cancelEdit">Cancel</button>
+        <button type="submit" :disabled="saving || (canManageUsers && !isEditingSelf && (!editForm.role_codes.length || (branches.length > 0 && !editForm.branch_ids.length)))" class="bg-primary text-white disabled:opacity-60">{{ saving ? 'Saving…' : 'Save changes' }}</button>
+      </template>
+    </AppModal>
 
     <p v-if="notice" class="rounded-lg bg-green-50 px-3 py-2 text-sm text-income">{{ notice }}</p>
     <FilterCard :summary="userFilterSummary" :active="userFiltersActive">
@@ -78,9 +84,9 @@
             <span class="rounded-full px-2 py-1 text-[10px] font-semibold uppercase" :class="item.is_active ? 'bg-green-50 text-income' : 'bg-slate-100 text-muted'">{{ item.is_active ? 'Active' : 'Inactive' }}</span>
             <span v-if="item.is_super_admin" class="text-[10px] font-medium text-primary">Super Admin</span>
             <div class="flex flex-wrap justify-start gap-1.5 sm:justify-end">
-              <button v-if="canEditUser && item.can_manage !== false" class="rounded-md border border-border px-2 py-1 text-[10px] font-medium text-navy hover:bg-canvas" @click="beginEdit(item)">Edit</button>
-              <button v-if="canManageUsers && item.can_manage !== false && item.id !== currentUserId" class="rounded-md border border-border px-2 py-1 text-[10px] font-medium text-primary hover:bg-blue-50" @click="openPasswordChange(item)">Change PIN</button>
-              <button v-if="canManageUsers && item.can_manage !== false && item.id !== currentUserId" class="rounded-md border px-2 py-1 text-[10px] font-medium" :class="item.is_active ? 'border-red-100 text-expense hover:bg-red-50' : 'border-green-100 text-income hover:bg-green-50'" :disabled="saving" @click="toggleActive(item)">{{ item.is_active ? 'Deactivate' : 'Activate' }}</button>
+              <button v-if="canEditUser && item.can_manage !== false" class="action-chip action-edit" @click="beginEdit(item)"><Pencil :size="13" /> Edit</button>
+              <button v-if="canManageUsers && item.can_manage !== false && item.id !== currentUserId" class="action-chip action-pin" @click="openPasswordChange(item)"><KeyRound :size="13" /> Change PIN</button>
+              <button v-if="canManageUsers && item.can_manage !== false && item.id !== currentUserId" class="action-chip" :class="item.is_active ? 'action-danger' : 'action-success'" :disabled="saving" @click="toggleActive(item)"><Power :size="13" /> {{ item.is_active ? 'Deactivate' : 'Activate' }}</button>
             </div>
           </div>
         </div>
@@ -108,7 +114,7 @@
 </template>
 
 <script setup lang="ts">
-import { RotateCcw } from 'lucide-vue-next'
+import { KeyRound, Pencil, Power, RotateCcw, UserPen, UserPlus } from 'lucide-vue-next'
 import type { AdminUser, Branch, Role } from '~/types/api'
 
 const { api } = useApi()
@@ -211,8 +217,8 @@ async function load() {
 }
 
 function toggleCreate() {
-  showCreate.value = !showCreate.value
   createError.value = ''
+  showCreate.value = true
 }
 
 function openPasswordChange(item: AdminUser) {

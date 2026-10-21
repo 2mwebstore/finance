@@ -14,6 +14,7 @@ type HydrationStrategies = {
 type LazyComponent<T> = DefineComponent<HydrationStrategies, {}, {}, {}, {}, {}, {}, { hydrated: () => void }> & T
 
 interface _GlobalComponents {
+  AppModal: typeof import("../../components/AppModal.vue")['default']
   ApprovalDialog: typeof import("../../components/ApprovalDialog.vue")['default']
   AttachmentViewer: typeof import("../../components/AttachmentViewer.vue")['default']
   Can: typeof import("../../components/Can.vue")['default']
@@ -51,6 +52,7 @@ interface _GlobalComponents {
   Html: typeof import("../../node_modules/nuxt/dist/head/runtime/components")['Html']
   Body: typeof import("../../node_modules/nuxt/dist/head/runtime/components")['Body']
   NuxtIsland: typeof import("../../node_modules/nuxt/dist/app/components/nuxt-island")['default']
+  LazyAppModal: LazyComponent<typeof import("../../components/AppModal.vue")['default']>
   LazyApprovalDialog: LazyComponent<typeof import("../../components/ApprovalDialog.vue")['default']>
   LazyAttachmentViewer: LazyComponent<typeof import("../../components/AttachmentViewer.vue")['default']>
   LazyCan: LazyComponent<typeof import("../../components/Can.vue")['default']>

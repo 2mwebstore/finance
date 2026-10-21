@@ -6,16 +6,22 @@
         <h1 class="text-xl font-bold text-navy">Branches</h1>
         <p class="mt-1 text-xs text-muted">Create, view, update, and archive business locations.</p>
       </div>
-      <button v-if="canCreate" class="rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white hover:bg-primary-hover" @click="openCreate">
-        {{ showCreate ? 'Cancel' : '+ Branch' }}
+      <button v-if="canCreate" class="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white hover:bg-primary-hover" @click="openCreate">
+        <Plus :size="16" /> Add branch
       </button>
     </header>
 
-    <form v-if="showCreate || editing" class="space-y-3 rounded-xl border border-border bg-white p-4" @submit.prevent="save">
-      <div class="flex items-start justify-between gap-3">
-        <div><h2 class="text-sm font-semibold text-navy">{{ editing ? `Edit ${editing.name}` : 'Create branch' }}</h2><p class="mt-1 text-xs text-muted">Update the location details used on transactions.</p></div>
-        <button type="button" class="text-xs font-medium text-muted" :disabled="saving" @click="closeForm">Cancel</button>
-      </div>
+    <AppModal
+      :model-value="showCreate || !!editing"
+      form
+      :title="editing ? `Edit ${editing.name}` : 'Create branch'"
+      :eyebrow="editing ? 'EDIT BRANCH' : 'NEW BRANCH'"
+      subtitle="Location details shown on transactions and reports."
+      :busy="saving"
+      @update:model-value="(open) => { if (!open) closeForm() }"
+      @submit="save"
+    >
+      <template #icon><Building2 :size="20" /></template>
       <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label class="space-y-1 text-xs font-medium text-muted">Branch code<input v-model.trim="form.code" required minlength="2" maxlength="32" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" placeholder="PP-01" /></label>
         <label class="space-y-1 text-xs font-medium text-muted">Branch name<input v-model.trim="form.name" required minlength="2" maxlength="128" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" placeholder="Phnom Penh HQ" /></label>
@@ -23,9 +29,12 @@
         <label class="space-y-1 text-xs font-medium text-muted">Phone<input v-model.trim="form.phone" maxlength="32" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" /></label>
         <label class="space-y-1 text-xs font-medium text-muted sm:col-span-2">Email<input v-model.trim="form.email" type="email" maxlength="255" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" /></label>
       </div>
-      <p v-if="formError" class="text-sm text-expense" role="alert">{{ formError }}</p>
-      <button type="submit" :disabled="saving" class="rounded-lg bg-primary px-4 py-2 text-sm text-white disabled:opacity-60">{{ saving ? 'Saving…' : editing ? 'Save changes' : 'Create branch' }}</button>
-    </form>
+      <p v-if="formError" class="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-expense" role="alert">{{ formError }}</p>
+      <template #footer>
+        <button type="button" class="border border-border bg-white text-muted" :disabled="saving" @click="closeForm">Cancel</button>
+        <button type="submit" :disabled="saving" class="bg-primary text-white disabled:opacity-60">{{ saving ? 'Saving…' : editing ? 'Save changes' : 'Create branch' }}</button>
+      </template>
+    </AppModal>
 
     <p v-if="notice" class="rounded-lg bg-green-50 px-3 py-2 text-sm text-income" role="status">{{ notice }}</p>
     <div v-if="loading" class="text-sm text-muted">Loading…</div>
@@ -43,9 +52,9 @@
           </p>
         </div>
         <div v-if="canEdit || canManage" class="flex flex-wrap gap-2 sm:shrink-0 sm:justify-end">
-          <button v-if="canEdit" type="button" class="rounded-md border border-border px-3 py-1.5 text-xs font-medium text-navy hover:bg-canvas" @click="openEdit(branch)">Edit</button>
-          <button v-if="canManage && branch.is_active" type="button" class="rounded-md border border-red-100 px-3 py-1.5 text-xs font-medium text-expense hover:bg-red-50" @click="confirmDelete(branch)">Delete</button>
-          <button v-else-if="canManage" type="button" class="rounded-md border border-green-100 px-3 py-1.5 text-xs font-medium text-income hover:bg-green-50" :disabled="saving" @click="setActive(branch, true)">Restore</button>
+          <button v-if="canEdit" type="button" class="action-chip action-edit" @click="openEdit(branch)"><Pencil :size="13" /> Edit</button>
+          <button v-if="canManage && branch.is_active" type="button" class="action-chip action-danger" @click="confirmDelete(branch)"><Trash2 :size="13" /> Delete</button>
+          <button v-else-if="canManage" type="button" class="action-chip action-success" :disabled="saving" @click="setActive(branch, true)"><RotateCcw :size="13" /> Restore</button>
         </div>
       </li>
       <li v-if="!items.length" class="p-6 text-center text-sm text-muted">No branches</li>
@@ -66,6 +75,7 @@
 </template>
 
 <script setup lang="ts">
+import { Building2, Pencil, Plus, RotateCcw, Trash2 } from 'lucide-vue-next'
 import type { Branch } from '~/types/api'
 
 const { api } = useApi()
@@ -104,10 +114,6 @@ function resetForm() {
 }
 
 function openCreate() {
-  if (showCreate.value) {
-    closeForm()
-    return
-  }
   editing.value = null
   resetForm()
   showCreate.value = true

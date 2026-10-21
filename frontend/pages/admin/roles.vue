@@ -17,8 +17,8 @@
             <p v-if="role.description" class="mt-1 text-xs text-muted">{{ role.description }}</p>
           </div>
           <div v-if="canManage" class="flex shrink-0 gap-1.5">
-            <button class="rounded-md border border-border px-2.5 py-1.5 text-[10px] font-medium text-navy hover:bg-canvas" @click="openEdit(role)"><Pencil :size="12" class="mr-1 inline" />Edit</button>
-            <button v-if="!role.is_system" class="rounded-md border border-red-100 px-2.5 py-1.5 text-[10px] font-medium text-expense hover:bg-red-50" @click="deleteTarget = role"><Trash2 :size="12" class="mr-1 inline" />Delete</button>
+            <button class="action-chip action-edit" @click="openEdit(role)"><Pencil :size="13" /> Edit</button>
+            <button v-if="!role.is_system" class="action-chip action-danger" @click="deleteTarget = role"><Trash2 :size="13" /> Delete</button>
           </div>
         </div>
         <div v-if="role.permissions?.length" class="mt-3 flex flex-wrap gap-1.5">

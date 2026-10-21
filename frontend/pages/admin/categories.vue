@@ -39,7 +39,7 @@
           <p class="mt-1 font-mono text-[10px] text-muted">{{ category.code }} · {{ category.type }}</p>
           <p v-if="category.description" class="mt-1 text-xs text-muted">{{ category.description }}</p>
         </div>
-        <button v-if="canEdit(category)" class="inline-flex shrink-0 items-center gap-1 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-navy hover:bg-canvas" @click="openEdit(category)"><Pencil :size="13" /> Edit</button>
+        <button v-if="canEdit(category)" class="action-chip action-edit shrink-0" @click="openEdit(category)"><Pencil :size="13" /> Edit</button>
       </article>
       <div v-if="!categories.length" class="p-8 text-center text-sm text-muted">No expense categories yet. Add a category to make it available on expense forms.</div>
       <div v-else-if="!visibleCategories.length" class="p-8 text-center text-sm text-muted">No categories match these filters.</div>

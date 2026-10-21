@@ -99,10 +99,15 @@
             </div>
           </div>
 
-          <label v-if="mode === 'create'" class="pending-option">
+          <label v-if="mode === 'create' && canApprove" class="pending-option">
             <span><strong>Submit for approval</strong><small>This transaction stays pending until approved.</small></span>
             <input v-model="form.pending" type="checkbox" role="switch" class="pending-switch" />
           </label>
+          <!-- Without approve permission the API always saves it as pending. -->
+          <div v-else-if="mode === 'create'" class="pending-option is-locked" role="note">
+            <span class="pending-icon"><Clock3 :size="16" /></span>
+            <span><strong>Sent for approval</strong><small>It stays pending until a manager approves it.</small></span>
+          </div>
 
           <p v-if="error" class="form-error" role="alert">{{ error }}</p>
         </div>
@@ -119,7 +124,7 @@
 </template>
 
 <script setup lang="ts">
-import { ArrowDownLeft, ArrowUpRight, FileText, ImageIcon, Paperclip, X } from 'lucide-vue-next'
+import { ArrowDownLeft, ArrowUpRight, Clock3, FileText, ImageIcon, Paperclip, X } from 'lucide-vue-next'
 import type { Branch, Category, Transaction } from '~/types/api'
 import { richTextToPlain } from '~/utils/richText'
 
@@ -143,7 +148,7 @@ const emit = defineEmits<{
 
 const { api } = useApi()
 const { user } = useAuth()
-const { canViewBranches } = usePermissions()
+const { canViewBranches, canApprove } = usePermissions()
 const branches = ref<Branch[]>([])
 const categories = ref<Category[]>([])
 const form = reactive({
@@ -346,7 +351,7 @@ async function submit() {
           branch_id: form.branch_id,
           ...(transactionType.value === 'expense' ? { category_id: form.category_id } : {}),
           description: form.description,
-          pending: form.pending,
+          pending: form.pending || !canApprove.value,
         },
       })
       createdTransaction.value = saved
@@ -453,6 +458,10 @@ onMounted(() => {
 .pending-option > span { display: flex; flex-direction: column; gap: 3px; }
 .pending-option strong { color: #2c4468; font-size: 13px; font-weight: 700; }
 .pending-option small { color: #7b8ca5; font-size: 12px; }
+.pending-option.is-locked { justify-content: flex-start; gap: 12px; border-color: #f6dfb8; background: #fff8ec; cursor: default; }
+.pending-option.is-locked strong { color: #8a5310; }
+.pending-option.is-locked small { color: #9b7440; }
+.pending-icon { display: grid; flex: 0 0 auto; width: 32px; height: 32px; place-items: center; border-radius: 9px; color: #b86e0c; background: #fdecd0; }
 .pending-switch { position: relative; flex: 0 0 auto; width: 42px; height: 24px; margin: 0; border-radius: 999px; background: #cfd9e6; cursor: pointer; appearance: none; transition: background .15s ease; }
 .pending-switch::before { content: ''; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgb(16 40 80 / 25%); transition: transform .15s ease; }
 .pending-switch:checked { background: #1769e8; }

@@ -160,7 +160,8 @@ func (s *TransactionService) Create(ctx context.Context, in CreateTransactionInp
 	status := models.TxnStatusApproved
 	var approvedBy *uuid.UUID
 	var approvedAt *time.Time
-	if in.Pending {
+	// People who can't approve always submit for approval, whatever the request says.
+	if in.Pending || !s.canApproveTransactions(ctx, actorID) {
 		status = models.TxnStatusPending
 	} else {
 		approvedBy = &actorID
@@ -763,6 +764,25 @@ func (s *TransactionService) CanWriteType(ctx context.Context, actorID uuid.UUID
 	for _, r := range actor.Roles {
 		for _, p := range r.Permissions {
 			if p.Code == txnType+".create" || p.Code == txnType+".edit" || p.Code == permissions.BranchesManage {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// canApproveTransactions: Super Admin or anyone holding transactions.approve.
+func (s *TransactionService) canApproveTransactions(ctx context.Context, actorID uuid.UUID) bool {
+	var actor models.User
+	if err := s.db.WithContext(ctx).Preload("Roles.Permissions").First(&actor, "id = ?", actorID).Error; err != nil {
+		return false
+	}
+	if actor.IsSuperAdmin {
+		return true
+	}
+	for _, r := range actor.Roles {
+		for _, p := range r.Permissions {
+			if p.Code == permissions.TransactionsApprove {
 				return true
 			}
 		}

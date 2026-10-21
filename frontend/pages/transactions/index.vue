@@ -83,15 +83,15 @@
           <small>{{ transaction.type }}</small>
         </div>
         <div class="row-actions">
+          <button v-if="transaction.status === 'pending' && transaction.can_approve" class="row-action approve-action" :aria-label="`Approve ${transaction.transaction_number}`" title="Approve" @click="openApproval(transaction, 'approve')"><Check :size="16" :stroke-width="2.6" /></button>
+          <button v-if="transaction.status === 'pending' && transaction.can_reject" class="row-action reject-action" :aria-label="`Reject ${transaction.transaction_number}`" title="Reject" @click="openApproval(transaction, 'reject')"><X :size="16" :stroke-width="2.6" /></button>
           <button v-if="canEdit(transaction)" class="row-action edit-action" :aria-label="`Edit ${transaction.transaction_number}`" title="Edit" @click="openEdit(transaction)"><Pencil :size="15" /></button>
           <button v-if="canDelete(transaction)" class="row-action delete-action" :aria-label="`Delete ${transaction.transaction_number}`" title="Delete" @click="openDelete(transaction)"><Trash2 :size="15" /></button>
         </div>
-        <div v-if="transaction.status === 'pending' && (transaction.can_approve || transaction.can_reject)" class="approval-bar">
-          <span class="approval-bar-copy"><Clock3 :size="14" /> Waiting for your approval<template v-if="transaction.created_by?.name"> · by {{ transaction.created_by.name }}</template></span>
-          <button v-if="transaction.can_reject" type="button" class="approval-reject" @click="openApproval(transaction, 'reject')"><X :size="15" /> Reject</button>
-          <button v-if="transaction.can_approve" type="button" class="approval-approve" @click="openApproval(transaction, 'approve')"><Check :size="15" /> Approve</button>
-        </div>
-        <p v-else-if="transaction.status === 'pending' && transaction.created_by?.name" class="pending-note"><Clock3 :size="13" /> Waiting for approval · by {{ transaction.created_by.name }}</p>
+        <p v-if="transaction.status === 'pending'" class="pending-note" :class="{ 'is-yours': transaction.can_approve || transaction.can_reject }">
+          <Clock3 :size="13" />
+          {{ transaction.can_approve || transaction.can_reject ? 'Waiting for your approval' : 'Waiting for approval' }}<template v-if="transaction.created_by?.name"> · by {{ transaction.created_by.name }}</template>
+        </p>
       </article>
     </div>
 
@@ -453,13 +453,8 @@ onMounted(load)
 .transaction-row { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; min-width: 0; padding: 14px 16px; border-bottom: 1px solid #edf1f7; transition: background .15s ease; }
 .attachment-pill { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 4px; border: 1px solid #d6e4fb; border-radius: 999px; padding: 3px 9px; color: #1769e8; background: #f2f7ff; font-size: 11px; font-weight: 700; cursor: pointer; transition: background .15s ease; }
 .attachment-pill:hover { background: #e4eeff; }
-.approval-bar { display: flex; flex: 1 0 100%; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: -2px; border: 1px solid #f6e2b4; border-radius: 11px; padding: 8px 8px 8px 12px; background: #fffaf0; }
-.approval-bar-copy { display: inline-flex; flex: 1; min-width: 0; align-items: center; gap: 6px; color: #8a5a06; font-size: 12px; font-weight: 600; }
-.approval-bar button { display: inline-flex; min-height: 34px; align-items: center; gap: 5px; border-radius: 9px; padding: 0 12px; font-size: 13px; font-weight: 700; cursor: pointer; }
-.approval-reject { border: 1px solid #f3cdd3; color: #c93449; background: #fff; }
-.approval-approve { border: 0; color: #fff; background: #13966e; box-shadow: 0 3px 8px rgb(19 150 110 / 22%); }
-.approval-bar button:hover { filter: brightness(.96); }
 .pending-note { display: flex; flex: 1 0 100%; align-items: center; gap: 6px; margin: -4px 0 0; color: #9a6c12; font-size: 12px; }
+.pending-note.is-yours { width: fit-content; flex-basis: auto; margin-left: 56px; border-radius: 999px; padding: 4px 10px; background: #fff6e0; font-weight: 650; }
 .transaction-row:last-child { border-bottom: 0; }
 .transaction-row:hover { background: #fbfcfe; }
 .transaction-type-icon { display: flex; flex: 0 0 auto; align-items: center; justify-content: center; width: 42px; height: 42px; border-radius: 12px; }
@@ -482,11 +477,17 @@ onMounted(load)
 .income-text { color: #12865f; }
 .expense-text { color: #d94357; }
 .row-actions { display: flex; flex: 0 0 auto; gap: 5px; }
-.row-action { display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; border: 1px solid transparent; border-radius: 9px; background: transparent; cursor: pointer; }
-.edit-action { color: #4773b6; }
-.edit-action:hover { border-color: #dce9fc; background: #f0f6ff; }
-.delete-action { color: #bd6872; }
-.delete-action:hover { border-color: #f7dce0; color: #c93449; background: #fff2f4; }
+/* Every row action has a tinted background so it reads as a button. */
+.row-action { display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; border: 0; border-radius: 10px; cursor: pointer; transition: background .15s ease, transform .12s ease; }
+.row-action:active { transform: scale(.92); }
+.edit-action { color: #1769e8; background: #eaf2ff; }
+.edit-action:hover { background: #d9e8ff; }
+.delete-action { color: #c93449; background: #fdecef; }
+.delete-action:hover { background: #fbdbe1; }
+.approve-action { color: #fff; background: #13966e; box-shadow: 0 3px 8px rgb(19 150 110 / 25%); }
+.approve-action:hover { background: #0f8562; }
+.reject-action { color: #c2410c; background: #fff1e6; }
+.reject-action:hover { background: #ffe2cc; }
 .list-state { display: flex; align-items: center; justify-content: center; gap: 9px; min-height: 170px; border: 1px solid #e2eaf4; border-radius: 14px; padding: 24px; color: #8090a7; background: #fff; font-size: 12px; text-align: center; }
 .mini-spinner { width: 16px; height: 16px; border: 2px solid #dbe8f8; border-top-color: #2678ed; border-radius: 50%; animation: spin .7s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -518,11 +519,11 @@ onMounted(load)
   .transaction-meta span { max-width: 130px; }
   .transaction-amount { flex-basis: auto; margin-left: auto; padding-top: 1px; }
   .transaction-amount > span { font-size: 13px; }
-  .row-actions { align-self: center; flex-direction: column; }
-  .approval-bar { padding: 10px; }
-  .approval-bar-copy { flex: 1 0 100%; }
-  .approval-bar button { flex: 1; justify-content: center; min-height: 40px; }
-  .row-action { width: 32px; height: 32px; }
+  /* Up to four actions: a 2×2 grid keeps rows compact on phones. */
+  .row-actions { display: grid; align-self: center; grid-template-columns: repeat(2, 32px); gap: 5px; }
+  .row-actions > :only-child, .row-actions:has(> :nth-child(2):last-child) { grid-template-columns: 32px; }
+        .row-action { width: 32px; height: 32px; }
+  .pending-note.is-yours { margin-left: 46px; }
 }
 @media (max-width: 420px) {
   .transaction-meta span:nth-of-type(1), .transaction-meta i:nth-of-type(1) { display: none; }

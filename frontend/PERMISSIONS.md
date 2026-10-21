@@ -50,3 +50,6 @@ and access to the branch. Nobody can approve their own transaction or choose the
 A manager must have approve or reject permission and work in one of the user's branches (owners/admins
 always qualify). The transactions list returns `can_approve` / `can_reject` per row, so Approve/Reject
 buttons only appear for people the API will accept.
+
+Users without `transactions.approve` can't post approved transactions: whatever they send, the API saves
+their new transactions as **pending**, and the Add form shows "Sent for approval" instead of the switch.
