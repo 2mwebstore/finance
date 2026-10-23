@@ -10,6 +10,7 @@ import (
 	"github.com/cambodia-finance/income-expense/internal/database"
 	"github.com/cambodia-finance/income-expense/internal/middleware"
 	"github.com/cambodia-finance/income-expense/internal/routes"
+	"github.com/cambodia-finance/income-expense/internal/storage"
 	"github.com/gin-gonic/gin"
 )
 
@@ -105,14 +106,22 @@ func main() {
 		c.Next()
 	})
 
-	// Daily database backups (kept BACKUP_DIR, sent to Telegram); settings live in the admin page.
-	backups, err := backup.NewService(db, cfg.BackupDir, cfg.Timezone, cfg.AppName)
+	// Attachment files (R2, or local disk in development).
+	store, err := storage.NewFromEnv()
+	if err != nil {
+		log.Fatalf("storage: %v", err)
+	}
+	log.Printf("attachments: using %s storage", store.Kind())
+
+	// Daily backups of the database and attachment files (kept in BACKUP_DIR, sent to Telegram);
+	// settings live in the admin page.
+	backups, err := backup.NewService(db, store, cfg.BackupDir, cfg.Timezone, cfg.AppName)
 	if err != nil {
 		log.Fatalf("backups: %v", err)
 	}
 	backups.StartScheduler(context.Background())
 
-	routes.Setup(r, db, cfg, backups)
+	routes.Setup(r, db, cfg, store, backups)
 
 	port := cfg.AppPort
 	if port == "" {

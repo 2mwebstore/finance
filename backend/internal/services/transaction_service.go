@@ -805,18 +805,100 @@ func (s *TransactionService) Decisions(ctx context.Context, actorID uuid.UUID, i
 	return out, nil
 }
 
-// CreatorNames maps user IDs to display names for list rows.
-func (s *TransactionService) CreatorNames(ctx context.Context, items []models.Transaction) map[uuid.UUID]string {
-	out := map[uuid.UUID]string{}
-	ids := make([]uuid.UUID, 0, len(items))
-	for _, t := range items {
-		ids = append(ids, t.CreatedByID)
+// Person is a user as list rows show them.
+type Person struct {
+	ID   uuid.UUID `json:"id"`
+	Name string    `json:"name"`
+}
+
+// Outcome is the last decision on a transaction: who approved, rejected or deleted (voided) it.
+type Outcome struct {
+	Action string    `json:"action"` // approved | rejected | voided
+	By     Person    `json:"by"`
+	At     time.Time `json:"at"`
+	Notes  string    `json:"notes,omitempty"` // approval note, rejection or deletion reason
+}
+
+// People says who entered each listed transaction and who decided on it.
+type People struct {
+	CreatedBy Person
+	Outcome   *Outcome
+}
+
+// People works out the created-by and approved/rejected/deleted-by details for list rows.
+func (s *TransactionService) People(ctx context.Context, items []models.Transaction) map[uuid.UUID]People {
+	out := map[uuid.UUID]People{}
+	if len(items) == 0 {
+		return out
 	}
-	if len(ids) == 0 {
+	userIDs := map[uuid.UUID]bool{}
+	var decided []uuid.UUID
+	for _, t := range items {
+		userIDs[t.CreatedByID] = true
+		if t.ApprovedByID != nil {
+			userIDs[*t.ApprovedByID] = true
+		}
+		if t.VoidedByID != nil {
+			userIDs[*t.VoidedByID] = true
+		}
+		if t.Status == models.TxnStatusApproved || t.Status == models.TxnStatusRejected {
+			decided = append(decided, t.ID)
+		}
+	}
+	// The latest approve/reject record per transaction (rejections are only recorded there).
+	latest := map[uuid.UUID]models.TransactionApproval{}
+	if len(decided) > 0 {
+		var rows []models.TransactionApproval
+		if err := s.db.WithContext(ctx).Where("transaction_id IN ? AND action IN ?", decided, []string{"approve", "reject"}).
+			Order("created_at DESC").Find(&rows).Error; err == nil {
+			for _, r := range rows {
+				if _, seen := latest[r.TransactionID]; !seen {
+					latest[r.TransactionID] = r
+					userIDs[r.ActorID] = true
+				}
+			}
+		}
+	}
+	names := s.userNames(ctx, userIDs)
+	person := func(id uuid.UUID) Person { return Person{ID: id, Name: names[id]} }
+	for _, t := range items {
+		p := People{CreatedBy: person(t.CreatedByID)}
+		record, hasRecord := latest[t.ID]
+		switch {
+		case t.Status == models.TxnStatusVoided && t.VoidedByID != nil:
+			o := &Outcome{Action: "voided", By: person(*t.VoidedByID), Notes: t.VoidReason}
+			if t.VoidedAt != nil {
+				o.At = *t.VoidedAt
+			}
+			p.Outcome = o
+		case t.Status == models.TxnStatusRejected && hasRecord && record.Action == "reject":
+			p.Outcome = &Outcome{Action: "rejected", By: person(record.ActorID), At: record.CreatedAt, Notes: record.Notes}
+		case t.Status == models.TxnStatusApproved && t.ApprovedByID != nil:
+			o := &Outcome{Action: "approved", By: person(*t.ApprovedByID)}
+			if t.ApprovedAt != nil {
+				o.At = *t.ApprovedAt
+			}
+			if hasRecord && record.Action == "approve" {
+				o.Notes = record.Notes
+			}
+			p.Outcome = o
+		}
+		out[t.ID] = p
+	}
+	return out
+}
+
+func (s *TransactionService) userNames(ctx context.Context, ids map[uuid.UUID]bool) map[uuid.UUID]string {
+	out := map[uuid.UUID]string{}
+	list := make([]uuid.UUID, 0, len(ids))
+	for id := range ids {
+		list = append(list, id)
+	}
+	if len(list) == 0 {
 		return out
 	}
 	var users []models.User
-	if err := s.db.WithContext(ctx).Select("id", "full_name", "username").Where("id IN ?", ids).Find(&users).Error; err == nil {
+	if err := s.db.WithContext(ctx).Unscoped().Select("id", "full_name", "username").Where("id IN ?", list).Find(&users).Error; err == nil {
 		for _, u := range users {
 			name := u.FullName
 			if name == "" {

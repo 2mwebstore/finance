@@ -46,6 +46,13 @@ export function filesOfStage(files: TransactionAttachment[] | undefined, stage: 
   return (files || []).filter(file => (file.stage || 'submitted') === stage)
 }
 
+export interface TransactionOutcome {
+  action: 'approved' | 'rejected' | 'voided'
+  by: { id: string; name: string }
+  at: string
+  notes?: string
+}
+
 export interface Transaction {
   id: string
   transaction_number: string
@@ -66,6 +73,8 @@ export interface Transaction {
   can_approve?: boolean
   can_reject?: boolean
   created_by?: { id: string; name: string }
+  /** List rows only: who approved, rejected or deleted it, when, and their note or reason (null while pending). */
+  outcome?: TransactionOutcome | null
   created_at?: string
   branch?: { id: string; code: string; name: string }
   category?: { id: string; code: string; name: string; type: string }

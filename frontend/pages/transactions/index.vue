@@ -82,6 +82,16 @@
             <strong>{{ isMyDecision(transaction) ? 'Needs your approval' : 'Waiting for approval' }}</strong>
             <span v-if="pendingSource(transaction)" class="pending-by">{{ pendingSource(transaction) }}</span>
           </p>
+          <!-- Who entered it, and who approved, rejected or deleted it. -->
+          <p v-else-if="transaction.created_by?.name" class="people-line" :class="transaction.outcome ? `is-${transaction.outcome.action}` : ''">
+            <span class="people-created"><UserRound :size="12" :stroke-width="2.4" aria-hidden="true" />{{ createdText(transaction) }}</span>
+            <span v-if="outcomeText(transaction)" class="people-outcome" :title="outcomeTitle(transaction)">
+              <Check v-if="transaction.outcome?.action === 'approved'" :size="12" :stroke-width="2.8" aria-hidden="true" />
+              <X v-else-if="transaction.outcome?.action === 'rejected'" :size="12" :stroke-width="2.8" aria-hidden="true" />
+              <Trash2 v-else :size="12" :stroke-width="2.4" aria-hidden="true" />
+              {{ outcomeText(transaction) }}
+            </span>
+          </p>
         </div>
         <div class="transaction-amount" :class="transaction.type === 'income' ? 'income-text' : 'expense-text'">
           <span>{{ transaction.type === 'income' ? '+' : '−' }}{{ formatMoney(transaction.amount, transaction.currency) }}</span>
@@ -152,7 +162,7 @@
 </template>
 
 <script setup lang="ts">
-import { ArrowDownLeft, ArrowUpRight, Check, CircleDollarSign, Clock3, FileText, ImageIcon, Pencil, Plus, ReceiptText, RotateCcw, Trash2, X } from 'lucide-vue-next'
+import { ArrowDownLeft, ArrowUpRight, Check, CircleDollarSign, Clock3, FileText, ImageIcon, Pencil, Plus, ReceiptText, RotateCcw, Trash2, UserRound, X } from 'lucide-vue-next'
 import { useIntersectionObserver, useMediaQuery } from '@vueuse/core'
 import type { Transaction } from '~/types/api'
 import { formatMoney } from '~/utils/money'
@@ -262,6 +272,35 @@ function timeAgo(value?: string) {
 
 function isMyDecision(transaction: Transaction) {
   return !!(transaction.can_approve || transaction.can_reject)
+}
+
+function who(person?: { id: string; name: string }) {
+  if (!person?.name) return 'someone'
+  return person.id === user.value?.id ? 'you' : person.name
+}
+
+// "Created by Dara Cashier", or "Created & approved by Sokha" when the same person did both.
+function createdText(transaction: Transaction) {
+  const outcome = transaction.outcome
+  if (outcome?.action === 'approved' && outcome.by.id === transaction.created_by?.id) return `Created & approved by ${who(transaction.created_by)}`
+  return `Created by ${who(transaction.created_by)}`
+}
+
+// "Approved by Sokha", "Rejected by Sokha: “no receipt”", "Deleted by Sokha: “duplicate”".
+function outcomeText(transaction: Transaction) {
+  const outcome = transaction.outcome
+  if (!outcome || (outcome.action === 'approved' && outcome.by.id === transaction.created_by?.id)) return ''
+  const verb = { approved: 'Approved', rejected: 'Rejected', voided: 'Deleted' }[outcome.action]
+  const reason = outcome.action !== 'approved' && outcome.notes ? `: “${outcome.notes}”` : ''
+  return `${verb} by ${who(outcome.by)}${reason}`
+}
+
+function outcomeTitle(transaction: Transaction) {
+  const outcome = transaction.outcome
+  if (!outcome) return ''
+  const date = new Date(outcome.at)
+  const when = Number.isNaN(date.valueOf()) ? '' : ` on ${new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }).format(date)}`
+  return `${outcomeText(transaction) || createdText(transaction)}${when}${outcome.notes && outcome.action === 'approved' ? ` · Note: ${outcome.notes}` : ''}`
 }
 
 // "by Dara Cashier · 2 h ago" ("you" for your own submissions).
@@ -540,6 +579,13 @@ onMounted(load)
 .pending-hint strong { flex: 0 0 auto; font-weight: 700; }
 .pending-by { overflow: hidden; color: #9a8a6c; text-overflow: ellipsis; }
 .pending-by::before { content: '·'; margin-right: 5px; color: #c9b890; }
+.people-line { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; min-width: 0; margin: 5px 0 0; color: #8294b0; font-size: 11px; line-height: 1.35; }
+.people-line > span { display: inline-flex; min-width: 0; align-items: center; gap: 4px; }
+.people-line svg { flex: 0 0 auto; }
+.people-outcome { overflow: hidden; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.people-line.is-approved .people-outcome { color: #14835f; }
+.people-line.is-rejected .people-outcome { color: #bd3e50; }
+.people-line.is-voided .people-outcome { color: #8a96a8; }
 .pending-hint.is-yours { color: #c2570c; }
 .pending-hint.is-yours strong { color: #b4480a; }
 .row-footer { display: contents; }
@@ -617,6 +663,10 @@ onMounted(load)
   .amount-date { display: block; color: #8796ab; font-size: 11px; white-space: nowrap; }
   /* Narrow column: "by … · time" drops under the status, lined up with its text. */
   .pending-hint { flex-wrap: wrap; row-gap: 2px; margin-top: 6px; font-size: 11.5px; }
+  /* No hover on phones, so show the whole reason instead of cutting it off. */
+  .people-line { margin-top: 6px; font-size: 11.5px; }
+  .people-outcome { align-items: flex-start; white-space: normal; overflow-wrap: anywhere; }
+  .people-outcome svg { margin-top: 2px; }
   .pending-by { flex: 1 0 100%; padding-left: 17px; white-space: nowrap; }
   .pending-by::before { content: none; }
   .row-footer { display: flex; grid-column: 2 / -1; grid-row: 2; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; }

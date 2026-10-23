@@ -1,7 +1,6 @@
 package routes
 
 import (
-	"log"
 	"net/http"
 
 	"github.com/cambodia-finance/income-expense/internal/audit"
@@ -18,7 +17,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config, backups *backup.Service) {
+func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config, store storage.Store, backups *backup.Service) {
 	authSvc := auth.NewService(db, cfg)
 	tokenSvc := auth.NewTokenService(cfg)
 	auditSvc := audit.NewService(db)
@@ -40,11 +39,6 @@ func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config, backups *backup.Servi
 	roleCtrl := controllers.NewRoleController(roleSvc)
 	catCtrl := controllers.NewCategoryController(catSvc, db)
 	pmCtrl := controllers.NewPaymentMethodController(pmSvc)
-	store, err := storage.NewFromEnv()
-	if err != nil {
-		log.Fatalf("storage: %v", err)
-	}
-	log.Printf("attachments: using %s storage", store.Kind())
 	attachmentSvc := services.NewAttachmentService(db, txnSvc, store)
 	txnCtrl := controllers.NewTransactionController(txnSvc, attachmentSvc, auditSvc)
 	reportCtrl := controllers.NewReportController(reportSvc, auditSvc)

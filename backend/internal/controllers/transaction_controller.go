@@ -114,14 +114,16 @@ func (tc *TransactionController) List(c *gin.Context) {
 		writeTxnError(c, err)
 		return
 	}
-	creators := tc.svc.CreatorNames(c.Request.Context(), items)
+	people := tc.svc.People(c.Request.Context(), items)
 	out := make([]gin.H, 0, len(items))
 	for i := range items {
 		item := txnJSON(&items[i])
 		d := decisions[items[i].ID]
 		item["can_approve"] = d.CanApprove
 		item["can_reject"] = d.CanReject
-		item["created_by"] = gin.H{"id": items[i].CreatedByID, "name": creators[items[i].CreatedByID]}
+		p := people[items[i].ID]
+		item["created_by"] = p.CreatedBy
+		item["outcome"] = p.Outcome // who approved, rejected or deleted it (null while pending)
 		out = append(out, item)
 	}
 	c.JSON(http.StatusOK, gin.H{

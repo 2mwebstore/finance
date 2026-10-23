@@ -1,7 +1,6 @@
 package backup
 
 import (
-	"bufio"
 	"compress/gzip"
 	"context"
 	"encoding/json"
@@ -21,6 +20,7 @@ import (
 	"github.com/cambodia-finance/income-expense/internal/database"
 	"github.com/cambodia-finance/income-expense/internal/models"
 	"github.com/cambodia-finance/income-expense/internal/notifications"
+	"github.com/cambodia-finance/income-expense/internal/storage"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -61,7 +61,8 @@ var (
 	ErrBusy        = errors.New("another backup or restore is running; try again in a moment")
 	ErrBadTime     = errors.New("time must be HH:MM, 00:00 to 23:59")
 	ErrBadKeepDays = fmt.Errorf("keep days must be 1 to %d", maxKeepDays)
-	fileNameRule   = regexp.MustCompile(`^backup-(\d{8}-\d{6})-([a-z-]+)\.sql\.gz$`)
+	// .tar.gz: full backup (database and attachments); .sql.gz: database only (older backups, uploads).
+	fileNameRule   = regexp.MustCompile(`^backup-(\d{8}-\d{6})-([a-z-]+)\.(tar\.gz|sql\.gz)$`)
 	timeRule       = regexp.MustCompile(`^([01]\d|2[0-3]):([0-5]\d)$`)
 )
 
@@ -74,6 +75,10 @@ type Item struct {
 	Telegram      string    `json:"telegram"` // sent | failed | off | skipped
 	TelegramError string    `json:"telegram_error,omitempty"`
 	CreatedBy     string    `json:"created_by,omitempty"`
+	// Full: database and attachment files; otherwise the database only.
+	Full        bool `json:"full"`
+	Attachments int  `json:"attachments"`
+	Missing     int  `json:"missing_attachments,omitempty"`
 }
 
 // Settings is what the admin page shows and edits. The bot token itself is never sent back.
@@ -108,18 +113,21 @@ type sidecar struct {
 	Telegram      string `json:"telegram"`
 	TelegramError string `json:"telegram_error,omitempty"`
 	CreatedBy     string `json:"created_by,omitempty"`
+	Attachments   int    `json:"attachments,omitempty"`
+	Missing       int    `json:"missing_attachments,omitempty"`
 }
 
 // Service makes, keeps, sends and restores database backups.
 type Service struct {
 	db      *gorm.DB
+	store   storage.Store // attachment files, included in full backups
 	dir     string
 	loc     *time.Location
 	appName string
 	mu      sync.Mutex // one backup or restore at a time
 }
 
-func NewService(db *gorm.DB, dir, timezone, appName string) (*Service, error) {
+func NewService(db *gorm.DB, store storage.Store, dir, timezone, appName string) (*Service, error) {
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		// Don't stop the API over it: keep backups in the temp folder and say so.
 		fallback := filepath.Join(os.TempDir(), "income-expense-backups")
@@ -133,7 +141,7 @@ func NewService(db *gorm.DB, dir, timezone, appName string) (*Service, error) {
 	if err != nil {
 		loc = time.FixedZone("Asia/Phnom_Penh", 7*3600)
 	}
-	return &Service{db: db, dir: dir, loc: loc, appName: appName}, nil
+	return &Service{db: db, store: store, dir: dir, loc: loc, appName: appName}, nil
 }
 
 // --- settings ---
@@ -298,11 +306,12 @@ func (s *Service) item(name string) (Item, bool) {
 	if err != nil {
 		return Item{}, false
 	}
-	item := Item{Name: name, Size: info.Size(), CreatedAt: created, Trigger: m[2], Telegram: "off"}
+	item := Item{Name: name, Size: info.Size(), CreatedAt: created, Trigger: m[2], Telegram: "off", Full: m[3] == "tar.gz"}
 	if raw, err := os.ReadFile(filepath.Join(s.dir, name+".json")); err == nil {
 		var meta sidecar
 		if json.Unmarshal(raw, &meta) == nil {
 			item.Telegram, item.TelegramError, item.CreatedBy = meta.Telegram, meta.TelegramError, meta.CreatedBy
+			item.Attachments, item.Missing = meta.Attachments, meta.Missing
 		}
 	}
 	return item, true
@@ -358,11 +367,11 @@ func (s *Service) prune(keepDays int) {
 	}
 }
 
-// newName picks a free file name for a backup made now.
-func (s *Service) newName(trigger string) string {
+// newName picks a free file name for a backup made now (ext: "tar.gz" or "sql.gz").
+func (s *Service) newName(trigger, ext string) string {
 	now := time.Now().In(s.loc)
 	for {
-		name := fmt.Sprintf("backup-%s-%s.sql.gz", now.Format("20060102-150405"), trigger)
+		name := fmt.Sprintf("backup-%s-%s.%s", now.Format("20060102-150405"), trigger, ext)
 		if _, err := os.Stat(filepath.Join(s.dir, name)); os.IsNotExist(err) {
 			return name
 		}
@@ -387,25 +396,17 @@ func (s *Service) runLocked(ctx context.Context, trigger, createdBy string) (Ite
 	if err != nil {
 		return Item{}, err
 	}
-	sqlDB, err := s.db.DB()
-	if err != nil {
-		return Item{}, err
-	}
-	name := s.newName(trigger)
+	name := s.newName(trigger, "tar.gz")
 	final := filepath.Join(s.dir, name)
 	tmp, err := os.CreateTemp(s.dir, ".partial-*")
 	if err != nil {
 		return Item{}, err
 	}
 	defer os.Remove(tmp.Name())
-	gz := gzip.NewWriter(tmp)
-	if err := Dump(ctx, sqlDB, gz); err != nil {
+	files, missing, err := s.writeArchive(ctx, tmp)
+	if err != nil {
 		tmp.Close()
 		return Item{}, fmt.Errorf("backup failed: %w", err)
-	}
-	if err := gz.Close(); err != nil {
-		tmp.Close()
-		return Item{}, err
 	}
 	if err := tmp.Close(); err != nil {
 		return Item{}, err
@@ -413,14 +414,14 @@ func (s *Service) runLocked(ctx context.Context, trigger, createdBy string) (Ite
 	if err := os.Rename(tmp.Name(), final); err != nil {
 		return Item{}, err
 	}
-	meta := sidecar{Trigger: trigger, Telegram: "off", CreatedBy: createdBy}
+	meta := sidecar{Trigger: trigger, Telegram: "off", CreatedBy: createdBy, Attachments: files, Missing: missing}
 	if st.Telegram && st.TelegramReady {
 		meta.Telegram, meta.TelegramError = s.sendFile(ctx, st, name)
 	}
 	s.writeSidecar(name, meta)
 	s.prune(st.KeepDays)
 	item, _ := s.item(name)
-	log.Printf("backup: %s (%d bytes, telegram %s)", name, item.Size, meta.Telegram)
+	log.Printf("backup: %s (%d bytes, %d attachments, %d missing, telegram %s)", name, item.Size, files, missing, meta.Telegram)
 	return item, nil
 }
 
@@ -457,7 +458,7 @@ func (s *Service) Resend(ctx context.Context, name string) (Item, error) {
 		return Item{}, errors.New("set the Telegram bot token and chat ID first")
 	}
 	status, errText := s.sendFile(ctx, st, name)
-	s.writeSidecar(name, sidecar{Trigger: item.Trigger, Telegram: status, TelegramError: errText, CreatedBy: item.CreatedBy})
+	s.writeSidecar(name, sidecar{Trigger: item.Trigger, Telegram: status, TelegramError: errText, CreatedBy: item.CreatedBy, Attachments: item.Attachments, Missing: item.Missing})
 	item, _ = s.item(name)
 	if status == "failed" {
 		return item, errors.New(errText)
@@ -480,73 +481,76 @@ func (s *Service) SendTest(ctx context.Context) error {
 
 // --- upload & restore ---
 
-// readScript returns the SQL text of a backup, decompressing gzip when the bytes say so.
-func readScript(r io.Reader) (string, error) {
-	buf := bufio.NewReader(r)
-	head, _ := buf.Peek(2)
-	var src io.Reader = buf
-	if len(head) == 2 && head[0] == 0x1f && head[1] == 0x8b {
-		gz, err := gzip.NewReader(buf)
-		if err != nil {
-			return "", fmt.Errorf("the file is not a valid .gz archive")
-		}
-		defer gz.Close()
-		src = gz
-	}
-	raw, err := io.ReadAll(io.LimitReader(src, maxScriptBytes+1))
-	if err != nil {
-		return "", fmt.Errorf("could not read the backup file")
-	}
-	if len(raw) > maxScriptBytes {
-		return "", fmt.Errorf("the backup is larger than %d MB once unpacked", maxScriptBytes>>20)
-	}
-	return string(raw), nil
-}
-
-// SaveUpload checks an uploaded .sql or .sql.gz file and keeps it (compressed) next to the other
-// backups, so it can be restored from the list.
+// SaveUpload checks an uploaded backup (a full .tar.gz, or a .sql / .sql.gz with the database only)
+// and keeps it next to the other backups, so it can be restored from the list.
 func (s *Service) SaveUpload(r io.Reader, createdBy string) (Item, error) {
-	script, err := readScript(r)
-	if err != nil {
-		return Item{}, err
-	}
-	if err := Validate(script); err != nil {
-		return Item{}, err
-	}
-	name := s.newName(TriggerUploaded)
-	tmp, err := os.CreateTemp(s.dir, ".partial-*")
+	tmp, err := os.CreateTemp(s.dir, ".upload-*")
 	if err != nil {
 		return Item{}, err
 	}
 	defer os.Remove(tmp.Name())
-	gz := gzip.NewWriter(tmp)
-	if _, err := io.WriteString(gz, script); err != nil {
+	defer tmp.Close()
+	if _, err := io.Copy(tmp, io.LimitReader(r, MaxUploadBytes+1)); err != nil {
+		return Item{}, fmt.Errorf("could not read the backup file")
+	}
+	if info, _ := tmp.Stat(); info != nil && info.Size() > MaxUploadBytes {
+		return Item{}, fmt.Errorf("the file is larger than %d MB", MaxUploadBytes>>20)
+	}
+	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
+		return Item{}, err
+	}
+	ld, err := loadBackup(tmp)
+	if err != nil {
+		return Item{}, err
+	}
+	meta := sidecar{Trigger: TriggerUploaded, Telegram: "off", CreatedBy: createdBy, Attachments: ld.files}
+	if ld.archive {
+		name := s.newName(TriggerUploaded, "tar.gz")
 		tmp.Close()
+		if err := os.Rename(tmp.Name(), filepath.Join(s.dir, name)); err != nil {
+			return Item{}, err
+		}
+		s.writeSidecar(name, meta)
+		item, _ := s.item(name)
+		return item, nil
+	}
+	// Database only: keep it compressed.
+	name := s.newName(TriggerUploaded, "sql.gz")
+	out, err := os.CreateTemp(s.dir, ".partial-*")
+	if err != nil {
+		return Item{}, err
+	}
+	defer os.Remove(out.Name())
+	gz := gzip.NewWriter(out)
+	if _, err := io.WriteString(gz, ld.script); err != nil {
+		out.Close()
 		return Item{}, err
 	}
 	if err := gz.Close(); err != nil {
-		tmp.Close()
+		out.Close()
 		return Item{}, err
 	}
-	if err := tmp.Close(); err != nil {
+	if err := out.Close(); err != nil {
 		return Item{}, err
 	}
-	if err := os.Rename(tmp.Name(), filepath.Join(s.dir, name)); err != nil {
+	if err := os.Rename(out.Name(), filepath.Join(s.dir, name)); err != nil {
 		return Item{}, err
 	}
-	s.writeSidecar(name, sidecar{Trigger: TriggerUploaded, Telegram: "off", CreatedBy: createdBy})
+	s.writeSidecar(name, meta)
 	item, _ := s.item(name)
 	return item, nil
 }
 
 // RestoreResult says what a restore did.
 type RestoreResult struct {
-	Statements int  `json:"statements"`
-	SafetyCopy Item `json:"safety_copy"`
+	Statements  int  `json:"statements"`
+	Attachments int  `json:"attachments"` // files put back (full backups only)
+	SafetyCopy  Item `json:"safety_copy"`
 }
 
-// Restore replaces the database with a kept backup. A safety copy of the current database is made
-// first, and the backup/Telegram settings are kept as they are now.
+// Restore replaces the database (and, for a full backup, puts its attachment files back) with a
+// kept backup. A full safety copy is made first, and the backup/Telegram settings are kept as
+// they are now.
 func (s *Service) Restore(ctx context.Context, name, createdBy string) (RestoreResult, error) {
 	if !s.mu.TryLock() {
 		return RestoreResult{}, ErrBusy
@@ -560,12 +564,9 @@ func (s *Service) Restore(ctx context.Context, name, createdBy string) (RestoreR
 	if err != nil {
 		return RestoreResult{}, ErrNotFound
 	}
-	script, err := readScript(f)
+	ld, err := loadBackup(f)
 	f.Close()
 	if err != nil {
-		return RestoreResult{}, err
-	}
-	if err := Validate(script); err != nil {
 		return RestoreResult{}, err
 	}
 	keep, err := s.readSettings(ctx)
@@ -580,9 +581,17 @@ func (s *Service) Restore(ctx context.Context, name, createdBy string) (RestoreR
 	if err != nil {
 		return RestoreResult{}, err
 	}
-	n, err := Restore(ctx, sqlDB, script)
+	n, err := Restore(ctx, sqlDB, ld.script)
 	if err != nil {
 		return RestoreResult{SafetyCopy: safety}, fmt.Errorf("%w. Restore %s to go back to how it was", err, safety.Name)
+	}
+	files := 0
+	if ld.archive {
+		if files, err = s.restoreFiles(ctx, p); err != nil {
+			log.Printf("backup: restoring attachment files: %v", err)
+			return RestoreResult{Statements: n, Attachments: files, SafetyCopy: safety},
+				fmt.Errorf("the database was restored, but putting back the attachment files stopped after %d: %w", files, err)
+		}
 	}
 	// The restored settings table is from the backup; put this server's backup settings back.
 	if err := s.db.Transaction(func(tx *gorm.DB) error {
@@ -598,7 +607,7 @@ func (s *Service) Restore(ctx context.Context, name, createdBy string) (RestoreR
 	if err := database.EnsureRequiredTables(s.db); err != nil {
 		log.Printf("backup: required tables after restore: %v", err)
 	}
-	return RestoreResult{Statements: n, SafetyCopy: safety}, nil
+	return RestoreResult{Statements: n, Attachments: files, SafetyCopy: safety}, nil
 }
 
 // --- schedule ---

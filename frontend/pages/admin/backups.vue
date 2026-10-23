@@ -4,7 +4,7 @@
       <div>
         <p class="eyebrow">SYSTEM</p>
         <h1>Backups</h1>
-        <p class="heading-copy">Database backups, kept on the server for {{ settings.keep_days }} days and sent to Telegram.</p>
+        <p class="heading-copy">Backups of the database and attachment files, kept on the server for {{ settings.keep_days }} days and sent to Telegram.</p>
       </div>
       <button type="button" class="primary-button" :disabled="running || loading" @click="backupNow">
         <DatabaseBackup :size="16" /> {{ running ? 'Backing up…' : 'Backup now' }}
@@ -77,7 +77,7 @@
         <div><h2>Backups on the server</h2><p>Older than {{ settings.keep_days }} days are deleted automatically.</p></div>
         <label class="upload-button" :class="{ 'is-busy': uploading }">
           <Upload :size="15" /> {{ uploading ? 'Uploading…' : 'Upload backup' }}
-          <input type="file" accept=".sql,.gz,application/gzip,application/sql" class="sr-only" :disabled="uploading" @change="onUpload" />
+          <input type="file" accept=".gz,.sql,.tar.gz,application/gzip,application/sql" class="sr-only" :disabled="uploading" @change="onUpload" />
         </label>
       </div>
       <AppAlert v-if="uploadError" class="list-alert" compact title="Couldn’t upload the backup" :message="uploadError" dismissible @dismiss="uploadError = ''" />
@@ -91,6 +91,7 @@
             <span class="backup-meta">
               <em class="tag" :class="`trigger-${item.trigger}`">{{ triggerLabel(item.trigger) }}</em>
               <span>{{ formatBytes(item.size) }}</span>
+              <span class="contents" :title="item.missing_attachments ? `${item.missing_attachments} attachment file(s) were missing from storage and could not be included` : ''">{{ contentsLabel(item) }}</span>
               <span v-if="item.created_by && item.trigger !== 'scheduled'">by {{ item.created_by }}</span>
               <span class="telegram-status" :class="`tg-${item.telegram}`" :title="item.telegram_error || ''">
                 <Send :size="11" /> {{ telegramLabel(item) }}
@@ -112,7 +113,9 @@
       <template #icon><RotateCcw :size="20" /></template>
       <div class="restore-copy">
         <p>Everything in the database is replaced with the backup from <strong>{{ restoreTarget ? formatDateTime(restoreTarget.created_at) : '' }}</strong>. Changes made after it are lost.</p>
-        <p>A safety copy of the current database is made first, so you can go back. Everyone may have to sign in again.</p>
+        <p v-if="restoreTarget?.full">Its {{ restoreTarget.attachments === 1 ? '1 attachment file is' : `${restoreTarget.attachments} attachment files are` }} put back too.</p>
+        <p v-else>This backup holds the database only; attachment files on the server stay as they are.</p>
+        <p>A safety copy of the current database and files is made first, so you can go back. Everyone may have to sign in again.</p>
         <label class="field">
           <span>Type <b>RESTORE</b> to confirm</span>
           <input v-model.trim="restoreConfirm" type="text" autocomplete="off" autocapitalize="characters" :aria-invalid="restoreError ? 'true' : undefined" />
@@ -150,6 +153,10 @@ interface BackupItem {
   telegram: 'sent' | 'failed' | 'off' | 'skipped' | string
   telegram_error?: string
   created_by?: string
+  /** true: database and attachment files; false: database only (older backups, uploaded .sql). */
+  full: boolean
+  attachments: number
+  missing_attachments?: number
 }
 interface BackupSettings {
   enabled: boolean
@@ -304,8 +311,8 @@ async function backupNow() {
   running.value = true
   try {
     const item = await api<BackupItem>('/backups', { method: 'POST' })
-    const where = item.telegram === 'sent' ? 'kept on the server and sent to Telegram' : item.telegram === 'failed' ? `kept on the server, but sending to Telegram failed (${item.telegram_error})` : 'kept on the server'
-    toast[item.telegram === 'failed' ? 'warning' : 'success'](`${formatBytes(item.size)}, ${where}.`, { title: 'Backup made' })
+    const where = item.telegram === 'sent' ? 'kept on the server and sent to Telegram' : item.telegram === 'failed' ? `kept on the server, but sending to Telegram failed (${item.telegram_error})` : item.telegram === 'skipped' ? 'kept on the server (too large for Telegram)' : 'kept on the server'
+    toast[item.telegram === 'failed' || item.telegram === 'skipped' ? 'warning' : 'success'](`${contentsLabel(item)}, ${formatBytes(item.size)}, ${where}.`, { title: 'Backup made' })
     await refreshList()
   } catch (e: any) {
     toast.error(e?.data?.error || 'Please try again.', { title: 'Backup failed' })
@@ -377,7 +384,7 @@ async function onUpload(event: Event) {
   if (!file) return
   uploadError.value = ''
   if (!/\.(sql|gz)$/i.test(file.name)) {
-    uploadError.value = 'Choose a .sql or .sql.gz backup file.'
+    uploadError.value = 'Choose a backup file (.tar.gz, .sql.gz or .sql).'
     return
   }
   if (file.size > 100 * 1024 * 1024) {
@@ -418,11 +425,12 @@ async function restore() {
   restoring.value = true
   restoreError.value = ''
   try {
-    const res = await api<{ statements: number; safety_copy: BackupItem }>(`/backups/${restoreTarget.value.name}/restore`, {
+    const res = await api<{ statements: number; attachments: number; safety_copy: BackupItem }>(`/backups/${restoreTarget.value.name}/restore`, {
       method: 'POST',
       body: { confirm: 'RESTORE' },
     })
-    toast.success(`A safety copy of the previous data was kept (${formatDateTime(res.safety_copy.created_at)}).`, { title: 'Database restored', duration: 9000 })
+    const files = res.attachments ? ` and ${res.attachments === 1 ? '1 attachment file' : `${res.attachments} attachment files`}` : ''
+    toast.success(`Database${files} restored. A safety copy of the previous data was kept (${formatDateTime(res.safety_copy.created_at)}).`, { title: 'Backup restored', duration: 9000 })
     restoreTarget.value = null
     await load()
   } catch (e: any) {
@@ -446,6 +454,11 @@ function formatDateTime(value: string) {
 
 function triggerLabel(trigger: string) {
   return ({ scheduled: 'Daily', manual: 'Backup now', 'pre-restore': 'Safety copy', uploaded: 'Uploaded' } as Record<string, string>)[trigger] || trigger
+}
+
+function contentsLabel(item: BackupItem) {
+  if (!item.full) return 'Database only'
+  return item.attachments === 1 ? 'Database + 1 file' : `Database + ${item.attachments} files`
 }
 
 function telegramLabel(item: BackupItem) {
@@ -512,6 +525,7 @@ onMounted(load)
 .trigger-uploaded { color: #6d59b7; background: #f0edff; }
 .trigger-manual { color: #14835f; background: #e4f7ee; }
 .telegram-status { display: inline-flex; align-items: center; gap: 4px; }
+.contents { color: #5f7392; }
 .tg-sent { color: #14835f; }
 .tg-failed { color: #c93449; }
 .tg-skipped { color: #a46c0d; }
