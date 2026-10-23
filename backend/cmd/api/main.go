@@ -13,6 +13,9 @@ import (
 
 func main() {
 	cfg := config.Load()
+	if os.Getenv("APP_ENV") == "" {
+		log.Println("warning: APP_ENV is not set, so the API runs with development settings (auto-migrate, demo data); set APP_ENV=production on servers")
+	}
 
 	if cfg.JWTSecret == "" {
 		log.Fatal("JWT_SECRET is required; set it in the process environment or local development .env file")
@@ -54,7 +57,8 @@ func main() {
 	if err := r.SetTrustedProxies(cfg.TrustedProxies); err != nil {
 		log.Fatalf("TRUSTED_PROXIES: %v", err)
 	}
-	r.Use(gin.Logger(), gin.Recovery())
+	// Health checks arrive every few seconds during deploys; they would drown out real requests.
+	r.Use(gin.LoggerWithConfig(gin.LoggerConfig{SkipPaths: []string{"/health"}}), gin.Recovery())
 	r.Use(middleware.SecurityHeaders())
 	// Per-IP limit for every request. Login has a tighter limiter in routes.
 	r.Use(middleware.RateLimitByIP(middleware.NewRateLimiter(cfg.RateLimitPerMinute)))

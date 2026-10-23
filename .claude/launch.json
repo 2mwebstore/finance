@@ -4,14 +4,29 @@
     {
       "name": "api",
       "runtimeExecutable": "bash",
-      "runtimeArgs": ["-c", "cd backend && go run ./cmd/api"],
+      "runtimeArgs": [
+        "-c",
+        "cd backend && go run ./cmd/api"
+      ],
       "port": 8080
     },
     {
       "name": "web",
       "runtimeExecutable": "bash",
-      "runtimeArgs": ["-c", "cd frontend && npm run dev"],
+      "runtimeArgs": [
+        "-c",
+        "cd frontend && npm run dev"
+      ],
       "port": 3000
+    },
+    {
+      "name": "web-prod",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "cd frontend && env -u NUXT_PUBLIC_API_BASE PORT=3100 node .output/server/index.mjs"
+      ],
+      "port": 3100
     }
   ]
 }

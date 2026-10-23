@@ -41,9 +41,10 @@ export default defineNuxtConfig({
     // NUXT_API_PROXY_TARGET (Railway: http://<api service>.railway.internal:8080).
     apiProxyTarget: (process.env.NUXT_API_PROXY_TARGET || process.env.API_PROXY_TARGET || 'http://localhost:8080').replace(/\/$/, ''),
     public: {
-      // When unset, useApiBase matches the API hostname to the browser host so
-      // the refresh cookie remains same-site on localhost and 127.0.0.1.
-      apiBase: process.env.NUXT_PUBLIC_API_BASE || '',
+      // Same-origin by default: every deployment serves the API at /api/v1 on the app's own host
+      // (nginx in the single image, server/routes/api/v1 otherwise). Don't depend on a .env file
+      // for this; it is not in git, so a build without it would point the app nowhere.
+      apiBase: process.env.NUXT_PUBLIC_API_BASE || '/api/v1',
     },
   },
   app: {

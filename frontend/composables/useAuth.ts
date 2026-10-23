@@ -32,6 +32,7 @@ export function useAuth() {
       const me = await $fetch<User>(`${apiBase}/auth/me`, {
         headers: { Authorization: `Bearer ${accessToken.value}` },
         credentials: 'include',
+        timeout: 15000,
       })
       currentUser.value = me
       try {
@@ -72,6 +73,8 @@ export function useAuth() {
         const res = await $fetch<{ access_token?: string } | undefined>(`${apiBase}/auth/refresh`, {
           method: 'POST',
           credentials: 'include',
+          // The app waits for this before it shows anything; give up rather than leave a blank page.
+          timeout: 15000,
         })
         if (!res?.access_token) {
           accessToken.value = null

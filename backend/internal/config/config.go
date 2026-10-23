@@ -24,6 +24,9 @@ type Config struct {
 	DBPassword string
 	DBName     string
 	DBParams   string
+	// LogSQL prints every SQL statement (DB_LOG_SQL=true). Off by default: a single start-up
+	// migration is hundreds of statements, more than hosts like Railway accept per second.
+	LogSQL bool
 
 	JWTSecret       string
 	JWTAccessTTL    time.Duration
@@ -71,6 +74,7 @@ func Load() *Config {
 		DBPassword: getEnv("DB_PASSWORD", ""),
 		DBName:     getEnv("DB_NAME", "income_expense"),
 		DBParams:   getEnv("DB_PARAMS", "charset=utf8mb4&parseTime=True&loc=Asia%2FPhnom_Penh"),
+		LogSQL:     getEnvBool("DB_LOG_SQL", false),
 
 		JWTSecret:       getEnv("JWT_SECRET", ""),
 		JWTAccessTTL:    time.Duration(getEnvInt("JWT_ACCESS_TTL_MINUTES", 15)) * time.Minute,
