@@ -7,9 +7,9 @@ export type Schema = Record<string, Check[]>
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
-/** Digits in a new PIN (API: auth.PINLength). Older 4-digit PINs still sign in until replaced. */
-export const PIN_LENGTH = 6
-export const OLD_PIN_LENGTH = 4
+/** A PIN is 4 to 6 digits (API: auth.MinPINLength / MaxPINLength). */
+export const MIN_PIN_LENGTH = 4
+export const MAX_PIN_LENGTH = 6
 
 function isBlank(value: unknown) {
   if (Array.isArray(value)) return value.length === 0
@@ -30,11 +30,11 @@ export const rule = {
     !isBlank(value) && String(value).trim().length > max ? `${label} must be at most ${max} characters` : '',
   email: (label: string): Check => value =>
     !isBlank(value) && !EMAIL.test(String(value).trim()) ? `${label} must be a valid email address` : '',
-  /** New 6-digit PIN (API: len=6,numeric, checked in that order). */
+  /** PIN of 4 to 6 digits (API: min=4,max=6,numeric, checked in that order). */
   pin: (label: string): Check => (value) => {
     if (isBlank(value)) return ''
     const pin = String(value)
-    if (pin.length !== PIN_LENGTH) return `${label} must be exactly ${PIN_LENGTH} digits`
+    if (pin.length < MIN_PIN_LENGTH || pin.length > MAX_PIN_LENGTH) return `${label} must be ${MIN_PIN_LENGTH} to ${MAX_PIN_LENGTH} digits`
     return /^\d+$/.test(pin) ? '' : `${label} must contain digits only`
   },
   positiveAmount: (label: string): Check => value =>

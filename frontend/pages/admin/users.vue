@@ -11,7 +11,7 @@
         <label class="space-y-1 text-xs font-medium text-muted">Username<input v-model.trim="createForm.username" required minlength="3" maxlength="64" :aria-invalid="createCheck.invalid('username')" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" /></label>
         <label class="space-y-1 text-xs font-medium text-muted">Email<input v-model.trim="createForm.email" type="email" required :aria-invalid="createCheck.invalid('email')" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" /></label>
         <label class="space-y-1 text-xs font-medium text-muted">Full name<input v-model.trim="createForm.full_name" required minlength="2" :aria-invalid="createCheck.invalid('full_name')" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" /></label>
-        <label class="space-y-1 text-xs font-medium text-muted">Temporary {{ PIN_LENGTH }}-digit PIN<input v-model="createForm.password" type="password" inputmode="numeric" :pattern="`[0-9]{${PIN_LENGTH}}`" :maxlength="PIN_LENGTH" :minlength="PIN_LENGTH" required autocomplete="new-password" :aria-invalid="createCheck.invalid('password')" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" :placeholder="`${PIN_LENGTH} digits`" /></label>
+        <label class="space-y-1 text-xs font-medium text-muted">Temporary PIN ({{ MIN_PIN_LENGTH }}–{{ MAX_PIN_LENGTH }} digits)<input v-model="createForm.password" type="password" inputmode="numeric" :pattern="`[0-9]{${MIN_PIN_LENGTH},${MAX_PIN_LENGTH}}`" :maxlength="MAX_PIN_LENGTH" :minlength="MIN_PIN_LENGTH" required autocomplete="new-password" :aria-invalid="createCheck.invalid('password')" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" :placeholder="`${MIN_PIN_LENGTH}–${MAX_PIN_LENGTH} digits`" /></label>
         <div class="space-y-1 text-xs font-medium text-muted"><span class="block">Role</span><SearchSelect v-model="createForm.role_code" :options="roleOptions" placeholder="Select a role" search-placeholder="Search roles…" aria-label="User role" :aria-invalid="createCheck.invalid('role_codes')" /></div>
         <div class="space-y-1 text-xs font-medium text-muted"><span class="block">Branch</span><SearchSelect v-model="createForm.branch_id" :options="branchOptions" placeholder="Select a branch" search-placeholder="Search branches…" aria-label="User branch" :aria-invalid="createCheck.invalid('branch_ids')" /></div>
         <div class="space-y-1 text-xs font-medium text-muted sm:col-span-2">
@@ -98,7 +98,7 @@
     <div v-if="passwordTarget" class="fixed inset-0 z-[100] flex items-end justify-center bg-slate-950/55 p-0 backdrop-blur-sm sm:items-center sm:p-4" @click.self="closePasswordChange">
       <section class="w-full max-w-md rounded-t-2xl border border-border bg-white p-5 shadow-2xl sm:rounded-2xl" role="dialog" aria-modal="true" aria-labelledby="change-user-pin-title">
         <header class="mb-4 flex items-start justify-between gap-3">
-          <div><h2 id="change-user-pin-title" class="text-base font-bold text-navy">Change {{ passwordTarget.full_name }}’s PIN</h2><p class="mt-1 text-xs text-muted">Enter a new {{ PIN_LENGTH }}-digit numeric PIN. Their active sessions will be revoked.</p></div>
+          <div><h2 id="change-user-pin-title" class="text-base font-bold text-navy">Change {{ passwordTarget.full_name }}’s PIN</h2><p class="mt-1 text-xs text-muted">Enter a new PIN of {{ MIN_PIN_LENGTH }} to {{ MAX_PIN_LENGTH }} digits. Their active sessions will be revoked.</p></div>
           <button type="button" class="text-xs text-muted" :disabled="saving" @click="closePasswordChange">Close</button>
         </header>
         <form class="space-y-3" novalidate @submit.prevent="changeUserPassword">
@@ -118,7 +118,7 @@
 import { KeyRound, Pencil, Power, RotateCcw, UserPen, UserPlus } from 'lucide-vue-next'
 import type { AdminUser, Branch, Role } from '~/types/api'
 import { useToast } from '~/composables/useToast'
-import { PIN_LENGTH, rule } from '~/utils/validation'
+import { MAX_PIN_LENGTH, MIN_PIN_LENGTH, rule } from '~/utils/validation'
 import { useFormErrors } from '~/composables/useFormErrors'
 
 const { api } = useApi()

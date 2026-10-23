@@ -29,15 +29,17 @@ func argonKey(password, salt []byte, time, memory uint32, threads uint8, keyLen 
 	return argon2.IDKey(password, salt, time, memory, threads, keyLen)
 }
 
-// PINLength is how many digits a new PIN has. PINs set before it grew from 4 still sign in
-// (VerifyPassword doesn't care about length); those users are asked to choose a new one.
-const PINLength = 6
+// A PIN is MinPINLength to MaxPINLength digits; longer is safer, so people may choose 6.
+const (
+	MinPINLength = 4
+	MaxPINLength = 6
+)
 
-var errPINFormat = fmt.Errorf("PIN must be exactly %d digits", PINLength)
+var errPINFormat = fmt.Errorf("PIN must be %d to %d digits", MinPINLength, MaxPINLength)
 
-// IsCurrentPIN reports whether pin has the format new PINs must have (PINLength digits).
-func IsCurrentPIN(pin string) bool {
-	if len(pin) != PINLength {
+// IsValidPIN reports whether pin is MinPINLength to MaxPINLength digits.
+func IsValidPIN(pin string) bool {
+	if len(pin) < MinPINLength || len(pin) > MaxPINLength {
 		return false
 	}
 	for _, digit := range pin {
@@ -48,9 +50,9 @@ func IsCurrentPIN(pin string) bool {
 	return true
 }
 
-// HashPassword creates an Argon2id hash of a new PIN, which must be PINLength digits.
+// HashPassword creates an Argon2id hash of a new PIN (MinPINLength to MaxPINLength digits).
 func HashPassword(password string) (string, error) {
-	if !IsCurrentPIN(password) {
+	if !IsValidPIN(password) {
 		return "", errPINFormat
 	}
 	return encodeHash(password)

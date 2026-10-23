@@ -21,7 +21,7 @@ Super Admin is **not** created by demo seed — use `POST /api/v1/auth/setup` wi
 
 To repair demo logins in an existing development database, restart the API once with `SEED_DEMO=true` in its environment. Remove the variable after the seed completes so demo PINs do not get reset on every restart.
 
-Demo accounts created before PINs became 6 digits still sign in with `2468`; the app then asks for a new 6-digit PIN. A forced seed sets them back to `246810`.
+Demo accounts created earlier still sign in with `2468` (PINs are 4 to 6 digits). A forced seed sets them to `246810`.
 
 ## Demo content
 

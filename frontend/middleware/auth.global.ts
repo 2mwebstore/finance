@@ -15,8 +15,4 @@ export default defineNuxtRouteMiddleware(async (to) => {
   if (!user.value) {
     return navigateTo('/login')
   }
-  // Still on an old 4-digit PIN: choose a 6-digit one before using the rest of the app.
-  if (user.value.pin_upgrade_required && to.path !== '/profile') {
-    return navigateTo('/profile')
-  }
 })

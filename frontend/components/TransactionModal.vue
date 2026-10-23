@@ -72,35 +72,39 @@
             </div>
 
             <div class="form-field full-field">
-              <span>Attachment <small>Optional · image or PDF, up to 10 MB</small></span>
-              <div v-if="attachment.file" class="attachment-chip">
-                <img v-if="attachment.previewUrl" :src="attachment.previewUrl" alt="" class="attachment-thumb" />
-                <span v-else class="attachment-icon"><FileText :size="20" /></span>
-                <span class="attachment-meta"><strong>{{ attachment.file.name }}</strong><small>{{ formatBytes(attachment.file.size) }} · ready to upload</small></span>
-                <button type="button" class="attachment-action" @click="pickFile">Change</button>
-                <button type="button" class="attachment-remove" aria-label="Remove file" @click="clearPicked"><X :size="16" /></button>
+              <span>Attachments <small>Optional · up to {{ MAX_ATTACHMENTS }} images or PDFs, 10 MB each</small></span>
+              <div class="attachment-list">
+                <div v-for="file in keptAttachments" :key="file.id" class="attachment-chip">
+                  <span class="attachment-icon"><ImageIcon v-if="file.type.startsWith('image/')" :size="20" /><FileText v-else :size="20" /></span>
+                  <span class="attachment-meta"><strong>{{ file.name }}</strong><small>{{ formatBytes(file.size) }} · attached</small></span>
+                  <button type="button" class="attachment-remove" :aria-label="`Remove ${file.name}`" title="Remove" @click="removedIds.push(file.id)"><Trash2 :size="15" /></button>
+                </div>
+                <div v-for="item in picked" :key="item.key" class="attachment-chip">
+                  <img v-if="item.previewUrl" :src="item.previewUrl" alt="" class="attachment-thumb" />
+                  <span v-else class="attachment-icon"><FileText :size="20" /></span>
+                  <span class="attachment-meta"><strong>{{ item.file.name }}</strong><small>{{ formatBytes(item.file.size) }} · {{ item.uploaded ? 'uploaded' : 'ready to upload' }}</small></span>
+                  <button v-if="!item.uploaded" type="button" class="attachment-remove" :aria-label="`Remove ${item.file.name}`" title="Remove" @click="removePicked(item)"><X :size="16" /></button>
+                </div>
+                <button
+                  v-if="freeSlots > 0"
+                  type="button"
+                  class="attachment-drop"
+                  :class="{ 'is-dragging': dragging }"
+                  @click="pickFile"
+                  @dragover.prevent="dragging = true"
+                  @dragleave="dragging = false"
+                  @drop.prevent="onDrop"
+                >
+                  <span class="attachment-drop-icon"><Paperclip :size="18" /></span>
+                  <span class="attachment-meta">
+                    <strong>{{ keptAttachments.length || picked.length ? 'Add another file' : 'Attach a receipt or photo' }}</strong>
+                    <small>{{ removedIds.length ? `${removedIds.length === 1 ? '1 file' : `${removedIds.length} files`} will be deleted when you save` : `Tap to choose, or drop ${freeSlots === 1 ? 'a file' : 'files'} here` }}</small>
+                  </span>
+                </button>
               </div>
-              <div v-else-if="existingAttachment && !attachment.removeExisting" class="attachment-chip">
-                <span class="attachment-icon"><ImageIcon v-if="existingAttachment.type.startsWith('image/')" :size="20" /><FileText v-else :size="20" /></span>
-                <span class="attachment-meta"><strong>{{ existingAttachment.name }}</strong><small>{{ formatBytes(existingAttachment.size) }} · attached</small></span>
-                <button type="button" class="attachment-action" @click="pickFile">Replace</button>
-                <button type="button" class="attachment-remove" aria-label="Remove attachment" @click="attachment.removeExisting = true"><X :size="16" /></button>
-              </div>
-              <button
-                v-else
-                type="button"
-                class="attachment-drop"
-                :class="{ 'is-dragging': dragging }"
-                @click="pickFile"
-                @dragover.prevent="dragging = true"
-                @dragleave="dragging = false"
-                @drop.prevent="onDrop"
-              >
-                <span class="attachment-drop-icon"><Paperclip :size="18" /></span>
-                <span class="attachment-meta"><strong>Attach a receipt or photo</strong><small>{{ attachment.removeExisting ? 'The current file will be removed when you save' : 'Tap to choose, or drop a file here' }}</small></span>
-              </button>
-              <input ref="fileInput" type="file" class="sr-only" :accept="ACCEPTED_TYPES.join(',')" tabindex="-1" aria-hidden="true" @change="onFileChange" />
-              <small v-if="attachment.error" class="field-error" role="alert">{{ attachment.error }}</small>
+              <input ref="fileInput" type="file" class="sr-only" multiple :accept="ACCEPTED_TYPES.join(',')" tabindex="-1" aria-hidden="true" @change="onFileChange" />
+              <small v-if="attachmentError" class="field-error" role="alert">{{ attachmentError }}</small>
+              <small v-else-if="transactionType === 'expense' && !keptAttachments.length && !picked.length" class="field-hint">An expense needs a receipt before a manager can approve it.</small>
             </div>
           </div>
 
@@ -144,8 +148,8 @@
 </template>
 
 <script setup lang="ts">
-import { ArrowDownLeft, ArrowUpRight, Clock3, FileText, ImageIcon, Paperclip, X } from 'lucide-vue-next'
-import type { Branch, Category, Transaction } from '~/types/api'
+import { ArrowDownLeft, ArrowUpRight, Clock3, FileText, ImageIcon, Paperclip, Trash2, X } from 'lucide-vue-next'
+import { MAX_ATTACHMENTS, type Branch, type Category, type Transaction } from '~/types/api'
 import { richTextToPlain } from '~/utils/richText'
 import { rule } from '~/utils/validation'
 import { useFormErrors } from '~/composables/useFormErrors'
@@ -184,14 +188,24 @@ const form = reactive({
   pending: false,
 })
 
-// One optional attachment, uploaded after the transaction itself is saved.
 const DESCRIPTION_MAX = 1000
+// Up to MAX_ATTACHMENTS files, sent after the transaction itself is saved.
 const MAX_FILE_BYTES = 10 * 1024 * 1024
 const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'application/pdf']
 const fileInput = ref<HTMLInputElement | null>(null)
 const dragging = ref(false)
-const attachment = reactive({ file: null as File | null, previewUrl: '', removeExisting: false, error: '' })
-const existingAttachment = computed(() => props.mode === 'edit' ? props.transaction?.attachment || null : null)
+type PickedFile = { key: number; file: File; previewUrl: string; uploaded: boolean }
+let pickedKey = 0
+const picked = ref<PickedFile[]>([])
+// Saved files the person removed; they are deleted when the form is saved.
+const removedIds = ref<string[]>([])
+// Removals already done (kept so a retry after a failed upload doesn't redo them).
+const deletedIds = ref<string[]>([])
+const attachmentError = ref('')
+const keptAttachments = computed(() => props.mode === 'edit'
+  ? (props.transaction?.attachments || []).filter(file => !removedIds.value.includes(file.id))
+  : [])
+const freeSlots = computed(() => MAX_ATTACHMENTS - keptAttachments.value.length - picked.value.length)
 // Set once a new transaction is created, so a failed upload can be retried without creating it twice.
 const createdTransaction = ref<Transaction | null>(null)
 const loadingOptions = ref(true)
@@ -238,7 +252,7 @@ const { errors, messages: fieldMessages, check, fromApi, reset: resetErrors, inv
   }),
 )
 const alertTitle = computed(() => {
-  if (partialSave.value) return 'Saved, but without the file'
+  if (partialSave.value) return 'Saved, but the files weren’t all updated'
   if (!error.value) return 'Check the highlighted fields'
   return props.mode === 'edit' ? 'Couldn’t update this transaction' : 'Couldn’t save this transaction'
 })
@@ -267,44 +281,54 @@ function pickFile() {
   fileInput.value?.click()
 }
 
-function setFile(file: File) {
-  attachment.error = ''
-  if (!ACCEPTED_TYPES.includes(file.type)) {
-    attachment.error = 'Choose an image (JPG, PNG, GIF, WebP) or a PDF.'
-    return
+function addFiles(files: File[]) {
+  attachmentError.value = ''
+  for (const file of files) {
+    if (freeSlots.value <= 0) {
+      attachmentError.value = `A transaction can have up to ${MAX_ATTACHMENTS} files.`
+      return
+    }
+    if (!ACCEPTED_TYPES.includes(file.type)) {
+      attachmentError.value = `${file.name}: choose an image (JPG, PNG, GIF, WebP) or a PDF.`
+      continue
+    }
+    if (file.size > MAX_FILE_BYTES) {
+      attachmentError.value = `${file.name} is larger than 10 MB.`
+      continue
+    }
+    picked.value.push({ key: ++pickedKey, file, previewUrl: file.type.startsWith('image/') ? URL.createObjectURL(file) : '', uploaded: false })
   }
-  if (file.size > MAX_FILE_BYTES) {
-    attachment.error = 'The file is larger than 10 MB.'
-    return
-  }
-  clearPicked()
-  attachment.file = file
-  attachment.previewUrl = file.type.startsWith('image/') ? URL.createObjectURL(file) : ''
 }
 
 function onFileChange(event: Event) {
   const input = event.target as HTMLInputElement
-  const file = input.files?.[0]
-  if (file) setFile(file)
+  addFiles(Array.from(input.files || []))
   input.value = ''
 }
 
 function onDrop(event: DragEvent) {
   dragging.value = false
-  const file = event.dataTransfer?.files?.[0]
-  if (file) setFile(file)
+  addFiles(Array.from(event.dataTransfer?.files || []))
+}
+
+function removePicked(item: PickedFile) {
+  if (item.previewUrl) URL.revokeObjectURL(item.previewUrl)
+  picked.value = picked.value.filter(other => other.key !== item.key)
+  attachmentError.value = ''
 }
 
 function clearPicked() {
-  if (attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl)
-  attachment.previewUrl = ''
-  attachment.file = null
+  for (const item of picked.value) {
+    if (item.previewUrl) URL.revokeObjectURL(item.previewUrl)
+  }
+  picked.value = []
 }
 
 function resetAttachment() {
   clearPicked()
-  attachment.removeExisting = false
-  attachment.error = ''
+  removedIds.value = []
+  deletedIds.value = []
+  attachmentError.value = ''
   createdTransaction.value = null
 }
 
@@ -411,12 +435,18 @@ async function submit() {
     }
     recordSaved = true
 
-    if (attachment.file) {
+    // Delete removed files first so their slots are free for the new ones.
+    for (const id of removedIds.value) {
+      if (deletedIds.value.includes(id)) continue
+      saved = await api<Transaction>(`/transactions/${saved.id}/attachments/${id}`, { method: 'DELETE' })
+      deletedIds.value.push(id)
+    }
+    for (const item of picked.value) {
+      if (item.uploaded) continue
       const body = new FormData()
-      body.append('file', attachment.file)
-      saved = await api<Transaction>(`/transactions/${saved.id}/attachment`, { method: 'POST', body })
-    } else if (attachment.removeExisting && existingAttachment.value) {
-      saved = await api<Transaction>(`/transactions/${saved.id}/attachment`, { method: 'DELETE' })
+      body.append('file', item.file)
+      saved = await api<Transaction>(`/transactions/${saved.id}/attachments`, { method: 'POST', body })
+      item.uploaded = true
     }
 
     resetAttachment()
@@ -425,7 +455,7 @@ async function submit() {
   } catch (e: any) {
     const reason = e?.data?.error || e?.message || ''
     partialSave.value = recordSaved
-    if (recordSaved) error.value = `The file couldn't be uploaded${reason ? ` (${reason})` : ''}. Try again, or remove the file and save.`
+    if (recordSaved) error.value = `A file couldn't be saved${reason ? ` (${reason})` : ''}. Try again, or remove that file and save.`
     // When the API names the fields, the list says it all; otherwise show its message.
     else if (!fromApi(e)) error.value = reason || (props.mode === 'edit' ? 'Could not update this transaction.' : 'Could not save this transaction.')
   } finally {
@@ -496,6 +526,7 @@ onMounted(() => {
 .field-hint { display: block; margin-top: 2px; color: #8e9cb0; font-size: 11px; font-weight: 450; }
 .amount-card .field-hint { margin-top: 6px; }
 
+.attachment-list { display: flex; flex-direction: column; gap: 8px; }
 .attachment-chip, .attachment-drop { display: flex; width: 100%; min-height: 58px; align-items: center; gap: 11px; border: 1px solid #dfe7f1; border-radius: 12px; padding: 9px 10px; background: #fff; text-align: left; }
 .attachment-drop { border-style: dashed; border-color: #c9d6e8; color: #50668a; background: #fafcff; cursor: pointer; transition: border-color .15s ease, background .15s ease; }
 .attachment-drop:hover, .attachment-drop.is-dragging { border-color: var(--accent); background: var(--accent-soft); }
@@ -504,7 +535,6 @@ onMounted(() => {
 .attachment-meta { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 3px; }
 .attachment-meta strong { overflow: hidden; color: #1d365c; font-size: 13px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
 .attachment-meta small { color: #7b8ca5; font-size: 12px; font-weight: 450; }
-.attachment-action { flex: 0 0 auto; border: 1px solid #dfe7f1; border-radius: 8px; padding: 6px 10px; color: #3d5a82; background: #fff; font-size: 12px; font-weight: 650; cursor: pointer; }
 .attachment-remove { display: grid; flex: 0 0 auto; width: 32px; height: 32px; place-items: center; border: 0; border-radius: 8px; color: #8193ab; background: #f3f6fb; cursor: pointer; }
 .attachment-remove:hover { color: #c93449; background: #fff0f2; }
 .field-error { display: block; margin-top: 2px; color: #c33d50; font-size: 12px; font-weight: 550; }

@@ -65,9 +65,9 @@
           <div class="transaction-title-line">
             <strong>{{ transactionTitle(transaction) }}</strong>
             <span class="status-badge wide-only" :class="statusClass(transaction.status)">{{ displayStatus(transaction.status) }}</span>
-            <button v-if="transaction.attachment" type="button" class="attachment-pill wide-only" :title="`View ${transaction.attachment.name}`" :aria-label="`View attachment ${transaction.attachment.name}`" @click="openAttachment(transaction)">
-              <ImageIcon v-if="transaction.attachment.type.startsWith('image/')" :size="12" /><FileText v-else :size="12" />
-              <span>View</span>
+            <button v-if="transaction.attachments?.length" type="button" class="attachment-pill wide-only" :title="attachmentLabel(transaction)" :aria-label="attachmentLabel(transaction)" @click="openAttachment(transaction)">
+              <ImageIcon v-if="transaction.attachments[0]!.type.startsWith('image/')" :size="12" /><FileText v-else :size="12" />
+              <span>{{ transaction.attachments.length > 1 ? `${transaction.attachments.length} files` : 'View' }}</span>
             </button>
           </div>
           <div class="transaction-meta">
@@ -91,9 +91,9 @@
         <div class="row-footer">
           <div class="row-tags">
             <span class="status-badge" :class="statusClass(transaction.status)">{{ displayStatus(transaction.status) }}</span>
-            <button v-if="transaction.attachment" type="button" class="attachment-pill" :aria-label="`View attachment ${transaction.attachment.name}`" @click="openAttachment(transaction)">
-              <ImageIcon v-if="transaction.attachment.type.startsWith('image/')" :size="12" /><FileText v-else :size="12" />
-              <span>View file</span>
+            <button v-if="transaction.attachments?.length" type="button" class="attachment-pill" :aria-label="attachmentLabel(transaction)" @click="openAttachment(transaction)">
+              <ImageIcon v-if="transaction.attachments[0]!.type.startsWith('image/')" :size="12" /><FileText v-else :size="12" />
+              <span>{{ transaction.attachments.length > 1 ? `${transaction.attachments.length} files` : 'View file' }}</span>
             </button>
           </div>
           <div class="row-actions">
@@ -137,8 +137,16 @@
       :transaction="transactionToDelete"
       @deleted="onTransactionDeleted"
     />
-    <AttachmentViewer v-model="attachmentViewerOpen" :transaction="attachmentTransaction" />
-    <ApprovalDialog v-model="approvalOpen" :transaction="approvalTransaction" :action="approvalAction" @done="onApprovalDone" />
+    <ApprovalDialog
+      v-model="approvalOpen"
+      :transaction="approvalTransaction"
+      :action="approvalAction"
+      @done="onApprovalDone"
+      @files-changed="onFilesChanged"
+      @preview="(index) => approvalTransaction && openAttachment(approvalTransaction, index)"
+    />
+    <!-- After the approval dialog so a preview opened from it shows on top. -->
+    <AttachmentViewer v-model="attachmentViewerOpen" :transaction="attachmentTransaction" :start-index="attachmentStart" @changed="onFilesChanged" />
   </div>
 </template>
 
@@ -399,12 +407,28 @@ function transactionTitle(transaction: Transaction) {
     || transaction.transaction_number
 }
 
-// Attachment popup (image or PDF)
+// Attachment popup (images and PDFs; switches between a transaction's files)
 const attachmentViewerOpen = ref(false)
 const attachmentTransaction = ref<Transaction | null>(null)
-function openAttachment(transaction: Transaction) {
+const attachmentStart = ref(0)
+function openAttachment(transaction: Transaction, index = 0) {
   attachmentTransaction.value = transaction
+  attachmentStart.value = index
   attachmentViewerOpen.value = true
+}
+
+function attachmentLabel(transaction: Transaction) {
+  const files = transaction.attachments || []
+  return files.length > 1 ? `View ${files.length} files` : `View ${files[0]?.name || 'file'}`
+}
+
+// A file was added or deleted from the viewer or the approval dialog: update that row in place
+// (the API's answer has no list-only fields such as can_approve, so keep the row's).
+function onFilesChanged(updated: Transaction) {
+  const merge = (txn: Transaction | null) => txn && txn.id === updated.id ? { ...txn, attachments: updated.attachments } : txn
+  items.value = items.value.map(txn => merge(txn)!)
+  attachmentTransaction.value = merge(attachmentTransaction.value)
+  approvalTransaction.value = merge(approvalTransaction.value)
 }
 
 // Approve / reject (only shown when the API says this user may decide)

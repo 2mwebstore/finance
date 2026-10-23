@@ -5,9 +5,11 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"fmt"
 	"reflect"
 	"strings"
 
+	"github.com/cambodia-finance/income-expense/internal/auth"
 	"github.com/cambodia-finance/income-expense/internal/services"
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
@@ -105,16 +107,18 @@ func validationMessage(fe validator.FieldError) string {
 			return "choose at least one of the " + label
 		}
 		return label + " is required"
-	case "min":
-		if isList {
-			return "choose at least " + fe.Param() + " " + label
+	case "min", "max":
+		if isPIN {
+			return fmt.Sprintf("%s must be %d to %d digits", label, auth.MinPINLength, auth.MaxPINLength)
 		}
-		return label + " must be at least " + fe.Param() + " characters"
-	case "max":
-		if isList {
-			return "choose at most " + fe.Param() + " " + label
+		bound := "at least "
+		if fe.Tag() == "max" {
+			bound = "at most "
 		}
-		return label + " must be at most " + fe.Param() + " characters"
+		if isList {
+			return "choose " + bound + fe.Param() + " " + label
+		}
+		return label + " must be " + bound + fe.Param() + " characters"
 	case "len":
 		if isPIN {
 			return label + " must be exactly " + fe.Param() + " digits"

@@ -33,14 +33,14 @@ type setupRequest struct {
 	SetupToken string `json:"setup_token" binding:"required"`
 	Username   string `json:"username" binding:"required,min=3,max=64"`
 	Email      string `json:"email" binding:"required,email"`
-	Password   string `json:"password" binding:"required,len=6,numeric"`
+	Password   string `json:"password" binding:"required,min=4,max=6,numeric"`
 	FullName   string `json:"full_name" binding:"required,min=2"`
 }
 
 type changePasswordRequest struct {
 	// Required so a stolen session can't quietly take over the account.
 	CurrentPassword string `json:"current_password" binding:"required"`
-	NewPassword     string `json:"new_password" binding:"required,len=6,numeric"`
+	NewPassword     string `json:"new_password" binding:"required,min=4,max=6,numeric"`
 }
 
 func (ac *AuthController) Login(c *gin.Context) {
@@ -93,8 +93,6 @@ func (ac *AuthController) Login(c *gin.Context) {
 			"full_name":      result.User.FullName,
 			"is_super_admin": result.User.IsSuperAdmin,
 			"roles":          roleCodes(result.User),
-			// Signed in with an old 4-digit PIN: the app sends them to choose a 6-digit one.
-			"pin_upgrade_required": result.User.PINUpgradeRequired,
 		},
 	})
 }
@@ -208,7 +206,6 @@ func (ac *AuthController) Me(c *gin.Context) {
 		"permissions":          perms,
 		"branches":             branches,
 		"last_login_at":        user.LastLoginAt,
-		"pin_upgrade_required": user.PINUpgradeRequired,
 	})
 }
 

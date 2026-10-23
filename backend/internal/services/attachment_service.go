@@ -13,6 +13,7 @@ import (
 	"github.com/cambodia-finance/income-expense/internal/storage"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // MaxAttachmentBytes is the largest file accepted for a transaction.
@@ -23,12 +24,16 @@ var AllowedAttachmentTypes = map[string]bool{
 	"image/jpeg": true, "image/png": true, "image/gif": true, "image/webp": true, "application/pdf": true,
 }
 
+// MaxAttachments is how many files one transaction can have (e.g. a receipt and an invoice).
+const MaxAttachments = 2
+
 var (
-	ErrNoAttachment     = errors.New("this transaction has no attachment")
-	ErrAttachmentLocked = errors.New("attachments can't be changed on voided or reversed transactions")
+	ErrNoAttachment       = errors.New("attachment not found")
+	ErrAttachmentLocked   = errors.New("attachments can't be changed on voided or reversed transactions")
+	ErrTooManyAttachments = fmt.Errorf("a transaction can have at most %d attachments; delete one first", MaxAttachments)
 )
 
-// AttachmentService stores one file per transaction in object storage.
+// AttachmentService stores a transaction's files (up to MaxAttachments) in object storage.
 type AttachmentService struct {
 	db    *gorm.DB
 	txns  *TransactionService
@@ -53,14 +58,17 @@ func safeFileName(name string) string {
 	return name
 }
 
-// Attach stores (or replaces) the transaction's file. The caller has checked type and size.
-func (s *AttachmentService) Attach(ctx context.Context, id, actorID uuid.UUID, fileName, contentType string, size int64, r io.Reader) (*models.Transaction, error) {
+// Add stores one more file on the transaction. The caller has checked type and size.
+func (s *AttachmentService) Add(ctx context.Context, id, actorID uuid.UUID, fileName, contentType string, size int64, r io.Reader) (*models.Transaction, error) {
 	txn, err := s.txns.GetByID(ctx, id, actorID)
 	if err != nil {
 		return nil, err
 	}
 	if txn.Status == models.TxnStatusVoided || txn.Status == models.TxnStatusReversed {
 		return nil, ErrAttachmentLocked
+	}
+	if len(txn.Attachments) >= MaxAttachments {
+		return nil, ErrTooManyAttachments
 	}
 	key := fmt.Sprintf("transactions/%s/%s-%s", txn.ID, uuid.NewString()[:8], safeFileName(fileName))
 	if err := s.store.Put(ctx, key, r, size, contentType); err != nil {
@@ -70,53 +78,73 @@ func (s *AttachmentService) Attach(ctx context.Context, id, actorID uuid.UUID, f
 	if len(displayName) > 255 {
 		displayName = displayName[len(displayName)-255:]
 	}
-	oldKey := txn.AttachmentKey
-	if err := s.db.WithContext(ctx).Model(txn).Updates(map[string]interface{}{
-		"attachment_key": key, "attachment_name": displayName, "attachment_type": contentType, "attachment_size": size,
-	}).Error; err != nil {
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Lock the transaction row so two uploads at once can't both take the last free slot.
+		var locked models.Transaction
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id").First(&locked, "id = ?", txn.ID).Error; err != nil {
+			return err
+		}
+		var count int64
+		if err := tx.Model(&models.TransactionAttachment{}).Where("transaction_id = ?", txn.ID).Count(&count).Error; err != nil {
+			return err
+		}
+		if count >= MaxAttachments {
+			return ErrTooManyAttachments
+		}
+		return tx.Create(&models.TransactionAttachment{
+			TransactionID: txn.ID, StorageKey: key, Name: displayName,
+			ContentType: contentType, Size: size, CreatedByID: actorID,
+		}).Error
+	})
+	if err != nil {
 		_ = s.store.Delete(ctx, key)
 		return nil, err
-	}
-	if oldKey != "" && oldKey != key {
-		_ = s.store.Delete(ctx, oldKey) // the old file is no longer referenced
 	}
 	return s.txns.GetByID(ctx, id, actorID)
 }
 
-// Open returns the transaction (for name/type) and a reader for its file.
-func (s *AttachmentService) Open(ctx context.Context, id, actorID uuid.UUID) (*models.Transaction, io.ReadCloser, error) {
+// Open returns one of the transaction's attachments and a reader for its file.
+func (s *AttachmentService) Open(ctx context.Context, id, attachmentID, actorID uuid.UUID) (*models.TransactionAttachment, io.ReadCloser, error) {
 	txn, err := s.txns.GetByID(ctx, id, actorID)
 	if err != nil {
 		return nil, nil, err
 	}
-	if txn.AttachmentKey == "" {
+	att := findAttachment(txn, attachmentID)
+	if att == nil {
 		return nil, nil, ErrNoAttachment
 	}
-	rc, err := s.store.Open(ctx, txn.AttachmentKey)
+	rc, err := s.store.Open(ctx, att.StorageKey)
 	if errors.Is(err, storage.ErrNotFound) {
 		return nil, nil, ErrNoAttachment
 	}
-	return txn, rc, err
+	return att, rc, err
 }
 
-// Remove deletes the transaction's file.
-func (s *AttachmentService) Remove(ctx context.Context, id, actorID uuid.UUID) (*models.Transaction, error) {
+// Remove deletes one of the transaction's attachments.
+func (s *AttachmentService) Remove(ctx context.Context, id, attachmentID, actorID uuid.UUID) (*models.Transaction, error) {
 	txn, err := s.txns.GetByID(ctx, id, actorID)
 	if err != nil {
 		return nil, err
 	}
-	if txn.AttachmentKey == "" {
-		return txn, nil
-	}
 	if txn.Status == models.TxnStatusVoided || txn.Status == models.TxnStatusReversed {
 		return nil, ErrAttachmentLocked
 	}
-	key := txn.AttachmentKey
-	if err := s.db.WithContext(ctx).Model(txn).Updates(map[string]interface{}{
-		"attachment_key": "", "attachment_name": "", "attachment_type": "", "attachment_size": 0,
-	}).Error; err != nil {
+	att := findAttachment(txn, attachmentID)
+	if att == nil {
+		return nil, ErrNoAttachment
+	}
+	if err := s.db.WithContext(ctx).Delete(&models.TransactionAttachment{}, "id = ?", att.ID).Error; err != nil {
 		return nil, err
 	}
-	_ = s.store.Delete(ctx, key)
+	_ = s.store.Delete(ctx, att.StorageKey)
 	return s.txns.GetByID(ctx, id, actorID)
+}
+
+func findAttachment(txn *models.Transaction, attachmentID uuid.UUID) *models.TransactionAttachment {
+	for i := range txn.Attachments {
+		if txn.Attachments[i].ID == attachmentID {
+			return &txn.Attachments[i]
+		}
+	}
+	return nil
 }

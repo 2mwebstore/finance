@@ -55,9 +55,6 @@ func Connect(cfg *config.Config) (*gorm.DB, error) {
 // AutoMigrate is used only for development / first bootstrap.
 // Production must use versioned SQL migrations.
 func AutoMigrate(db *gorm.DB) error {
-	// Every PIN stored before pin_upgrade_required existed is a 4-digit one (see migration 000008).
-	backfillPINUpgrade := db.Migrator().HasTable(&models.User{}) &&
-		!db.Migrator().HasColumn(&models.User{}, "pin_upgrade_required")
 	err := db.AutoMigrate(
 		&models.User{},
 		&models.Role{},
@@ -74,15 +71,23 @@ func AutoMigrate(db *gorm.DB) error {
 		&models.PaymentMethod{},
 		&models.TransactionNumberSeq{},
 		&models.Transaction{},
+		&models.TransactionAttachment{},
 		&models.OpeningBalance{},
 		&models.CashReconciliation{},
 		&models.TransactionApproval{},
 		&models.AppSetting{},
 	)
-	if err != nil || !backfillPINUpgrade {
+	if err != nil {
 		return err
 	}
-	return db.Exec("UPDATE users SET pin_upgrade_required = TRUE").Error
+	// 4-digit PINs are valid again (PINs are 4 to 6 digits), so nobody has to replace theirs;
+	// drop the flag that sent those users to the profile page (see migration 000009).
+	if db.Migrator().HasColumn(&models.User{}, "pin_upgrade_required") {
+		if err := db.Migrator().DropColumn(&models.User{}, "pin_upgrade_required"); err != nil {
+			return err
+		}
+	}
+	return migrateLegacyAttachments(db)
 }
 
 func Ping(db *gorm.DB) error {
@@ -99,4 +104,31 @@ func MustConnect(cfg *config.Config) *gorm.DB {
 		log.Fatalf("database connection failed: %v", err)
 	}
 	return db
+}
+
+// migrateLegacyAttachments moves each transaction's old single attachment into
+// transaction_attachments (see migration 000010). Rows it has moved are cleared, so it is safe on every start.
+func migrateLegacyAttachments(db *gorm.DB) error {
+	var legacy []models.Transaction
+	if err := db.Select("id", "attachment_key", "attachment_name", "attachment_type", "attachment_size", "created_by_id", "updated_at").
+		Where("attachment_key <> ''").Find(&legacy).Error; err != nil {
+		return err
+	}
+	for _, t := range legacy {
+		err := db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Create(&models.TransactionAttachment{
+				TransactionID: t.ID, StorageKey: t.AttachmentKey, Name: t.AttachmentName,
+				ContentType: t.AttachmentType, Size: t.AttachmentSize, CreatedByID: t.CreatedByID, CreatedAt: t.UpdatedAt,
+			}).Error; err != nil {
+				return err
+			}
+			return tx.Model(&models.Transaction{}).Where("id = ?", t.ID).Updates(map[string]interface{}{
+				"attachment_key": "", "attachment_name": "", "attachment_type": "", "attachment_size": 0,
+			}).Error
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }

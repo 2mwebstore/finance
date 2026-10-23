@@ -144,10 +144,10 @@ func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config) {
 				txns.POST("/:id/approve", middleware.RequireAnyPermission(db, permissions.TransactionsApprove), txnCtrl.Approve)
 				txns.POST("/:id/reject", middleware.RequireAnyPermission(db, permissions.TransactionsReject), txnCtrl.Reject)
 				txns.POST("/:id/reverse", middleware.RequireAnyPermission(db, permissions.TransactionsReverse), txnCtrl.Reverse)
-				// One image/PDF per transaction (stored in R2, or local disk in development).
-				txns.GET("/:id/attachment", middleware.RequireAnyPermission(db, permissions.TransactionsView, permissions.IncomeView, permissions.ExpenseView), txnCtrl.Attachment)
-				txns.POST("/:id/attachment", middleware.RequireAnyPermission(db, permissions.IncomeCreate, permissions.ExpenseCreate, permissions.IncomeEdit, permissions.ExpenseEdit), txnCtrl.UploadAttachment)
-				txns.DELETE("/:id/attachment", middleware.RequireAnyPermission(db, permissions.IncomeCreate, permissions.ExpenseCreate, permissions.IncomeEdit, permissions.ExpenseEdit), txnCtrl.DeleteAttachment)
+				// Up to 2 images/PDFs per transaction (stored in R2, or local disk in development).
+				txns.POST("/:id/attachments", middleware.RequireAnyPermission(db, permissions.IncomeCreate, permissions.ExpenseCreate, permissions.IncomeEdit, permissions.ExpenseEdit), txnCtrl.UploadAttachment)
+				txns.GET("/:id/attachments/:attachmentId", middleware.RequireAnyPermission(db, permissions.TransactionsView, permissions.IncomeView, permissions.ExpenseView), txnCtrl.Attachment)
+				txns.DELETE("/:id/attachments/:attachmentId", middleware.RequireAnyPermission(db, permissions.IncomeCreate, permissions.ExpenseCreate, permissions.IncomeEdit, permissions.ExpenseEdit), txnCtrl.DeleteAttachment)
 			}
 
 			// Phase 6: cash control

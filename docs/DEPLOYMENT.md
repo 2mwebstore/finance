@@ -63,7 +63,7 @@ curl -s -X POST https://YOUR_DOMAIN/api/v1/auth/setup \
     "setup_token":"<SETUP_TOKEN from .env.prod>",
     "username":"superadmin",
     "email":"admin@yourcompany.com",
-    "password":"<6 digit PIN>",
+    "password":"<4 to 6 digit PIN>",
     "full_name":"Super Admin"
   }'
 ```

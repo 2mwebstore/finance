@@ -2,7 +2,7 @@
 
 ## Authentication
 
-- Login: username **or** email + 6-digit PIN. PINs set while they were 4 digits still sign in; those users are flagged (`pin_upgrade_required` on login and `/auth/me`) and the app keeps them on the profile page until they choose a 6-digit PIN
+- Login: username **or** email + PIN of 4 to 6 digits (people may choose 6 for extra safety)
 - Password hashing: Argon2id (preferred) or bcrypt cost ≥ 12
 - Access token: short-lived JWT (15 min default), stored in memory on client
 - Refresh token: rotating, stored in HttpOnly + Secure + SameSite=Strict cookie

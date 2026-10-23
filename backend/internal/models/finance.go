@@ -82,7 +82,7 @@ type Transaction struct {
 	TransactionDate   time.Time       `gorm:"index;not null" json:"transaction_date"`
 	Description       string          `gorm:"type:text" json:"description"` // sanitized rich text (HTML)
 	Counterparty      string          `gorm:"size:255" json:"counterparty"` // payer or payee (no longer entered in the app)
-	// One optional image/PDF per transaction, kept in object storage (R2) under AttachmentKey.
+	// Legacy single attachment (before transaction_attachments); moved there on start, then left empty.
 	AttachmentKey  string `gorm:"size:255" json:"-"`
 	AttachmentName string `gorm:"size:255" json:"attachment_name,omitempty"`
 	AttachmentType string `gorm:"size:128" json:"attachment_type,omitempty"`
@@ -99,6 +99,27 @@ type Transaction struct {
 	Branch        *Branch        `gorm:"foreignKey:BranchID" json:"branch,omitempty"`
 	Category      *Category      `gorm:"foreignKey:CategoryID" json:"category,omitempty"`
 	PaymentMethod *PaymentMethod `gorm:"foreignKey:PaymentMethodID" json:"payment_method,omitempty"`
+	Attachments   []TransactionAttachment `gorm:"foreignKey:TransactionID" json:"-"`
+}
+
+// TransactionAttachment is one image or PDF on a transaction (a receipt, an invoice…), kept in
+// object storage (R2, or local disk in development) under StorageKey.
+type TransactionAttachment struct {
+	ID            uuid.UUID `gorm:"type:char(36);primaryKey" json:"id"`
+	TransactionID uuid.UUID `gorm:"type:char(36);index;not null" json:"transaction_id"`
+	StorageKey    string    `gorm:"size:255;not null" json:"-"`
+	Name          string    `gorm:"size:255;not null" json:"name"`
+	ContentType   string    `gorm:"size:128;not null" json:"type"`
+	Size          int64     `gorm:"not null;default:0" json:"size"`
+	CreatedByID   uuid.UUID `gorm:"type:char(36);not null" json:"created_by_id"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
+func (a *TransactionAttachment) BeforeCreate(tx *gorm.DB) error {
+	if a.ID == uuid.Nil {
+		a.ID = uuid.New()
+	}
+	return nil
 }
 
 // IsFinalized returns true if this transaction counts toward financial totals.

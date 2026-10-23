@@ -69,7 +69,6 @@ onMounted(() => {
 })
 
 function defaultLandingPath() {
-  if (user.value?.pin_upgrade_required) return '/profile'
   const mobile = window.matchMedia('(max-width: 760px)').matches
   if (mobile && canViewTransactions.value) return '/transactions'
   if (canViewDashboard.value) return '/dashboard'

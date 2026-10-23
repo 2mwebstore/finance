@@ -28,7 +28,13 @@ var (
 	ErrNotApprover          = errors.New("only this user's managers can approve or reject it")
 	ErrDescriptionTooLong   = errors.New("description must be at most 1000 characters")
 	ErrTypeNotAllowed       = errors.New("you don't have permission for this type of transaction")
+	ErrReceiptRequired      = errors.New("attach a receipt (image or PDF) before approving this expense")
 )
+
+// withAttachments loads a transaction's files, oldest first.
+func withAttachments(db *gorm.DB) *gorm.DB {
+	return db.Preload("Attachments", func(q *gorm.DB) *gorm.DB { return q.Order("created_at ASC") })
+}
 
 // DescriptionMaxChars matches the counter on the transaction form.
 const DescriptionMaxChars = 1000
@@ -241,7 +247,7 @@ func (s *TransactionService) assertBranchAccess(ctx context.Context, actorID, br
 
 func (s *TransactionService) GetByID(ctx context.Context, id, actorID uuid.UUID) (*models.Transaction, error) {
 	var txn models.Transaction
-	err := s.db.WithContext(ctx).
+	err := withAttachments(s.db.WithContext(ctx)).
 		Preload("Branch").
 		Preload("Category").
 		Preload("PaymentMethod").
@@ -327,7 +333,7 @@ func (s *TransactionService) List(ctx context.Context, f TransactionListFilter, 
 	}
 
 	var items []models.Transaction
-	err = q.Preload("Branch").Preload("Category").Preload("PaymentMethod").
+	err = withAttachments(q).Preload("Branch").Preload("Category").Preload("PaymentMethod").
 		Order("transaction_date DESC, created_at DESC").
 		Offset((page - 1) * size).Limit(size).
 		Find(&items).Error
@@ -569,6 +575,10 @@ func (s *TransactionService) Approve(ctx context.Context, id uuid.UUID, notes st
 	// Prevent self-approval
 	if txn.CreatedByID == actorID {
 		return nil, errors.New("cannot approve your own transaction")
+	}
+	// An expense only counts once its receipt is on file.
+	if txn.Type == models.TxnTypeExpense && len(txn.Attachments) == 0 {
+		return nil, ErrReceiptRequired
 	}
 	if err := s.assertCanDecide(ctx, txn, actorID); err != nil {
 		return nil, err
@@ -817,9 +827,10 @@ func (s *TransactionService) CreatorNames(ctx context.Context, items []models.Tr
 	return out
 }
 
-// CanWriteType reports whether the actor may create or edit transactions of this type
-// (used for attachments). Owners/admins/Super Admins always can.
-func (s *TransactionService) CanWriteType(ctx context.Context, actorID uuid.UUID, txnType string) bool {
+// CanChangeAttachments reports whether the actor may add or delete files on the transaction.
+// Creating is enough while it is pending (the person entering it adds the receipt); once it is
+// approved, changing its files needs edit rights. Owners/admins/Super Admins always can.
+func (s *TransactionService) CanChangeAttachments(ctx context.Context, actorID uuid.UUID, txn *models.Transaction) bool {
 	var actor models.User
 	if err := s.db.WithContext(ctx).Preload("Roles.Permissions").First(&actor, "id = ?", actorID).Error; err != nil {
 		return false
@@ -829,7 +840,8 @@ func (s *TransactionService) CanWriteType(ctx context.Context, actorID uuid.UUID
 	}
 	for _, r := range actor.Roles {
 		for _, p := range r.Permissions {
-			if p.Code == txnType+".create" || p.Code == txnType+".edit" || p.Code == permissions.BranchesManage {
+			if p.Code == txn.Type+".edit" || p.Code == permissions.BranchesManage ||
+				(p.Code == txn.Type+".create" && txn.Status != models.TxnStatusApproved) {
 				return true
 			}
 		}

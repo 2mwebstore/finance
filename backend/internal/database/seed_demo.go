@@ -156,12 +156,8 @@ func seedDemoUsers(tx *gorm.DB, branches map[string]models.Branch, resetPIN bool
 		} else if err != nil {
 			return nil, err
 		} else if resetPIN {
-			// A forced demo seed restores the documented demo PIN for existing
-			// accounts too, including databases seeded before PINs became 6 digits.
-			if err := tx.Model(&u).Updates(map[string]interface{}{
-				"password_hash":        hash,
-				"pin_upgrade_required": false,
-			}).Error; err != nil {
+			// A forced demo seed restores the documented demo PIN for existing accounts too.
+			if err := tx.Model(&u).Update("password_hash", hash).Error; err != nil {
 				return nil, fmt.Errorf("reset demo PIN for %s: %w", d.Username, err)
 			}
 		}

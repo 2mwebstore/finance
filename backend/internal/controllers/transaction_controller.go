@@ -269,11 +269,11 @@ func txnJSON(t *models.Transaction) gin.H {
 	if t.PaymentMethod != nil {
 		h["payment_method"] = gin.H{"id": t.PaymentMethod.ID, "code": t.PaymentMethod.Code, "name": t.PaymentMethod.Name}
 	}
-	if t.AttachmentKey != "" {
-		h["attachment"] = gin.H{"name": t.AttachmentName, "type": t.AttachmentType, "size": t.AttachmentSize}
-	} else {
-		h["attachment"] = nil
+	attachments := make([]gin.H, 0, len(t.Attachments))
+	for _, a := range t.Attachments {
+		attachments = append(attachments, gin.H{"id": a.ID, "name": a.Name, "type": a.ContentType, "size": a.Size})
 	}
+	h["attachments"] = attachments
 	return h
 }
 
@@ -394,7 +394,7 @@ func (tc *TransactionController) Reverse(c *gin.Context) {
 	c.JSON(http.StatusCreated, txnJSON(txn))
 }
 
-// --- Attachment (one image or PDF per transaction) ---
+// --- Attachments (up to services.MaxAttachments images or PDFs per transaction) ---
 
 func (tc *TransactionController) attachmentTarget(c *gin.Context) (uuid.UUID, uuid.UUID, bool) {
 	actorID, ok := getActorID(c)
@@ -410,15 +410,24 @@ func (tc *TransactionController) attachmentTarget(c *gin.Context) (uuid.UUID, uu
 	return id, actorID, true
 }
 
-// canChangeAttachment requires create or edit permission for the transaction's type.
-func (tc *TransactionController) canChangeAttachment(c *gin.Context, id, actorID uuid.UUID) bool {
+func attachmentID(c *gin.Context) (uuid.UUID, bool) {
+	id, err := uuid.Parse(c.Param("attachmentId"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid attachment id"})
+		return uuid.Nil, false
+	}
+	return id, true
+}
+
+// canChangeAttachments: create or edit rights for the type while pending, edit rights once approved.
+func (tc *TransactionController) canChangeAttachments(c *gin.Context, id, actorID uuid.UUID) bool {
 	txn, err := tc.svc.GetByID(c.Request.Context(), id, actorID)
 	if err != nil {
 		writeTxnError(c, err)
 		return false
 	}
-	if !tc.svc.CanWriteType(c.Request.Context(), actorID, txn.Type) {
-		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+	if !tc.svc.CanChangeAttachments(c.Request.Context(), actorID, txn) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "you can't change the files on this transaction"})
 		return false
 	}
 	return true
@@ -426,7 +435,7 @@ func (tc *TransactionController) canChangeAttachment(c *gin.Context, id, actorID
 
 func (tc *TransactionController) UploadAttachment(c *gin.Context) {
 	id, actorID, ok := tc.attachmentTarget(c)
-	if !ok || !tc.canChangeAttachment(c, id, actorID) {
+	if !ok || !tc.canChangeAttachments(c, id, actorID) {
 		return
 	}
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, services.MaxAttachmentBytes+(1<<20))
@@ -458,7 +467,7 @@ func (tc *TransactionController) UploadAttachment(c *gin.Context) {
 		return
 	}
 	reader := io.MultiReader(bytes.NewReader(head[:n]), f)
-	txn, err := tc.attachments.Attach(c.Request.Context(), id, actorID, fh.Filename, contentType, fh.Size, reader)
+	txn, err := tc.attachments.Add(c.Request.Context(), id, actorID, fh.Filename, contentType, fh.Size, reader)
 	if err != nil {
 		writeTxnError(c, err)
 		return
@@ -468,7 +477,7 @@ func (tc *TransactionController) UploadAttachment(c *gin.Context) {
 		tc.audit.Record(c.Request.Context(), audit.Event{
 			ActorID: &actorID, Action: audit.ActionTxnUpdate, EntityType: "transaction",
 			EntityID: txn.ID.String(), BranchID: &bid, Outcome: "success", IPAddress: c.ClientIP(),
-			Details: map[string]interface{}{"attachment": "added", "name": txn.AttachmentName, "type": contentType, "size": fh.Size},
+			Details: map[string]interface{}{"attachment": "added", "name": fh.Filename, "type": contentType, "size": fh.Size},
 		})
 	}
 	c.JSON(http.StatusOK, txnJSON(txn))
@@ -479,7 +488,11 @@ func (tc *TransactionController) Attachment(c *gin.Context) {
 	if !ok {
 		return
 	}
-	txn, rc, err := tc.attachments.Open(c.Request.Context(), id, actorID)
+	attID, ok := attachmentID(c)
+	if !ok {
+		return
+	}
+	att, rc, err := tc.attachments.Open(c.Request.Context(), id, attID, actorID)
 	if err != nil {
 		if errors.Is(err, services.ErrNoAttachment) {
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
@@ -489,8 +502,8 @@ func (tc *TransactionController) Attachment(c *gin.Context) {
 		return
 	}
 	defer rc.Close()
-	name := strings.ReplaceAll(txn.AttachmentName, "\"", "")
-	c.DataFromReader(http.StatusOK, txn.AttachmentSize, txn.AttachmentType, rc, map[string]string{
+	name := strings.ReplaceAll(att.Name, "\"", "")
+	c.DataFromReader(http.StatusOK, att.Size, att.ContentType, rc, map[string]string{
 		"Content-Disposition":    mime.FormatMediaType("inline", map[string]string{"filename": name}),
 		"X-Content-Type-Options": "nosniff",
 		"Cache-Control":          "private, max-age=300",
@@ -499,11 +512,19 @@ func (tc *TransactionController) Attachment(c *gin.Context) {
 
 func (tc *TransactionController) DeleteAttachment(c *gin.Context) {
 	id, actorID, ok := tc.attachmentTarget(c)
-	if !ok || !tc.canChangeAttachment(c, id, actorID) {
+	if !ok || !tc.canChangeAttachments(c, id, actorID) {
 		return
 	}
-	txn, err := tc.attachments.Remove(c.Request.Context(), id, actorID)
+	attID, ok := attachmentID(c)
+	if !ok {
+		return
+	}
+	txn, err := tc.attachments.Remove(c.Request.Context(), id, attID, actorID)
 	if err != nil {
+		if errors.Is(err, services.ErrNoAttachment) {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
 		writeTxnError(c, err)
 		return
 	}
@@ -512,7 +533,7 @@ func (tc *TransactionController) DeleteAttachment(c *gin.Context) {
 		tc.audit.Record(c.Request.Context(), audit.Event{
 			ActorID: &actorID, Action: audit.ActionTxnUpdate, EntityType: "transaction",
 			EntityID: txn.ID.String(), BranchID: &bid, Outcome: "success", IPAddress: c.ClientIP(),
-			Details: map[string]interface{}{"attachment": "removed"},
+			Details: map[string]interface{}{"attachment": "removed", "attachment_id": attID.String()},
 		})
 	}
 	c.JSON(http.StatusOK, txnJSON(txn))

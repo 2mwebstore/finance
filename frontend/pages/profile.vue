@@ -6,10 +6,6 @@
       <p class="mt-1 text-sm text-muted">Manage your account details and sign-in PIN.</p>
     </header>
 
-    <AppAlert v-if="user?.pin_upgrade_required" type="warning" :title="`Choose a new ${PIN_LENGTH}-digit PIN`">
-      Sign-in PINs are now {{ PIN_LENGTH }} digits. Your {{ OLD_PIN_LENGTH }}-digit PIN still works for now: enter it as your current PIN below, then choose a {{ PIN_LENGTH }}-digit one to keep using the app.
-    </AppAlert>
-
     <article class="rounded-xl border border-border bg-white p-4 sm:p-5">
       <h2 class="text-sm font-semibold text-navy">Account details</h2>
       <dl class="mt-3 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
@@ -21,7 +17,7 @@
     </article>
 
     <form class="space-y-4 rounded-xl border border-border bg-white p-4 sm:p-5" novalidate @submit.prevent="changePassword">
-      <div><h2 class="text-sm font-semibold text-navy">Change PIN</h2><p class="mt-1 text-xs text-muted">Enter your current PIN, then the new {{ PIN_LENGTH }}-digit PIN. Your other devices will be signed out.</p></div>
+      <div><h2 class="text-sm font-semibold text-navy">Change PIN</h2><p class="mt-1 text-xs text-muted">Enter your current PIN, then a new PIN of {{ MIN_PIN_LENGTH }} to {{ MAX_PIN_LENGTH }} digits. Your other devices will be signed out.</p></div>
       <div class="grid max-w-md grid-cols-1 gap-3 sm:grid-cols-2">
         <div class="block space-y-1 text-xs font-medium text-muted"><span>Current PIN</span><PinInput v-model="currentPin" existing aria-label="Current PIN" :aria-invalid="pinCheck.invalid('current_password')" /></div>
         <div class="block space-y-1 text-xs font-medium text-muted"><span>New PIN</span><PinInput v-model="newPin" aria-label="New PIN" :aria-invalid="pinCheck.invalid('new_password')" /></div>
@@ -34,7 +30,7 @@
 
 <script setup lang="ts">
 import { useToast } from '~/composables/useToast'
-import { OLD_PIN_LENGTH, PIN_LENGTH, rule } from '~/utils/validation'
+import { MAX_PIN_LENGTH, MIN_PIN_LENGTH, rule } from '~/utils/validation'
 import { useFormErrors } from '~/composables/useFormErrors'
 const { api } = useApi()
 const { user, fetchMe } = useAuth()

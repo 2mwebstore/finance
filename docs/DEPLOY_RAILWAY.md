@@ -86,7 +86,7 @@ Read the token with `railway variable list --service api --kv | grep SETUP_TOKEN
 curl -X POST https://<your-web-domain>/api/v1/auth/setup -H 'Content-Type: application/json' -d '{"setup_token":"<SETUP_TOKEN>","username":"admin","email":"you@example.com","password":"123456","full_name":"Your Name"}'
 ```
 
-`password` is the 6-digit PIN. Setup works only while no Super Admin exists. Afterwards remove the
+`password` is the PIN (4 to 6 digits). Setup works only while no Super Admin exists. Afterwards remove the
 token so it can't be reused:
 
 ```bash

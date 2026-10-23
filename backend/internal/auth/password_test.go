@@ -31,33 +31,37 @@ func TestHashAndVerifyPassword(t *testing.T) {
 	}
 }
 
-func TestHashPasswordRejectsAnythingButSixDigits(t *testing.T) {
-	for _, pin := range []string{"", "short", "1234", "12345", "1234567", "12a456", "１２３４５６"} {
+func TestHashPasswordAcceptsFourToSixDigits(t *testing.T) {
+	for _, pin := range []string{"2468", "24681", "246810"} {
+		if _, err := HashPassword(pin); err != nil {
+			t.Errorf("HashPassword(%q) failed: %v", pin, err)
+		}
+	}
+	for _, pin := range []string{"", "short", "123", "1234567", "12a4", "１２３４"} {
 		if _, err := HashPassword(pin); err == nil {
 			t.Errorf("HashPassword(%q) should fail", pin)
 		}
 	}
 }
 
-// PINs hashed while they were 4 digits must keep signing in until the user picks a new one.
-func TestVerifyPasswordAcceptsLegacyFourDigitPIN(t *testing.T) {
-	hash, err := encodeHash("2468")
+func TestVerifyPasswordFourDigitPIN(t *testing.T) {
+	hash, err := HashPassword("2468")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if ok, err := VerifyPassword("2468", hash); err != nil || !ok {
-		t.Fatalf("legacy PIN should verify, got ok=%v err=%v", ok, err)
+		t.Fatalf("PIN should verify, got ok=%v err=%v", ok, err)
 	}
 	if ok, _ := VerifyPassword("246800", hash); ok {
 		t.Fatal("a different PIN should not verify")
 	}
 }
 
-func TestIsCurrentPIN(t *testing.T) {
-	cases := map[string]bool{"246810": true, "000000": true, "2468": false, "24681": false, "2468100": false, "24681a": false}
+func TestIsValidPIN(t *testing.T) {
+	cases := map[string]bool{"246810": true, "2468": true, "24681": true, "246": false, "2468100": false, "24681a": false}
 	for pin, want := range cases {
-		if got := IsCurrentPIN(pin); got != want {
-			t.Errorf("IsCurrentPIN(%q) = %v, want %v", pin, got, want)
+		if got := IsValidPIN(pin); got != want {
+			t.Errorf("IsValidPIN(%q) = %v, want %v", pin, got, want)
 		}
 	}
 }

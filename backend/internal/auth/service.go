@@ -68,14 +68,7 @@ func (s *Service) Login(ctx context.Context, identifier, password, userAgent, ip
 	if !user.IsActive {
 		return nil, ErrAccountInactive
 	}
-	updates := map[string]interface{}{"last_login_at": time.Now()}
-	// PINs from before they grew to 6 digits still sign in; flag those users so the app asks
-	// them to choose a new one.
-	if upgrade := !IsCurrentPIN(password); upgrade != user.PINUpgradeRequired {
-		updates["pin_upgrade_required"] = upgrade
-		user.PINUpgradeRequired = upgrade
-	}
-	s.db.WithContext(ctx).Model(&user).Updates(updates)
+	s.db.WithContext(ctx).Model(&user).Update("last_login_at", time.Now())
 
 	roles := make([]string, 0, len(user.Roles))
 	for _, r := range user.Roles {
@@ -176,7 +169,7 @@ var (
 // spendHashTime makes a login for an unknown username take as long as a real PIN check, so
 // response times don't reveal which usernames exist.
 func spendHashTime(pin string) {
-	unknownUserHashOnce.Do(func() { unknownUserHash, _ = HashPassword(strings.Repeat("0", PINLength)) })
+	unknownUserHashOnce.Do(func() { unknownUserHash, _ = HashPassword(strings.Repeat("0", MinPINLength)) })
 	if unknownUserHash != "" {
 		_, _ = VerifyPassword(pin, unknownUserHash)
 	}
@@ -365,10 +358,7 @@ func (s *Service) ChangePassword(ctx context.Context, userID, keepSessionID uuid
 		return err
 	}
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&user).Updates(map[string]interface{}{
-			"password_hash":        hash,
-			"pin_upgrade_required": false,
-		}).Error; err != nil {
+		if err := tx.Model(&user).Update("password_hash", hash).Error; err != nil {
 			return err
 		}
 		return tx.Model(&models.Session{}).

@@ -36,7 +36,6 @@ type User struct {
 	FailedLogins   int        `gorm:"default:0;not null" json:"-"`
 	LockedUntil    *time.Time `json:"-"`
 	// Set when the user signs in with an old 4-digit PIN; cleared once they choose a 6-digit one.
-	PINUpgradeRequired bool `gorm:"column:pin_upgrade_required;default:false;not null" json:"-"`
 
 	Roles    []Role   `gorm:"many2many:user_roles;" json:"roles,omitempty"`
 	Branches []Branch `gorm:"many2many:user_branches;" json:"branches,omitempty"`

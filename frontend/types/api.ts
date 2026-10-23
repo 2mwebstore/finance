@@ -9,8 +9,6 @@ export interface User {
   permissions: string[]
   branches: { id: string; code: string; name: string }[]
   last_login_at?: string
-  /** Still signed in with an old 4-digit PIN: must choose a 6-digit one on the profile page. */
-  pin_upgrade_required?: boolean
 }
 
 export interface LoginResponse {
@@ -23,9 +21,18 @@ export interface LoginResponse {
     full_name: string
     is_super_admin: boolean
     roles: string[]
-    pin_upgrade_required?: boolean
   }
 }
+
+export interface TransactionAttachment {
+  id: string
+  name: string
+  type: string
+  size: number
+}
+
+/** How many files one transaction can have (API: services.MaxAttachments). */
+export const MAX_ATTACHMENTS = 2
 
 export interface Transaction {
   id: string
@@ -41,8 +48,8 @@ export interface Transaction {
   transaction_date: string
   description: string
   counterparty?: string
-  /** One optional image/PDF (served by GET /transactions/:id/attachment) */
-  attachment?: { name: string; type: string; size: number } | null
+  /** Up to MAX_ATTACHMENTS images/PDFs (each served by GET /transactions/:id/attachments/:attachmentId) */
+  attachments?: TransactionAttachment[]
   /** List rows only: whether the signed-in user may approve/reject this pending transaction */
   can_approve?: boolean
   can_reject?: boolean
