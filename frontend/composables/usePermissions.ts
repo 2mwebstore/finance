@@ -82,6 +82,8 @@ export function usePermissions() {
   const canViewRoles = computed(() => can(P.RolesView, P.RolesManage))
   const canViewAudit = computed(() => can(P.AuditLogsView))
   const canManageSettings = computed(() => can(P.SettingsManage))
+  // The API also requires full access (owner / Super Admin) for backups.
+  const canManageBackups = computed(() => hasFullAccess.value && can(P.BackupsManage))
 
   return {
     P,
@@ -117,5 +119,6 @@ export function usePermissions() {
     canViewRoles,
     canViewAudit,
     canManageSettings,
+    canManageBackups,
   }
 }

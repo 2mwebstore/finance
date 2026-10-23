@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/cambodia-finance/income-expense/internal/audit"
+	"github.com/cambodia-finance/income-expense/internal/backup"
 	"github.com/cambodia-finance/income-expense/internal/auth"
 	"github.com/cambodia-finance/income-expense/internal/config"
 	"github.com/cambodia-finance/income-expense/internal/controllers"
@@ -17,7 +18,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config) {
+func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config, backups *backup.Service) {
 	authSvc := auth.NewService(db, cfg)
 	tokenSvc := auth.NewTokenService(cfg)
 	auditSvc := audit.NewService(db)
@@ -51,6 +52,7 @@ func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config) {
 	notifyCtrl := controllers.NewNotificationController(tg)
 	settingsCtrl := controllers.NewSettingsController(settingsSvc, auditSvc)
 	cashCtrl := controllers.NewCashController(cashSvc)
+	backupCtrl := controllers.NewBackupController(backups, db, auditSvc)
 
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
@@ -183,6 +185,19 @@ func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config) {
 				auditCtrl.Cleanup)
 			api.GET("/notifications/status", middleware.RequireAnyPermission(db, permissions.SettingsManage), notifyCtrl.Status)
 			api.POST("/notifications/test", middleware.RequireAnyPermission(db, permissions.SettingsManage), notifyCtrl.Test)
+			// Database backups: the whole database, so owner / Super Admin only (full access + backups.manage).
+			bk := api.Group("/backups", middleware.RequireAnyPermission(db, permissions.BackupsManage), middleware.RequireFullAccess(db))
+			{
+				bk.GET("", backupCtrl.List)
+				bk.POST("", backupCtrl.Create)
+				bk.PUT("/settings", backupCtrl.UpdateSettings)
+				bk.POST("/telegram-test", backupCtrl.TestTelegram)
+				bk.POST("/upload", backupCtrl.Upload)
+				bk.GET("/:name/download", backupCtrl.Download)
+				bk.POST("/:name/telegram", backupCtrl.Resend)
+				bk.POST("/:name/restore", backupCtrl.Restore)
+				bk.DELETE("/:name", backupCtrl.Delete)
+			}
 			api.GET("/settings", middleware.RequireAnyPermission(db, permissions.SettingsManage, permissions.DashboardView), settingsCtrl.Get)
 			api.PUT("/settings", middleware.RequireAnyPermission(db, permissions.SettingsManage), settingsCtrl.Update)
 		}

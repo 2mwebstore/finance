@@ -31,7 +31,8 @@
     { "code": "categories.manage", "name": "Manage Categories", "module": "Settings", "description": "Create, edit, and deactivate income/expense categories" },
     { "code": "currency-settings.manage", "name": "Manage Currency Settings", "module": "Settings", "description": "Configure currency options" },
     { "code": "audit-logs.view", "name": "View Audit Logs", "module": "Audit", "description": "View system audit logs" },
-    { "code": "settings.manage", "name": "Manage Settings", "module": "Settings", "description": "Change application settings" }
+    { "code": "settings.manage", "name": "Manage Settings", "module": "Settings", "description": "Change application settings" },
+    { "code": "backups.manage", "name": "Manage Backups", "module": "Backups", "description": "Back up the database, send backups to Telegram, and restore from a backup" }
   ],
-  "count": 30
+  "count": 31
 }

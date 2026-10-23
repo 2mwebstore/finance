@@ -77,3 +77,41 @@ func SeedPermissionsAndRoles(db *gorm.DB) error {
 	log.Println("seeded permissions and default roles")
 	return nil
 }
+
+// EnsureRequiredPermissions adds permissions that features depend on when they are missing, and
+// grants them to the roles that get every permission (super_admin, owner). It runs on every start,
+// even with AUTO_SEED off, so a new feature's page appears without a full seed. It only adds.
+func EnsureRequiredPermissions(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&models.Permission{}) {
+		return nil
+	}
+	required := map[string]bool{permissions.BackupsManage: true}
+	for _, p := range permissions.AllPermissions() {
+		if !required[p.Code] {
+			continue
+		}
+		var perm models.Permission
+		err := db.Where("code = ?", p.Code).First(&perm).Error
+		if err == gorm.ErrRecordNotFound {
+			perm = models.Permission{Base: models.Base{ID: uuid.New()}, Code: p.Code, Name: p.Name, Module: p.Module, Description: p.Description}
+			if err := db.Create(&perm).Error; err != nil {
+				return fmt.Errorf("create permission %s: %w", p.Code, err)
+			}
+			log.Printf("added permission %s", p.Code)
+		} else if err != nil {
+			return err
+		}
+		for _, roleCode := range []string{"super_admin", "owner"} {
+			var role models.Role
+			if err := db.Preload("Permissions", "code = ?", p.Code).Where("code = ?", roleCode).First(&role).Error; err != nil {
+				continue // role not created yet
+			}
+			if len(role.Permissions) == 0 {
+				if err := db.Model(&role).Association("Permissions").Append(&perm); err != nil {
+					return fmt.Errorf("grant %s to %s: %w", p.Code, roleCode, err)
+				}
+			}
+		}
+	}
+	return nil
+}

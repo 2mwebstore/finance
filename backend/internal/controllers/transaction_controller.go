@@ -271,7 +271,11 @@ func txnJSON(t *models.Transaction) gin.H {
 	}
 	attachments := make([]gin.H, 0, len(t.Attachments))
 	for _, a := range t.Attachments {
-		attachments = append(attachments, gin.H{"id": a.ID, "name": a.Name, "type": a.ContentType, "size": a.Size})
+		stage := a.Stage
+		if stage == "" {
+			stage = models.AttachmentSubmitted
+		}
+		attachments = append(attachments, gin.H{"id": a.ID, "name": a.Name, "type": a.ContentType, "size": a.Size, "stage": stage})
 	}
 	h["attachments"] = attachments
 	return h
@@ -422,15 +426,26 @@ func attachmentID(c *gin.Context) (uuid.UUID, bool) {
 	return id, true
 }
 
-// canChangeAttachments: create or edit rights for the type while pending, edit rights once approved.
-func (tc *TransactionController) canChangeAttachments(c *gin.Context, id, actorID uuid.UUID) bool {
-	txn, err := tc.svc.GetByID(c.Request.Context(), id, actorID)
-	if err != nil {
-		writeTxnError(c, err)
+// canChangeStage checks the actor may add or delete files in this stage of the transaction:
+// submitted files need create or edit rights for the type (edit once approved); approval files
+// need approve rights and must not be on the actor's own transaction.
+func (tc *TransactionController) canChangeStage(c *gin.Context, txn *models.Transaction, actorID uuid.UUID, stage string) bool {
+	allowed := false
+	switch stage {
+	case models.AttachmentApproval:
+		allowed = tc.svc.CanChangeApprovalFiles(c.Request.Context(), actorID, txn)
+	case models.AttachmentSubmitted, "":
+		allowed = tc.svc.CanChangeAttachments(c.Request.Context(), actorID, txn)
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": services.ErrBadStage.Error()})
 		return false
 	}
-	if !tc.svc.CanChangeAttachments(c.Request.Context(), actorID, txn) {
-		c.JSON(http.StatusForbidden, gin.H{"error": "you can't change the files on this transaction"})
+	if !allowed {
+		msg := "you can't change these files"
+		if stage == models.AttachmentApproval {
+			msg = "only an approver (not the person who entered it) can change the approval files"
+		}
+		c.JSON(http.StatusForbidden, gin.H{"error": msg})
 		return false
 	}
 	return true
@@ -438,10 +453,20 @@ func (tc *TransactionController) canChangeAttachments(c *gin.Context, id, actorI
 
 func (tc *TransactionController) UploadAttachment(c *gin.Context) {
 	id, actorID, ok := tc.attachmentTarget(c)
-	if !ok || !tc.canChangeAttachments(c, id, actorID) {
+	if !ok {
 		return
 	}
+	// Cap the body before anything reads the form (reading "stage" parses the whole upload).
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, services.MaxAttachmentBytes+(1<<20))
+	stage := c.DefaultPostForm("stage", models.AttachmentSubmitted)
+	txn, err := tc.svc.GetByID(c.Request.Context(), id, actorID)
+	if err != nil {
+		writeTxnError(c, err)
+		return
+	}
+	if !tc.canChangeStage(c, txn, actorID, stage) {
+		return
+	}
 	fh, err := c.FormFile("file")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "choose an image or PDF (up to 10 MB)"})
@@ -470,7 +495,7 @@ func (tc *TransactionController) UploadAttachment(c *gin.Context) {
 		return
 	}
 	reader := io.MultiReader(bytes.NewReader(head[:n]), f)
-	txn, err := tc.attachments.Add(c.Request.Context(), id, actorID, fh.Filename, contentType, fh.Size, reader)
+	txn, err = tc.attachments.Add(c.Request.Context(), id, actorID, stage, fh.Filename, contentType, fh.Size, reader)
 	if err != nil {
 		writeTxnError(c, err)
 		return
@@ -480,7 +505,7 @@ func (tc *TransactionController) UploadAttachment(c *gin.Context) {
 		tc.audit.Record(c.Request.Context(), audit.Event{
 			ActorID: &actorID, Action: audit.ActionTxnUpdate, EntityType: "transaction",
 			EntityID: txn.ID.String(), BranchID: &bid, Outcome: "success", IPAddress: c.ClientIP(),
-			Details: map[string]interface{}{"attachment": "added", "name": fh.Filename, "type": contentType, "size": fh.Size},
+			Details: map[string]interface{}{"attachment": "added", "stage": stage, "name": fh.Filename, "type": contentType, "size": fh.Size},
 		})
 	}
 	c.JSON(http.StatusOK, txnJSON(txn))
@@ -515,11 +540,23 @@ func (tc *TransactionController) Attachment(c *gin.Context) {
 
 func (tc *TransactionController) DeleteAttachment(c *gin.Context) {
 	id, actorID, ok := tc.attachmentTarget(c)
-	if !ok || !tc.canChangeAttachments(c, id, actorID) {
+	if !ok {
 		return
 	}
 	attID, ok := attachmentID(c)
 	if !ok {
+		return
+	}
+	current, att, err := tc.attachments.Find(c.Request.Context(), id, attID, actorID)
+	if err != nil {
+		if errors.Is(err, services.ErrNoAttachment) {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+		writeTxnError(c, err)
+		return
+	}
+	if !tc.canChangeStage(c, current, actorID, att.Stage) {
 		return
 	}
 	txn, err := tc.attachments.Remove(c.Request.Context(), id, attID, actorID)

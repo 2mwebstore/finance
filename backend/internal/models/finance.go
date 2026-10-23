@@ -102,6 +102,12 @@ type Transaction struct {
 	Attachments   []TransactionAttachment `gorm:"foreignKey:TransactionID" json:"-"`
 }
 
+// Attachment stages.
+const (
+	AttachmentSubmitted = "submitted"
+	AttachmentApproval  = "approval"
+)
+
 // TransactionAttachment is one image or PDF on a transaction (a receipt, an invoice…), kept in
 // object storage (R2, or local disk in development) under StorageKey.
 type TransactionAttachment struct {
@@ -111,6 +117,9 @@ type TransactionAttachment struct {
 	Name          string    `gorm:"size:255;not null" json:"name"`
 	ContentType   string    `gorm:"size:128;not null" json:"type"`
 	Size          int64     `gorm:"not null;default:0" json:"size"`
+	// Stage keeps the files from whoever entered the transaction (submitted) apart from the ones
+	// its approver added (approval); the app shows them separately.
+	Stage         string    `gorm:"size:16;not null;default:'submitted'" json:"stage"`
 	CreatedByID   uuid.UUID `gorm:"type:char(36);not null" json:"created_by_id"`
 	CreatedAt     time.Time `json:"created_at"`
 }

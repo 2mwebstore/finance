@@ -38,6 +38,7 @@ export const P = {
   CurrencySettingsManage: 'currency-settings.manage',
   AuditLogsView: 'audit-logs.view',
   SettingsManage: 'settings.manage',
+  BackupsManage: 'backups.manage',
 } as const
 
 export type PermissionCode = (typeof P)[keyof typeof P]
@@ -87,10 +88,11 @@ export const PERMISSION_CATALOG: {
   { code: P.CurrencySettingsManage, name: 'Manage Currency Settings', module: 'Settings', description: 'Configure currency options' },
   { code: P.AuditLogsView, name: 'View Audit Logs', module: 'Audit', description: 'View system audit logs' },
   { code: P.SettingsManage, name: 'Manage Settings', module: 'Settings', description: 'Change application settings' },
+  { code: P.BackupsManage, name: 'Manage Backups', module: 'Backups', description: 'Back up the database, send backups to Telegram, and restore from a backup' },
 ]
 
 /** Permission modules in the same order as the sidebar (Settings holds Categories). */
-export const PERMISSION_MODULE_ORDER = ['Dashboard', 'Transactions', 'Income', 'Expenses', 'Reports', 'Branches', 'Roles', 'Users', 'Settings', 'Audit']
+export const PERMISSION_MODULE_ORDER = ['Dashboard', 'Transactions', 'Income', 'Expenses', 'Reports', 'Branches', 'Roles', 'Users', 'Settings', 'Audit', 'Backups']
 
 /** Sort key for a module: sidebar order, unknown modules last. */
 export function permissionModuleRank(module: string) {
@@ -108,6 +110,7 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionCode[]> = {
   '/admin/users': [P.UsersView, P.UsersManage],
   '/admin/roles': [P.RolesView, P.RolesManage],
   '/admin/audit': [P.AuditLogsView],
+  '/admin/backups': [P.BackupsManage],
   '/admin/permissions': [P.RolesView],
   '/admin/categories': [P.CategoriesManage],
 }

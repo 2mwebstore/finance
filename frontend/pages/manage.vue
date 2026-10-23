@@ -27,11 +27,11 @@
 
 <script setup lang="ts">
 import type { Component } from 'vue'
-import { Building2, ChevronRight, KeyRound, ReceiptText, ShieldCheck, Tags, UsersRound } from 'lucide-vue-next'
+import { Building2, ChevronRight, DatabaseBackup, KeyRound, ReceiptText, ShieldCheck, Tags, UsersRound } from 'lucide-vue-next'
 
 type ManageItem = { label: string; description: string; to: string; icon: Component }
 
-const { can, canViewBranches, canViewUsers, canViewRoles, canViewAudit } = usePermissions()
+const { can, canViewBranches, canViewUsers, canViewRoles, canViewAudit, canManageBackups } = usePermissions()
 
 const manageItems = computed<ManageItem[]>(() => {
   const items: ManageItem[] = []
@@ -41,6 +41,7 @@ const manageItems = computed<ManageItem[]>(() => {
   if (canViewUsers.value) items.push({ label: 'Users', description: 'Manage user accounts, roles, and status.', to: '/admin/users', icon: UsersRound })
   if (can('categories.manage')) items.push({ label: 'Categories', description: 'Manage expense categories.', to: '/admin/categories', icon: Tags })
   if (canViewAudit.value) items.push({ label: 'Audit Log', description: 'Review account activity and filter by date.', to: '/admin/audit', icon: ReceiptText })
+  if (canManageBackups.value) items.push({ label: 'Backups', description: 'Daily database backups to Telegram, and restore.', to: '/admin/backups', icon: DatabaseBackup })
   return items
 })
 </script>

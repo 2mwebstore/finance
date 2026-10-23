@@ -14,9 +14,15 @@ type Config struct {
 	AppPort  string
 	AppName  string
 	Timezone string
-	// AutoMigrate creates/updates tables and seeds roles, permissions and categories on start.
-	// Always on in development/test; set AUTO_MIGRATE=true on hosts without a migration step (Railway).
+	// AutoMigrate creates/updates tables on start. Always on in development/test; set
+	// AUTO_MIGRATE=true on hosts without a migration step (Railway).
 	AutoMigrate bool
+	// AutoSeed fills in the base data on start: permissions, default roles, categories and payment
+	// methods (it only adds what is missing). Always on in development/test; elsewhere AUTO_SEED,
+	// which defaults to AUTO_MIGRATE so existing setups keep seeding.
+	AutoSeed bool
+	// BackupDir is where database backups are kept (BACKUP_DIR, default "backups").
+	BackupDir string
 
 	DBHost     string
 	DBPort     string
@@ -67,6 +73,8 @@ func Load() *Config {
 		AppName:     getEnv("APP_NAME", "income-expense-api"),
 		Timezone:    getEnv("TZ", "Asia/Phnom_Penh"),
 		AutoMigrate: appEnv == "development" || appEnv == "test" || getEnvBool("AUTO_MIGRATE", false),
+		AutoSeed:    appEnv == "development" || appEnv == "test" || getEnvBool("AUTO_SEED", getEnvBool("AUTO_MIGRATE", false)),
+		BackupDir:   getEnv("BACKUP_DIR", "backups"),
 
 		DBHost:     getEnv("DB_HOST", "localhost"),
 		DBPort:     getEnv("DB_PORT", "3306"),

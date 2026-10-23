@@ -104,7 +104,8 @@
               </div>
               <input ref="fileInput" type="file" class="sr-only" multiple :accept="ACCEPTED_TYPES.join(',')" tabindex="-1" aria-hidden="true" @change="onFileChange" />
               <small v-if="attachmentError" class="field-error" role="alert">{{ attachmentError }}</small>
-              <small v-else-if="transactionType === 'expense' && !keptAttachments.length && !picked.length" class="field-hint">An expense needs a receipt before a manager can approve it.</small>
+              <small v-else-if="transactionType === 'expense' && !keptAttachments.length && !picked.length && !approvalFileCount" class="field-hint">An expense needs a receipt before a manager can approve it.</small>
+              <small v-if="approvalFileCount" class="field-hint">The approver added {{ approvalFileCount === 1 ? '1 file' : `${approvalFileCount} files` }} separately; open “View” on the list to see them.</small>
             </div>
           </div>
 
@@ -149,7 +150,7 @@
 
 <script setup lang="ts">
 import { ArrowDownLeft, ArrowUpRight, Clock3, FileText, ImageIcon, Paperclip, Trash2, X } from 'lucide-vue-next'
-import { MAX_ATTACHMENTS, type Branch, type Category, type Transaction } from '~/types/api'
+import { MAX_ATTACHMENTS, filesOfStage, type Branch, type Category, type Transaction } from '~/types/api'
 import { richTextToPlain } from '~/utils/richText'
 import { rule } from '~/utils/validation'
 import { useFormErrors } from '~/composables/useFormErrors'
@@ -202,9 +203,11 @@ const removedIds = ref<string[]>([])
 // Removals already done (kept so a retry after a failed upload doesn't redo them).
 const deletedIds = ref<string[]>([])
 const attachmentError = ref('')
+// This form manages the files of whoever entered the transaction; the approver's are separate.
 const keptAttachments = computed(() => props.mode === 'edit'
-  ? (props.transaction?.attachments || []).filter(file => !removedIds.value.includes(file.id))
+  ? filesOfStage(props.transaction?.attachments, 'submitted').filter(file => !removedIds.value.includes(file.id))
   : [])
+const approvalFileCount = computed(() => props.mode === 'edit' ? filesOfStage(props.transaction?.attachments, 'approval').length : 0)
 const freeSlots = computed(() => MAX_ATTACHMENTS - keptAttachments.value.length - picked.value.length)
 // Set once a new transaction is created, so a failed upload can be retried without creating it twice.
 const createdTransaction = ref<Transaction | null>(null)
@@ -445,6 +448,7 @@ async function submit() {
       if (item.uploaded) continue
       const body = new FormData()
       body.append('file', item.file)
+      body.append('stage', 'submitted')
       saved = await api<Transaction>(`/transactions/${saved.id}/attachments`, { method: 'POST', body })
       item.uploaded = true
     }

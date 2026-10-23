@@ -103,6 +103,7 @@ import {
   ChartNoAxesCombined,
   ChevronDown,
   ChevronRight,
+  DatabaseBackup,
   FileChartColumnIncreasing,
   House,
   KeyRound,
@@ -133,6 +134,7 @@ const {
   canViewUsers,
   canViewRoles,
   canViewAudit,
+  canManageBackups,
   isSuperAdmin,
 } = usePermissions()
 const searchTerm = ref('')
@@ -156,6 +158,7 @@ const adminNav = computed<NavItem[]>(() => {
   if (canViewUsers.value) items.push({ label: 'Users', to: '/admin/users', icon: UsersRound })
   if (can('categories.manage')) items.push({ label: 'Categories', to: '/admin/categories', icon: Tags })
   if (canViewAudit.value) items.push({ label: 'Audit Log', to: '/admin/audit', icon: ReceiptText })
+  if (canManageBackups.value) items.push({ label: 'Backups', to: '/admin/backups', icon: DatabaseBackup })
   return items
 })
 

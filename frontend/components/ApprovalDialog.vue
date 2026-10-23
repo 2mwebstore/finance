@@ -10,19 +10,35 @@
       </p>
       <p class="approval-copy">{{ isApprove ? 'It will count toward totals and reports.' : 'It stays in the history but never counts toward totals.' }}</p>
       <div class="approval-files">
-        <span class="approval-files-label">Attachments</span>
-        <div v-if="files.length" class="approval-file-list">
-          <button v-for="(file, i) in files" :key="file.id" type="button" class="approval-file" :title="`Preview ${file.name}`" @click="emit('preview', i)">
-            <ImageIcon v-if="file.type.startsWith('image/')" :size="15" /><FileText v-else :size="15" />
-            <span>{{ file.name }}</span>
-            <Eye :size="14" class="approval-file-eye" />
+        <!-- Kept apart: what the submitter attached, and what the approver adds. -->
+        <section class="approval-file-group">
+          <span class="approval-files-label">From {{ transaction.created_by?.name || 'the submitter' }}</span>
+          <div v-if="submittedFiles.length" class="approval-file-list">
+            <button v-for="file in submittedFiles" :key="file.id" type="button" class="approval-file" :title="`Preview ${file.name}`" @click="preview(file.id)">
+              <ImageIcon v-if="file.type.startsWith('image/')" :size="15" /><FileText v-else :size="15" />
+              <span>{{ file.name }}</span>
+              <Eye :size="14" class="approval-file-eye" />
+            </button>
+          </div>
+          <p v-else class="approval-files-empty">No files attached.</p>
+        </section>
+        <section class="approval-file-group">
+          <span class="approval-files-label">Approval files <small>Optional · up to {{ MAX_ATTACHMENTS }}</small></span>
+          <div v-if="approvalFiles.length" class="approval-file-list">
+            <div v-for="file in approvalFiles" :key="file.id" class="approval-file-row">
+              <button type="button" class="approval-file" :title="`Preview ${file.name}`" @click="preview(file.id)">
+                <ImageIcon v-if="file.type.startsWith('image/')" :size="15" /><FileText v-else :size="15" />
+                <span>{{ file.name }}</span>
+                <Eye :size="14" class="approval-file-eye" />
+              </button>
+              <button v-if="canAddFile" type="button" class="approval-file-remove" :aria-label="`Delete ${file.name}`" title="Delete" :disabled="removingId === file.id || saving" @click="removeFile(file.id)"><Trash2 :size="15" /></button>
+            </div>
+          </div>
+          <button v-if="canAddFile && approvalFiles.length < MAX_ATTACHMENTS" type="button" class="approval-add-file" :disabled="uploading || saving" @click="fileInput?.click()">
+            <Paperclip :size="15" /> {{ uploading ? 'Uploading…' : needsReceipt ? 'Attach a receipt' : approvalFiles.length ? 'Add another file' : 'Attach a file' }}
           </button>
-        </div>
-        <p v-else class="approval-files-empty">No files attached.</p>
+        </section>
         <AppAlert v-if="needsReceipt" type="warning" compact message="Attach a receipt (image or PDF) before approving this expense." />
-        <button v-if="canAddFile && files.length < MAX_ATTACHMENTS" type="button" class="approval-add-file" :disabled="uploading || saving" @click="fileInput?.click()">
-          <Paperclip :size="15" /> {{ uploading ? 'Uploading…' : files.length ? 'Add another file' : 'Attach a receipt' }}
-        </button>
         <input ref="fileInput" type="file" class="sr-only" :accept="ACCEPTED_TYPES.join(',')" tabindex="-1" aria-hidden="true" @change="onFile" />
       </div>
       <label class="approval-note">
@@ -42,8 +58,8 @@
 </template>
 
 <script setup lang="ts">
-import { Check, CheckCircle2, Eye, FileText, ImageIcon, Paperclip, X, XCircle } from 'lucide-vue-next'
-import { MAX_ATTACHMENTS, type Transaction } from '~/types/api'
+import { Check, CheckCircle2, Eye, FileText, ImageIcon, Paperclip, Trash2, X, XCircle } from 'lucide-vue-next'
+import { MAX_ATTACHMENTS, filesOfStage, orderedAttachments, type Transaction } from '~/types/api'
 import { formatMoney } from '~/utils/money'
 
 const props = defineProps<{
@@ -56,12 +72,12 @@ const emit = defineEmits<{
   done: [transaction: Transaction]
   /** A file was attached here; the updated transaction. */
   filesChanged: [transaction: Transaction]
-  /** Open the file viewer at this file. */
+  /** Open the file viewer at this file (index in orderedAttachments). */
   preview: [index: number]
 }>()
 
 const { api } = useApi()
-const { canEditIncome, canEditExpense, canCreateIncome, canCreateExpense } = usePermissions()
+const { canApprove } = usePermissions()
 const notes = ref('')
 const error = ref('')
 const saving = ref(false)
@@ -70,15 +86,31 @@ const fileInput = ref<HTMLInputElement | null>(null)
 const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'application/pdf']
 const MAX_FILE_BYTES = 10 * 1024 * 1024
 const isApprove = computed(() => props.action === 'approve')
-const files = computed(() => props.transaction?.attachments || [])
-// The API only approves an expense that has its receipt.
-const needsReceipt = computed(() => isApprove.value && props.transaction?.type === 'expense' && !files.value.length)
-// Same rule as the API for a pending transaction: create or edit rights for its type.
-const canAddFile = computed(() => {
-  const type = props.transaction?.type
-  if (!type) return false
-  return type === 'income' ? canCreateIncome.value || canEditIncome.value : canCreateExpense.value || canEditExpense.value
-})
+const removingId = ref('')
+const submittedFiles = computed(() => filesOfStage(props.transaction?.attachments, 'submitted'))
+const approvalFiles = computed(() => filesOfStage(props.transaction?.attachments, 'approval'))
+// The API only approves an expense that has a receipt (from either side).
+const needsReceipt = computed(() => isApprove.value && props.transaction?.type === 'expense' && !submittedFiles.value.length && !approvalFiles.value.length)
+// Same rule as the API: approvers manage the approval files (the dialog only opens for people who may decide).
+const canAddFile = computed(() => canApprove.value)
+
+function preview(id: string) {
+  emit('preview', orderedAttachments(props.transaction?.attachments).findIndex(file => file.id === id))
+}
+
+async function removeFile(id: string) {
+  if (!props.transaction) return
+  removingId.value = id
+  error.value = ''
+  try {
+    const updated = await api<Transaction>(`/transactions/${props.transaction.id}/attachments/${id}`, { method: 'DELETE' })
+    emit('filesChanged', updated)
+  } catch (e: any) {
+    error.value = e?.data?.error || 'Could not delete the file.'
+  } finally {
+    removingId.value = ''
+  }
+}
 
 async function onFile(event: Event) {
   const input = event.target as HTMLInputElement
@@ -98,6 +130,7 @@ async function onFile(event: Event) {
   try {
     const body = new FormData()
     body.append('file', file)
+    body.append('stage', 'approval')
     const updated = await api<Transaction>(`/transactions/${props.transaction.id}/attachments`, { method: 'POST', body })
     emit('filesChanged', updated)
   } catch (e: any) {
@@ -147,8 +180,15 @@ async function confirm() {
 .approval-summary { margin: 8px 0 0; color: #50668a; font-size: 13px; }
 .approval-summary strong { color: #1d365c; }
 .approval-copy { margin: 4px 0 16px; color: #7b8ca5; font-size: 13px; }
-.approval-files { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+.approval-files { display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px; }
+.approval-file-group { display: flex; flex-direction: column; gap: 7px; }
+.approval-file-group + .approval-file-group { border-top: 1px dashed #e2e9f3; padding-top: 12px; }
 .approval-files-label { color: #324b70; font-size: 13px; font-weight: 650; }
+.approval-files-label small { margin-left: 4px; color: #94a2b7; font-size: 11px; font-weight: 500; }
+.approval-file-row { display: flex; align-items: center; gap: 6px; }
+.approval-file-row .approval-file { flex: 1; }
+.approval-file-remove { display: grid; flex: 0 0 auto; width: 36px; height: 36px; place-items: center; border: 0; border-radius: 9px; color: #c93449; background: #fdecef; cursor: pointer; }
+.approval-file-remove:disabled { opacity: .5; cursor: wait; }
 .approval-file-list { display: flex; flex-direction: column; gap: 6px; }
 .approval-file { display: flex; min-width: 0; align-items: center; gap: 8px; border: 1px solid #dfe7f1; border-radius: 10px; padding: 9px 11px; color: #3d5a82; background: #f8fbff; font-size: 13px; font-weight: 600; text-align: left; cursor: pointer; }
 .approval-file span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

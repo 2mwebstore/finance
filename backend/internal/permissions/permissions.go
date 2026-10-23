@@ -40,6 +40,8 @@ const (
 	CurrencySettingsManage = "currency-settings.manage"
 	AuditLogsView          = "audit-logs.view"
 	SettingsManage         = "settings.manage"
+	// BackupsManage: back up, download, upload and restore the whole database.
+	BackupsManage = "backups.manage"
 )
 
 // AllPermissions returns the full list for seeding.
@@ -87,6 +89,7 @@ func AllPermissions() []struct {
 		{CurrencySettingsManage, "Manage Currency Settings", "Settings", "Configure currency options"},
 		{AuditLogsView, "View Audit Logs", "Audit", "View system audit logs"},
 		{SettingsManage, "Manage Settings", "Settings", "Change application settings"},
+		{BackupsManage, "Manage Backups", "Backups", "Back up the database, send backups to Telegram, and restore from a backup"},
 	}
 }
 

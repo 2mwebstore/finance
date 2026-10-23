@@ -113,6 +113,7 @@ const createAttachmentsTable = `CREATE TABLE IF NOT EXISTS transaction_attachmen
 	name VARCHAR(255) NOT NULL,
 	content_type VARCHAR(128) NOT NULL,
 	size BIGINT NOT NULL DEFAULT 0,
+	stage VARCHAR(16) NOT NULL DEFAULT 'submitted',
 	created_by_id CHAR(36) NOT NULL,
 	created_at DATETIME(3) NULL,
 	PRIMARY KEY (id),
@@ -133,6 +134,12 @@ func EnsureRequiredTables(db *gorm.DB) error {
 		// from the transactions table) must not stop the server from starting. AutoMigrate adds it
 		// later when it can.
 		if err := db.Exec(createAttachmentsTable).Error; err != nil {
+			return err
+		}
+	}
+	if !db.Migrator().HasColumn(&models.TransactionAttachment{}, "stage") {
+		log.Println("adding column transaction_attachments.stage")
+		if err := db.Exec("ALTER TABLE transaction_attachments ADD COLUMN stage VARCHAR(16) NOT NULL DEFAULT 'submitted'").Error; err != nil {
 			return err
 		}
 	}

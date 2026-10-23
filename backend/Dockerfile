@@ -13,6 +13,8 @@ RUN apk add --no-cache ca-certificates tzdata wget \
 ENV TZ=Asia/Phnom_Penh
 WORKDIR /app
 COPY --from=builder /out/api /app/api
+# Writable folders for local attachments and database backups (the app runs as appuser).
+RUN mkdir -p /app/uploads /app/backups && chown appuser /app/uploads /app/backups
 USER appuser
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \

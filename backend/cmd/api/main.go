@@ -1,9 +1,11 @@
 package main
 
 import (
+	"context"
 	"log"
 	"os"
 
+	"github.com/cambodia-finance/income-expense/internal/backup"
 	"github.com/cambodia-finance/income-expense/internal/config"
 	"github.com/cambodia-finance/income-expense/internal/database"
 	"github.com/cambodia-finance/income-expense/internal/middleware"
@@ -30,13 +32,19 @@ func main() {
 	if err := database.EnsureRequiredTables(db); err != nil {
 		log.Fatalf("required tables: %v", err)
 	}
+	if err := database.EnsureRequiredPermissions(db); err != nil {
+		log.Fatalf("required permissions: %v", err)
+	}
 
-	// Schema + base data (roles, permissions, categories). Development/test always; other
-	// environments opt in with AUTO_MIGRATE=true (e.g. Railway, which has no migration step).
+	// Schema (AUTO_MIGRATE) and base data (AUTO_SEED) are separate switches, so a host can update
+	// tables without touching data, or the other way round. Development/test always do both.
 	if cfg.AutoMigrate {
 		if err := database.AutoMigrate(db); err != nil {
 			log.Fatalf("migrate: %v", err)
 		}
+		log.Println("auto-migrate: tables are up to date")
+	}
+	if cfg.AutoSeed {
 		if err := database.SeedPermissionsAndRoles(db); err != nil {
 			log.Fatalf("seed: %v", err)
 		}
@@ -97,7 +105,14 @@ func main() {
 		c.Next()
 	})
 
-	routes.Setup(r, db, cfg)
+	// Daily database backups (kept BACKUP_DIR, sent to Telegram); settings live in the admin page.
+	backups, err := backup.NewService(db, cfg.BackupDir, cfg.Timezone, cfg.AppName)
+	if err != nil {
+		log.Fatalf("backups: %v", err)
+	}
+	backups.StartScheduler(context.Background())
+
+	routes.Setup(r, db, cfg, backups)
 
 	port := cfg.AppPort
 	if port == "" {

@@ -828,6 +828,18 @@ func (s *TransactionService) CreatorNames(ctx context.Context, items []models.Tr
 	return out
 }
 
+// CanChangeApprovalFiles reports whether the actor may add or delete the approver's files: someone
+// who approves transactions (not the person who entered this one), while it is pending or approved.
+func (s *TransactionService) CanChangeApprovalFiles(ctx context.Context, actorID uuid.UUID, txn *models.Transaction) bool {
+	if txn.CreatedByID == actorID {
+		return false
+	}
+	if txn.Status != models.TxnStatusPending && txn.Status != models.TxnStatusApproved {
+		return false
+	}
+	return s.hasPermission(ctx, actorID, permissions.TransactionsApprove)
+}
+
 // CanChangeAttachments reports whether the actor may add or delete files on the transaction.
 // Creating is enough while it is pending (the person entering it adds the receipt); once it is
 // approved, changing its files needs edit rights. Owners/admins/Super Admins always can.

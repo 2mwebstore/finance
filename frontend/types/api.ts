@@ -29,10 +29,22 @@ export interface TransactionAttachment {
   name: string
   type: string
   size: number
+  /** submitted: added by whoever entered the transaction; approval: added by its approver. */
+  stage: 'submitted' | 'approval'
 }
 
-/** How many files one transaction can have (API: services.MaxAttachments). */
+/** How many files each stage of a transaction can have (API: services.MaxAttachments). */
 export const MAX_ATTACHMENTS = 2
+
+/** All files in display order: the submitter's first, then the approver's. */
+export function orderedAttachments(files: TransactionAttachment[] | undefined) {
+  return [...filesOfStage(files, 'submitted'), ...filesOfStage(files, 'approval')]
+}
+
+/** Files of one stage (files from before stages existed count as submitted). */
+export function filesOfStage(files: TransactionAttachment[] | undefined, stage: TransactionAttachment['stage']) {
+  return (files || []).filter(file => (file.stage || 'submitted') === stage)
+}
 
 export interface Transaction {
   id: string

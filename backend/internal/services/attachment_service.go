@@ -24,14 +24,27 @@ var AllowedAttachmentTypes = map[string]bool{
 	"image/jpeg": true, "image/png": true, "image/gif": true, "image/webp": true, "application/pdf": true,
 }
 
-// MaxAttachments is how many files one transaction can have (e.g. a receipt and an invoice).
+// MaxAttachments is how many files each stage of a transaction can have: up to 2 from whoever
+// entered it (e.g. a receipt and an invoice) and up to 2 more from its approver.
 const MaxAttachments = 2
 
 var (
 	ErrNoAttachment       = errors.New("attachment not found")
 	ErrAttachmentLocked   = errors.New("attachments can't be changed on voided or reversed transactions")
-	ErrTooManyAttachments = fmt.Errorf("a transaction can have at most %d attachments; delete one first", MaxAttachments)
+	ErrTooManyAttachments = fmt.Errorf("this section already has %d files; delete one first", MaxAttachments)
+	ErrBadStage           = errors.New(`stage must be "submitted" or "approval"`)
 )
+
+// countStage counts a transaction's files in one stage.
+func countStage(files []models.TransactionAttachment, stage string) int {
+	n := 0
+	for _, f := range files {
+		if f.Stage == stage || (f.Stage == "" && stage == models.AttachmentSubmitted) {
+			n++
+		}
+	}
+	return n
+}
 
 // AttachmentService stores a transaction's files (up to MaxAttachments) in object storage.
 type AttachmentService struct {
@@ -58,8 +71,12 @@ func safeFileName(name string) string {
 	return name
 }
 
-// Add stores one more file on the transaction. The caller has checked type and size.
-func (s *AttachmentService) Add(ctx context.Context, id, actorID uuid.UUID, fileName, contentType string, size int64, r io.Reader) (*models.Transaction, error) {
+// Add stores one more file on the transaction, in the given stage. The caller has checked the
+// file's type and size and the actor's right to add to that stage.
+func (s *AttachmentService) Add(ctx context.Context, id, actorID uuid.UUID, stage, fileName, contentType string, size int64, r io.Reader) (*models.Transaction, error) {
+	if stage != models.AttachmentSubmitted && stage != models.AttachmentApproval {
+		return nil, ErrBadStage
+	}
 	txn, err := s.txns.GetByID(ctx, id, actorID)
 	if err != nil {
 		return nil, err
@@ -67,7 +84,7 @@ func (s *AttachmentService) Add(ctx context.Context, id, actorID uuid.UUID, file
 	if txn.Status == models.TxnStatusVoided || txn.Status == models.TxnStatusReversed {
 		return nil, ErrAttachmentLocked
 	}
-	if len(txn.Attachments) >= MaxAttachments {
+	if countStage(txn.Attachments, stage) >= MaxAttachments {
 		return nil, ErrTooManyAttachments
 	}
 	key := fmt.Sprintf("transactions/%s/%s-%s", txn.ID, uuid.NewString()[:8], safeFileName(fileName))
@@ -85,7 +102,7 @@ func (s *AttachmentService) Add(ctx context.Context, id, actorID uuid.UUID, file
 			return err
 		}
 		var count int64
-		if err := tx.Model(&models.TransactionAttachment{}).Where("transaction_id = ?", txn.ID).Count(&count).Error; err != nil {
+		if err := tx.Model(&models.TransactionAttachment{}).Where("transaction_id = ? AND stage = ?", txn.ID, stage).Count(&count).Error; err != nil {
 			return err
 		}
 		if count >= MaxAttachments {
@@ -93,7 +110,7 @@ func (s *AttachmentService) Add(ctx context.Context, id, actorID uuid.UUID, file
 		}
 		return tx.Create(&models.TransactionAttachment{
 			TransactionID: txn.ID, StorageKey: key, Name: displayName,
-			ContentType: contentType, Size: size, CreatedByID: actorID,
+			ContentType: contentType, Size: size, Stage: stage, CreatedByID: actorID,
 		}).Error
 	})
 	if err != nil {
@@ -118,6 +135,19 @@ func (s *AttachmentService) Open(ctx context.Context, id, attachmentID, actorID 
 		return nil, nil, ErrNoAttachment
 	}
 	return att, rc, err
+}
+
+// Find returns one of the transaction's attachments (to check who may change it).
+func (s *AttachmentService) Find(ctx context.Context, id, attachmentID, actorID uuid.UUID) (*models.Transaction, *models.TransactionAttachment, error) {
+	txn, err := s.txns.GetByID(ctx, id, actorID)
+	if err != nil {
+		return nil, nil, err
+	}
+	att := findAttachment(txn, attachmentID)
+	if att == nil {
+		return nil, nil, ErrNoAttachment
+	}
+	return txn, att, nil
 }
 
 // Remove deletes one of the transaction's attachments.

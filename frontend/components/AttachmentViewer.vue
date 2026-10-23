@@ -6,7 +6,7 @@
           <span class="viewer-icon"><ImageIcon v-if="isImage" :size="18" /><FileText v-else :size="18" /></span>
           <div class="viewer-title">
             <strong>{{ current.name }}</strong>
-            <small>{{ transaction?.transaction_number }} · {{ formatBytes(current.size) }}<template v-if="files.length > 1"> · file {{ index + 1 }} of {{ files.length }}</template></small>
+            <small>{{ stageLabel(current) }} · {{ transaction?.transaction_number }} · {{ formatBytes(current.size) }}<template v-if="files.length > 1"> · file {{ index + 1 }} of {{ files.length }}</template></small>
           </div>
           <a v-if="objectUrl" class="viewer-button" :href="objectUrl" :download="current.name" title="Download" aria-label="Download"><Download :size="17" /></a>
           <button v-if="objectUrl && !isImage" type="button" class="viewer-button" title="Open in a new tab" aria-label="Open in a new tab" @click="openInTab"><ExternalLink :size="17" /></button>
@@ -25,6 +25,7 @@
             :aria-current="i === index ? 'true' : undefined"
             @click="show(i)"
           >
+            <em class="viewer-tab-stage" :class="`is-${file.stage || 'submitted'}`">{{ (file.stage || 'submitted') === 'approval' ? 'Approval' : 'Submitted' }}</em>
             <ImageIcon v-if="file.type.startsWith('image/')" :size="14" /><FileText v-else :size="14" />
             <span>{{ file.name }}</span>
           </button>
@@ -74,7 +75,7 @@
 <script setup lang="ts">
 import { useEventListener } from '@vueuse/core'
 import { ChevronLeft, ChevronRight, Download, ExternalLink, FileText, ImageIcon, Trash2, X } from 'lucide-vue-next'
-import type { Transaction } from '~/types/api'
+import { orderedAttachments, type Transaction, type TransactionAttachment } from '~/types/api'
 import { sanitizeRichText } from '~/utils/richText'
 
 const props = withDefaults(defineProps<{
@@ -91,7 +92,8 @@ const emit = defineEmits<{
 
 const { api, apiBase } = useApi()
 const { getToken, tryRefresh } = useAuth()
-const { canEditIncome, canEditExpense, canCreateIncome, canCreateExpense } = usePermissions()
+const { canEditIncome, canEditExpense, canCreateIncome, canCreateExpense, canApprove } = usePermissions()
+const { user } = useAuth()
 const index = ref(0)
 const objectUrl = ref('')
 const loading = ref(false)
@@ -104,18 +106,28 @@ const deleteError = ref('')
 const cache = new Map<string, string>()
 let request = 0
 
-const files = computed(() => props.transaction?.attachments || [])
+// The submitter's files first, then the approver's (shown apart, with a label on each tab).
+const files = computed(() => orderedAttachments(props.transaction?.attachments))
 const current = computed(() => files.value[index.value] || null)
 const isImage = computed(() => !!current.value?.type.startsWith('image/'))
 const descriptionHtml = computed(() => sanitizeRichText(props.transaction?.description))
-// Same rule as the API: edit rights, or create rights while the transaction isn't approved yet.
+// Same rules as the API. Submitted files: edit rights, or create rights while not approved yet.
+// Approval files: an approver who didn't enter the transaction, while it is pending or approved.
 const canDelete = computed(() => {
   const txn = props.transaction
-  if (!txn || txn.status === 'voided' || txn.status === 'reversed') return false
+  const file = current.value
+  if (!txn || !file || txn.status === 'voided' || txn.status === 'reversed') return false
+  if ((file.stage || 'submitted') === 'approval') {
+    return canApprove.value && txn.created_by?.id !== user.value?.id && (txn.status === 'pending' || txn.status === 'approved')
+  }
   const edit = txn.type === 'income' ? canEditIncome.value : canEditExpense.value
   const create = txn.type === 'income' ? canCreateIncome.value : canCreateExpense.value
   return edit || (create && txn.status !== 'approved')
 })
+
+function stageLabel(file: TransactionAttachment) {
+  return (file.stage || 'submitted') === 'approval' ? 'Added by the approver' : `From ${props.transaction?.created_by?.name || 'the submitter'}`
+}
 
 function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`
@@ -244,6 +256,8 @@ onBeforeUnmount(clearCache)
 .viewer-tab span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .viewer-tab:hover { color: #fff; background: rgb(255 255 255 / 8%); }
 .viewer-tab.is-active { border-color: #5b9bff; color: #fff; background: rgb(91 155 255 / 22%); }
+.viewer-tab-stage { flex: 0 0 auto; border-radius: 999px; padding: 1px 7px; color: #cfe0ff; background: rgb(91 155 255 / 22%); font-size: 10px; font-style: normal; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; }
+.viewer-tab-stage.is-approval { color: #c9f2df; background: rgb(19 150 110 / 30%); }
 .viewer-confirm { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px; color: #ffe1e5; background: #3a1a26; font-size: 13px; }
 .viewer-confirm strong { color: #fff; }
 .viewer-confirm div { display: flex; gap: 8px; }

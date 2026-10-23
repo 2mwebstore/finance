@@ -10,8 +10,9 @@ frontend/.nuxt/
 frontend/.output/
 frontend/dist/
 
-# Attachments saved on local disk in development
+# Attachments and database backups saved on local disk
 backend/uploads/
+backend/backups/
 
 # OS files
 .DS_Store
