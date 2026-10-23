@@ -36,6 +36,7 @@
       </template>
     </AppModal>
 
+    <ListSearch v-model="search" placeholder="Search by code, name, address, phone or email…" />
     <div v-if="loading" class="text-sm text-muted">Loading…</div>
     <AppAlert v-else-if="err" title="Couldn’t load branches" :message="err"><template #action><button type="button" @click="load">Try again</button></template></AppAlert>
     <ul v-else class="divide-y divide-border rounded-xl border border-border bg-white">
@@ -56,7 +57,7 @@
           <button v-else-if="canManage" type="button" class="action-chip action-success" :disabled="saving" @click="setActive(branch, true)"><RotateCcw :size="13" /> Restore</button>
         </div>
       </li>
-      <li v-if="!items.length" class="p-6 text-center text-sm text-muted">No branches</li>
+      <li v-if="!items.length" class="p-6 text-center text-sm text-muted">{{ search ? `No branches match “${search}”.` : 'No branches' }}</li>
     </ul>
 
     <div v-if="archiveTarget" class="fixed inset-0 z-[100] flex items-end justify-center bg-slate-950/55 p-0 backdrop-blur-sm sm:items-center sm:p-4" @click.self="archiveTarget = null">
@@ -97,18 +98,23 @@ const editing = ref<Branch | null>(null)
 const archiveTarget = ref<Branch | null>(null)
 const form = reactive({ code: '', name: '', address: '', phone: '', email: '' })
 
+const search = ref('')
+let loadRequest = 0
+
 async function load() {
+  const request = ++loadRequest
   loading.value = true
   err.value = ''
   try {
-    const result = await api<{ items: Branch[] }>('/branches?page_size=100')
-    items.value = result.items || []
+    const result = await api<{ items: Branch[] }>('/branches', { query: { page_size: 100, search: search.value || undefined } })
+    if (request === loadRequest) items.value = result.items || []
   } catch (error: any) {
-    err.value = error?.data?.error || 'Could not load branches.'
+    if (request === loadRequest) err.value = error?.data?.error || 'Could not load branches.'
   } finally {
-    loading.value = false
+    if (request === loadRequest) loading.value = false
   }
 }
+watch(search, () => load())
 
 // Same rules as the API (CreateBranchInput / UpdateBranchInput).
 const formCheck = reactive(useFormErrors(

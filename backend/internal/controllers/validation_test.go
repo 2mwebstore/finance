@@ -3,6 +3,7 @@ package controllers
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/cambodia-finance/income-expense/internal/accounting"
 	"github.com/cambodia-finance/income-expense/internal/services"
 	"github.com/gin-gonic/gin"
+	"github.com/go-sql-driver/mysql"
 )
 
 func bindResponse(t *testing.T, dst interface{}, body string) (int, map[string]interface{}) {
@@ -121,5 +123,24 @@ func TestDayRangeUsesBusinessTimeZone(t *testing.T) {
 	midnight := time.Date(2026, 10, 18, 0, 0, 0, 0, loc)
 	if from == nil || !from.Equal(midnight) || to == nil || !to.Equal(midnight.AddDate(0, 0, 1)) {
 		t.Fatalf("dayRange = %v – %v, want %v – next day", from, to, midnight)
+	}
+}
+
+func TestDatabaseErrorsAreServerErrors(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/transactions", nil)
+	writeTxnError(c, fmt.Errorf("list: %w", &mysql.MySQLError{Number: 1146, Message: "Table 'app.transaction_attachments' doesn't exist"}))
+	if w.Code != http.StatusInternalServerError || strings.Contains(w.Body.String(), "transaction_attachments") {
+		t.Fatalf("got %d %s, want 500 without SQL details", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	c, _ = gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/", nil)
+	writeTxnError(c, services.ErrReceiptRequired)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("business rule got %d, want 400", w.Code)
 	}
 }

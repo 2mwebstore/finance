@@ -66,21 +66,22 @@
 </template>
 
 <script setup lang="ts">
+import { permissionModuleRank } from '~/utils/permissions'
 const store = usePermissionsStore()
 const { catalog, catalogSynced, catalogSyncError, refreshCatalog, can } = usePermissions()
 
 const moduleFilter = ref('')
 const syncing = ref(false)
 
+// Same module order as the sidebar.
 const moduleOptions = computed(() => {
   const set = new Set(catalog.value.map((c) => c.module))
-  return ['', ...Array.from(set).sort()]
+  return ['', ...Array.from(set).sort((a, b) => permissionModuleRank(a) - permissionModuleRank(b) || a.localeCompare(b))]
 })
 
 const filtered = computed(() =>
-  moduleFilter.value
-    ? catalog.value.filter((c) => c.module === moduleFilter.value)
-    : catalog.value,
+  (moduleFilter.value ? catalog.value.filter((c) => c.module === moduleFilter.value) : [...catalog.value])
+    .sort((a, b) => permissionModuleRank(a.module) - permissionModuleRank(b.module)),
 )
 
 function formatTime(d: string) {

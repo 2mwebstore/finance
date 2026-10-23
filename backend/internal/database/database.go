@@ -106,6 +106,39 @@ func MustConnect(cfg *config.Config) *gorm.DB {
 	return db
 }
 
+const createAttachmentsTable = `CREATE TABLE IF NOT EXISTS transaction_attachments (
+	id CHAR(36) NOT NULL,
+	transaction_id CHAR(36) NOT NULL,
+	storage_key VARCHAR(255) NOT NULL,
+	name VARCHAR(255) NOT NULL,
+	content_type VARCHAR(128) NOT NULL,
+	size BIGINT NOT NULL DEFAULT 0,
+	created_by_id CHAR(36) NOT NULL,
+	created_at DATETIME(3) NULL,
+	PRIMARY KEY (id),
+	KEY idx_transaction_attachments_transaction_id (transaction_id)
+)`
+
+// EnsureRequiredTables creates tables added after the first release if they are missing, and moves
+// data into them. It only ever adds (never alters or drops), so it is safe on every start, with or
+// without AUTO_MIGRATE or the SQL migrations.
+func EnsureRequiredTables(db *gorm.DB) error {
+	// A brand-new database gets every table from AutoMigrate or the SQL migrations instead.
+	if !db.Migrator().HasTable(&models.Transaction{}) {
+		return nil
+	}
+	if !db.Migrator().HasTable(&models.TransactionAttachment{}) {
+		log.Println("creating missing table transaction_attachments")
+		// Plain SQL with no foreign key: a key that can't be created (e.g. a collation that differs
+		// from the transactions table) must not stop the server from starting. AutoMigrate adds it
+		// later when it can.
+		if err := db.Exec(createAttachmentsTable).Error; err != nil {
+			return err
+		}
+	}
+	return migrateLegacyAttachments(db)
+}
+
 // migrateLegacyAttachments moves each transaction's old single attachment into
 // transaction_attachments (see migration 000010). Rows it has moved are cleared, so it is safe on every start.
 func migrateLegacyAttachments(db *gorm.DB) error {

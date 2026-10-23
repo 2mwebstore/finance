@@ -49,6 +49,7 @@
 <script setup lang="ts">
 import { Search } from 'lucide-vue-next'
 import type { Permission } from '~/types/api'
+import { PERMISSION_CATALOG, permissionModuleRank } from '~/utils/permissions'
 
 const props = withDefaults(defineProps<{
   modelValue: string[]
@@ -68,13 +69,22 @@ const visible = computed(() => {
 const visibleCodes = computed(() => visible.value.map(permission => permission.code))
 const allVisibleSelected = computed(() => visibleCodes.value.length > 0 && visibleCodes.value.every(code => selected.value.has(code)))
 const anyVisibleSelected = computed(() => visibleCodes.value.some(code => selected.value.has(code)))
+// Modules follow the sidebar; within a module, the catalog's order (view, create, edit, void…)
+// rather than the API's alphabetical one.
+const catalogOrder = new Map(PERMISSION_CATALOG.map((permission, index) => [permission.code, index]))
+function catalogRank(code: string) {
+  return catalogOrder.get(code) ?? Number.MAX_SAFE_INTEGER
+}
 const groups = computed(() => {
   const byModule = new Map<string, typeof props.permissions>()
   for (const permission of visible.value) {
     const module = permission.module || 'General'
     byModule.set(module, [...(byModule.get(module) || []), permission])
   }
-  return [...byModule.entries()].map(([module, items]) => ({
+  return [...byModule.entries()]
+    .sort(([a], [b]) => permissionModuleRank(a) - permissionModuleRank(b) || a.localeCompare(b))
+    .map(([module, items]) => [module, [...items].sort((a, b) => catalogRank(a.code) - catalogRank(b.code))] as const)
+    .map(([module, items]) => ({
     module,
     items,
     selected: items.filter(item => selected.value.has(item.code)).length,

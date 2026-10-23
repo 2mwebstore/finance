@@ -25,6 +25,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("database: %v", err)
 	}
+	// Tables the running code can't work without, created even when AUTO_MIGRATE is off,
+	// so a deploy never serves code that reads a table the database doesn't have yet.
+	if err := database.EnsureRequiredTables(db); err != nil {
+		log.Fatalf("required tables: %v", err)
+	}
 
 	// Schema + base data (roles, permissions, categories). Development/test always; other
 	// environments opt in with AUTO_MIGRATE=true (e.g. Railway, which has no migration step).

@@ -1,14 +1,32 @@
 package controllers
 
 import (
+	"database/sql"
+	"database/sql/driver"
+	"errors"
+	"log"
 	"net/http"
 
 	"github.com/cambodia-finance/income-expense/internal/middleware"
 	"github.com/cambodia-finance/income-expense/internal/models"
 	"github.com/gin-gonic/gin"
+	"github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
+
+// writeInternalError answers database and driver failures with a plain 500 and logs the details.
+// Their text (SQL, table names) helps whoever reads the server log, not people using the app;
+// sent as a 400 it also looked like the request was wrong.
+func writeInternalError(c *gin.Context, err error) bool {
+	var myErr *mysql.MySQLError
+	if !errors.As(err, &myErr) && !errors.Is(err, driver.ErrBadConn) && !errors.Is(err, sql.ErrConnDone) {
+		return false
+	}
+	log.Printf("internal error on %s %s: %v", c.Request.Method, c.FullPath(), err)
+	c.JSON(http.StatusInternalServerError, gin.H{"error": "something went wrong on the server; please try again"})
+	return true
+}
 
 func getActorID(c *gin.Context) (uuid.UUID, bool) {
 	v, ok := c.Get(middleware.ContextUserIDKey)
@@ -32,6 +50,9 @@ func actorIsSuperAdmin(c *gin.Context, db *gorm.DB) bool {
 }
 
 func writeServiceError(c *gin.Context, err error) {
+	if err != nil && writeInternalError(c, err) {
+		return
+	}
 	switch err {
 	case nil:
 		return

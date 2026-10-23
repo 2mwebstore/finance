@@ -34,6 +34,7 @@ func (ac *AuditController) List(c *gin.Context) {
 		ActorID:    c.Query("actor_id"),
 		BranchID:   c.Query("branch_id"),
 		Outcome:    c.Query("outcome"),
+		Search:     c.Query("search"),
 	}
 	f.Page, _ = strconv.Atoi(c.DefaultQuery("page", "1"))
 	f.PageSize, _ = strconv.Atoi(c.DefaultQuery("page_size", "50"))

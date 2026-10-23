@@ -14,6 +14,7 @@ import (
 	"github.com/cambodia-finance/income-expense/internal/models"
 	"github.com/cambodia-finance/income-expense/internal/permissions"
 	"github.com/cambodia-finance/income-expense/internal/richtext"
+	"github.com/cambodia-finance/income-expense/internal/textsearch"
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
@@ -314,8 +315,8 @@ func (s *TransactionService) List(ctx context.Context, f TransactionListFilter, 
 	if f.DateTo != nil {
 		q = q.Where("transaction_date < ?", *f.DateTo)
 	}
-	if f.Search != "" {
-		like := "%" + f.Search + "%"
+	if strings.TrimSpace(f.Search) != "" {
+		like := textsearch.Contains(f.Search)
 		q = q.Where("transaction_number LIKE ? OR description LIKE ? OR counterparty LIKE ?", like, like, like)
 	}
 
@@ -510,8 +511,8 @@ func (s *TransactionService) TotalsByCurrency(ctx context.Context, actorID uuid.
 	if currency != "" {
 		q = q.Where("currency = ?", currency)
 	}
-	if search != "" {
-		like := "%" + search + "%"
+	if strings.TrimSpace(search) != "" {
+		like := textsearch.Contains(search)
 		q = q.Where("transaction_number LIKE ? OR description LIKE ? OR counterparty LIKE ?", like, like, like)
 	}
 

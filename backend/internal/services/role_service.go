@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/cambodia-finance/income-expense/internal/models"
+	"github.com/cambodia-finance/income-expense/internal/textsearch"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
@@ -132,9 +133,15 @@ func (s *RoleService) GetByID(ctx context.Context, id uuid.UUID) (*models.Role, 
 	return &role, nil
 }
 
-func (s *RoleService) List(ctx context.Context) ([]models.Role, error) {
+// List returns the roles; search (optional) matches the name, code or description.
+func (s *RoleService) List(ctx context.Context, search string) ([]models.Role, error) {
+	q := s.db.WithContext(ctx).Preload("Permissions")
+	if strings.TrimSpace(search) != "" {
+		like := textsearch.Contains(search)
+		q = q.Where("name LIKE ? OR code LIKE ? OR description LIKE ?", like, like, like)
+	}
 	var roles []models.Role
-	err := s.db.WithContext(ctx).Preload("Permissions").Order("code ASC").Find(&roles).Error
+	err := q.Order("code ASC").Find(&roles).Error
 	return roles, err
 }
 

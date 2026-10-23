@@ -9,6 +9,7 @@ import (
 
 	"github.com/cambodia-finance/income-expense/internal/auth"
 	"github.com/cambodia-finance/income-expense/internal/models"
+	"github.com/cambodia-finance/income-expense/internal/textsearch"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
@@ -300,8 +301,8 @@ type UserListFilter struct {
 
 func (s *UserService) List(ctx context.Context, f UserListFilter) ([]models.User, int64, error) {
 	q := s.db.WithContext(ctx).Model(&models.User{})
-	if f.Search != "" {
-		like := "%" + f.Search + "%"
+	if strings.TrimSpace(f.Search) != "" {
+		like := textsearch.Contains(f.Search)
 		q = q.Where("username LIKE ? OR email LIKE ? OR full_name LIKE ?", like, like, like)
 	}
 	if f.IsActive != nil {

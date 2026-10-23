@@ -11,6 +11,7 @@
       </button>
     </header>
 
+    <ListSearch v-model="search" placeholder="Search by name, code or description…" />
     <FilterCard :summary="categoryFilterSummary" :active="categoryFiltersActive">
       <div class="filter-field">
         <span>Applies to</span>
@@ -41,8 +42,8 @@
         </div>
         <button v-if="canEdit(category)" class="action-chip action-edit shrink-0" @click="openEdit(category)"><Pencil :size="13" /> Edit</button>
       </article>
-      <div v-if="!categories.length" class="p-8 text-center text-sm text-muted">No expense categories yet. Add a category to make it available on expense forms.</div>
-      <div v-else-if="!visibleCategories.length" class="p-8 text-center text-sm text-muted">No categories match these filters.</div>
+      <div v-if="!categories.length && !search" class="p-8 text-center text-sm text-muted">No expense categories yet. Add a category to make it available on expense forms.</div>
+      <div v-else-if="!visibleCategories.length" class="p-8 text-center text-sm text-muted">{{ search ? `No categories match “${search}”.` : 'No categories match these filters.' }}</div>
     </div>
 
     <div v-if="modalOpen" class="fixed inset-0 z-[90] flex items-end justify-center bg-slate-950/50 p-0 backdrop-blur-sm sm:items-center sm:p-5" @click.self="close">
@@ -162,21 +163,27 @@ function slugify(value: string) {
   return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 }
 
+const search = ref('')
+let loadRequest = 0
+
 async function load() {
+  const request = ++loadRequest
   loading.value = true
   error.value = ''
   try {
-    const result = await api<{ items: Category[] }>('/categories', { query: { type: 'expense' } })
+    const result = await api<{ items: Category[] }>('/categories', { query: { type: 'expense', search: search.value || undefined } })
+    if (request !== loadRequest) return
     // Shared first, then each branch's own categories.
     categories.value = (result.items || [])
       .filter((category) => category.type === 'expense')
       .sort((a, b) => Number(!!a.branch_id) - Number(!!b.branch_id) || (a.branch_name || '').localeCompare(b.branch_name || ''))
   } catch (e: any) {
-    error.value = e?.data?.error || 'Could not load categories.'
+    if (request === loadRequest) error.value = e?.data?.error || 'Could not load categories.'
   } finally {
-    loading.value = false
+    if (request === loadRequest) loading.value = false
   }
 }
+watch(search, () => load())
 
 function openCreate() {
   formMode.value = 'create'

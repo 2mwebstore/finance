@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/cambodia-finance/income-expense/internal/models"
+	"github.com/cambodia-finance/income-expense/internal/textsearch"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
@@ -109,6 +110,8 @@ type CategoryListScope struct {
 	All       bool
 	BranchIDs []uuid.UUID
 	ForBranch *uuid.UUID
+	// Search matches the name, code or description.
+	Search string
 }
 
 func (s *CategoryService) List(ctx context.Context, typ string, activeOnly bool, scope CategoryListScope) ([]models.Category, error) {
@@ -126,6 +129,10 @@ func (s *CategoryService) List(ctx context.Context, typ string, activeOnly bool,
 	}
 	if activeOnly {
 		q = q.Where("is_active = ?", true)
+	}
+	if strings.TrimSpace(scope.Search) != "" {
+		like := textsearch.Contains(scope.Search)
+		q = q.Where("name LIKE ? OR code LIKE ? OR description LIKE ?", like, like, like)
 	}
 	var cats []models.Category
 	err := q.Order("type ASC, name ASC").Find(&cats).Error

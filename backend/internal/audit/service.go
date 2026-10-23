@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/cambodia-finance/income-expense/internal/models"
+	"github.com/cambodia-finance/income-expense/internal/textsearch"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
@@ -104,6 +106,8 @@ type ListFilter struct {
 	ActorID    string
 	BranchID   string
 	Outcome    string
+	// Search matches the action, actor email, entity, or IP address.
+	Search     string
 	DateFrom   *time.Time
 	DateTo     *time.Time
 	Page       int
@@ -115,6 +119,10 @@ type ListFilter struct {
 
 func (s *Service) List(ctx context.Context, f ListFilter) ([]models.AuditLog, int64, error) {
 	q := s.db.WithContext(ctx).Model(&models.AuditLog{})
+	if strings.TrimSpace(f.Search) != "" {
+		like := textsearch.Contains(f.Search)
+		q = q.Where("action LIKE ? OR actor_email LIKE ? OR entity_type LIKE ? OR entity_id LIKE ? OR ip_address LIKE ?", like, like, like, like, like)
+	}
 	if f.Action != "" {
 		q = q.Where("action = ?", f.Action)
 	}

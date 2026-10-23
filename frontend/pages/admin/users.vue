@@ -45,6 +45,7 @@
       </template>
     </AppModal>
 
+    <ListSearch v-model="search" placeholder="Search by name, username or email…" />
     <FilterCard :summary="userFilterSummary" :active="userFiltersActive">
       <div v-if="branches.length > 1" class="filter-field">
         <span>Branch</span>
@@ -92,7 +93,7 @@
           <button v-if="canManageUsers && item.can_manage !== false && item.id !== currentUserId" class="action-chip" :class="item.is_active ? 'action-danger' : 'action-success'" :disabled="saving" @click="toggleActive(item)"><Power :size="13" /> {{ item.is_active ? 'Deactivate' : 'Activate' }}</button>
         </div>
       </li>
-      <li v-if="!items.length" class="p-6 text-center text-sm text-muted">No users</li>
+      <li v-if="!items.length" class="p-6 text-center text-sm text-muted">{{ search ? `No users match “${search}”.` : 'No users' }}</li>
     </ul>
 
     <div v-if="passwordTarget" class="fixed inset-0 z-[100] flex items-end justify-center bg-slate-950/55 p-0 backdrop-blur-sm sm:items-center sm:p-4" @click.self="closePasswordChange">
@@ -195,7 +196,8 @@ function permCount(item: AdminUser) {
   return new Set(codes).size
 }
 
-// Branch and role filters
+// Search box and branch / role filters
+const search = ref('')
 const branchFilter = ref('')
 const roleFilter = ref('')
 const filterBranchOptions = computed(() => [{ value: '', label: 'All branches' }, ...branchOptions.value])
@@ -209,12 +211,12 @@ const userFilterSummary = computed(() => {
 
 function fetchUsers() {
   return api<{ items: AdminUser[] }>('/users', {
-    query: { page_size: 100, branch_id: branchFilter.value || undefined, role: roleFilter.value || undefined },
+    query: { page_size: 100, search: search.value || undefined, branch_id: branchFilter.value || undefined, role: roleFilter.value || undefined },
   })
 }
 
 let userRequest = 0
-watch([branchFilter, roleFilter], async () => {
+watch([search, branchFilter, roleFilter], async () => {
   const request = ++userRequest
   loading.value = true
   error.value = ''

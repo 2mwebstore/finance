@@ -154,8 +154,8 @@ const adminNav = computed<NavItem[]>(() => {
   if (canViewRoles.value) items.push({ label: 'Roles & Permissions', to: '/admin/roles', icon: ShieldCheck })
   if (canViewRoles.value) items.push({ label: 'Permission Codes', to: '/admin/permissions', icon: KeyRound })
   if (canViewUsers.value) items.push({ label: 'Users', to: '/admin/users', icon: UsersRound })
-  if (canViewAudit.value) items.push({ label: 'Audit Log', to: '/admin/audit', icon: ReceiptText })
   if (can('categories.manage')) items.push({ label: 'Categories', to: '/admin/categories', icon: Tags })
+  if (canViewAudit.value) items.push({ label: 'Audit Log', to: '/admin/audit', icon: ReceiptText })
   return items
 })
 

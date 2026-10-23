@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/cambodia-finance/income-expense/internal/models"
+	"github.com/cambodia-finance/income-expense/internal/textsearch"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
@@ -165,9 +166,9 @@ func (s *BranchService) List(ctx context.Context, f BranchListFilter, allowedIDs
 		}
 		q = q.Where("id IN ?", allowedIDs)
 	}
-	if f.Search != "" {
-		like := "%" + f.Search + "%"
-		q = q.Where("code LIKE ? OR name LIKE ? OR address LIKE ?", like, like, like)
+	if strings.TrimSpace(f.Search) != "" {
+		like := textsearch.Contains(f.Search)
+		q = q.Where("code LIKE ? OR name LIKE ? OR address LIKE ? OR phone LIKE ? OR email LIKE ?", like, like, like, like, like)
 	}
 	if f.IsActive != nil {
 		q = q.Where("is_active = ?", *f.IsActive)

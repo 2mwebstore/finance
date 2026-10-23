@@ -9,6 +9,7 @@
       <button v-if="canCleanup" type="button" class="cleanup-button" @click="openCleanup"><Trash2 :size="16" /> Clean up</button>
     </header>
 
+    <ListSearch v-model="search" class="audit-search" placeholder="Search by user email, action, record or IP address…" />
     <FilterCard :summary="filterSummary" :active="filtersActive">
       <div class="filter-field date-range-filter">
         <span>Date range</span>
@@ -50,7 +51,7 @@
         <li v-if="!items.length" class="audit-empty">
           <ShieldCheck :size="22" />
           <strong>No audit events</strong>
-          <span>Try a wider date range or another action.</span>
+          <span>{{ search ? `Nothing matches “${search}”. Try other words or a wider date range.` : 'Try a wider date range or another action.' }}</span>
         </li>
       </ul>
       <div v-if="items.length" class="audit-footer">
@@ -134,6 +135,7 @@ const loading = ref(true)
 const loadingMore = ref(false)
 const err = ref('')
 const toast = useToast()
+const search = ref('')
 const actionFilter = ref('')
 const branchFilter = ref('')
 const dateRange = ref(currentMonthRange())
@@ -217,6 +219,7 @@ function formatTime(value: string) {
 async function fetchPage(pageNumber: number) {
   return api<{ items: AuditEntry[]; total: number }>('/audit-logs', {
     query: {
+      search: search.value || undefined,
       action: actionFilter.value || undefined,
       branch_id: branchFilter.value || undefined,
       date_from: dateRange.value.from || undefined,
@@ -343,7 +346,7 @@ async function runCleanup() {
   }
 }
 
-watch(() => [actionFilter.value, branchFilter.value, dateRange.value.from, dateRange.value.to], () => { void load() })
+watch(() => [search.value, actionFilter.value, branchFilter.value, dateRange.value.from, dateRange.value.to], () => { void load() })
 onMounted(load)
 </script>
 
@@ -375,6 +378,7 @@ onMounted(load)
 .audit-meta span { overflow: hidden; max-width: 260px; text-overflow: ellipsis; white-space: nowrap; }
 .audit-meta i { color: #b5c1d1; font-style: normal; }
 .audit-entity { margin: 4px 0 0; color: #94a3b8; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+.audit-search { margin-bottom: 10px; }
 .audit-empty { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 40px 16px; color: #8193ab; font-size: 13px; text-align: center; }
 .audit-empty svg { color: #9db5d6; }
 .audit-empty strong { color: #2c4468; font-size: 14px; }

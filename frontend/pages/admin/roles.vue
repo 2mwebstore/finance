@@ -5,6 +5,7 @@
       <button v-if="canManage" class="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white hover:bg-primary-hover" @click="openCreate"><Plus :size="16" /> Add role</button>
     </header>
 
+    <ListSearch v-model="search" placeholder="Search by role name, code or description…" />
     <div v-if="loading" class="text-sm text-muted">Loading roles…</div>
     <AppAlert v-else-if="error" title="Couldn’t load roles" :message="error"><template #action><button type="button" @click="load">Try again</button></template></AppAlert>
     <div v-else class="space-y-3">
@@ -28,7 +29,7 @@
         </div>
         <p v-else class="mt-3 text-xs text-muted">No permissions assigned.</p>
       </article>
-      <div v-if="!roles.length" class="rounded-xl border border-border bg-white p-8 text-center text-sm text-muted">No roles found.</div>
+      <div v-if="!roles.length" class="rounded-xl border border-border bg-white p-8 text-center text-sm text-muted">{{ search ? `No roles match “${search}”.` : 'No roles found.' }}</div>
     </div>
 
     <div v-if="modalOpen" class="fixed inset-0 z-[90] flex items-end justify-center bg-slate-950/50 p-0 backdrop-blur-sm sm:items-center sm:p-5" @click.self="close">
@@ -73,6 +74,7 @@ import { Pencil, Plus, Trash2, X } from 'lucide-vue-next'
 import type { Permission, Role } from '~/types/api'
 import { useToast } from '~/composables/useToast'
 import { rule } from '~/utils/validation'
+import { PERMISSION_CATALOG, permissionModuleRank } from '~/utils/permissions'
 import { useFormErrors } from '~/composables/useFormErrors'
 
 const { api } = useApi()
@@ -104,27 +106,37 @@ const formCheck = reactive(useFormErrors(
 const PERMISSION_PREVIEW = 8
 const expandedRoles = reactive<Record<string, boolean>>({})
 
+// Same order as the permission picker: sidebar modules, then view/create/edit… within each.
+const catalogOrder = new Map(PERMISSION_CATALOG.map((permission, index) => [permission.code, index]))
 function shownPermissions(role: Role) {
-  const list = role.permissions || []
+  const list = [...(role.permissions || [])].sort((a, b) =>
+    permissionModuleRank(a.module || '') - permissionModuleRank(b.module || '')
+    || (catalogOrder.get(a.code) ?? Number.MAX_SAFE_INTEGER) - (catalogOrder.get(b.code) ?? Number.MAX_SAFE_INTEGER))
   return expandedRoles[role.id] ? list : list.slice(0, PERMISSION_PREVIEW)
 }
 
+const search = ref('')
+let loadRequest = 0
+
 async function load() {
+  const request = ++loadRequest
   loading.value = true
   error.value = ''
   try {
     const [roleResult, permissionResult] = await Promise.all([
-      api<{ items: Role[] }>('/roles'),
-      api<{ items: Permission[] }>('/permissions').catch(() => ({ items: [] })),
+      api<{ items: Role[] }>('/roles', { query: { search: search.value || undefined } }),
+      permissions.value.length ? Promise.resolve({ items: permissions.value }) : api<{ items: Permission[] }>('/permissions').catch(() => ({ items: [] })),
     ])
+    if (request !== loadRequest) return
     roles.value = roleResult.items || []
     permissions.value = permissionResult.items || []
   } catch (e: any) {
-    error.value = e?.data?.error || 'Could not load roles.'
+    if (request === loadRequest) error.value = e?.data?.error || 'Could not load roles.'
   } finally {
-    loading.value = false
+    if (request === loadRequest) loading.value = false
   }
 }
+watch(search, () => load())
 
 function openCreate() {
   formMode.value = 'create'

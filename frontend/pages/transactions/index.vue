@@ -16,7 +16,8 @@
       <div v-if="!routeType" class="type-filters" aria-label="Transaction type filter">
         <button v-for="filter in filters" :key="filter.value" :class="typeFilter === filter.value ? 'active' : ''" @click="selectType(filter.value)">{{ filter.label }}</button>
       </div>
-      <p v-if="searchTerm" class="search-caption">Search results for <strong>“{{ searchTerm }}”</strong></p>
+      <!-- Kept in the URL (?search=), like the top bar's search, so both stay in sync. -->
+      <ListSearch :model-value="searchTerm" class="transaction-search" placeholder="Search by number or description…" @update:model-value="setSearch" />
     </div>
 
     <FilterCard :summary="filterSummary" :active="filtersActive">
@@ -205,9 +206,12 @@ const headingCopy = computed(() => routeType.value
   ? `View, update, and manage ${routeType.value} records.`
   : 'View, update, and manage transaction records.')
 const emptyTitle = computed(() => routeType.value ? `No ${routeType.value} found` : 'No transactions found')
-const emptyCopy = computed(() => routeType.value
-  ? `New ${routeType.value} records will appear here.`
-  : 'New income and expense records will appear here.')
+const emptyCopy = computed(() => {
+  if (searchTerm.value) return `Nothing matches “${searchTerm.value}”. Try other words or a wider date range.`
+  return routeType.value
+    ? `New ${routeType.value} records will appear here.`
+    : 'New income and expense records will appear here.'
+})
 const items = ref<Transaction[]>([])
 const pageCount = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
 const firstItem = computed(() => total.value ? ((page.value - 1) * pageSize.value) + 1 : 0)
@@ -354,6 +358,10 @@ function scheduleFilterLoad() {
     items.value = []
     void load()
   }, 250)
+}
+
+function setSearch(value: string) {
+  void navigateTo({ path: route.path, query: { ...route.query, search: value || undefined } }, { replace: true })
 }
 
 function selectType(value: string) {
@@ -521,8 +529,7 @@ onMounted(load)
 .type-filters button { border: 0; border-radius: 8px; padding: 9px 14px; color: #70829d; background: transparent; font-size: 12px; font-weight: 650; cursor: pointer; white-space: nowrap; transition: color .15s ease, background .15s ease; }
 .type-filters button.active { color: #fff; background: #1769e8; box-shadow: 0 3px 9px rgb(23 105 232 / 22%); }
 .type-scope { display: inline-flex; align-items: center; min-height: 34px; border-radius: 8px; padding: 0 12px; color: #3565a7; background: #eaf3ff; font-size: 11px; font-weight: 700; }
-.search-caption { margin: 0; color: #8493a8; font-size: 12px; }
-.search-caption strong { color: #496386; font-weight: 650; }
+.transaction-search { flex: 0 1 340px; margin-left: auto; }
 .transaction-list { overflow: hidden; border: 1px solid #e2eaf4; border-radius: 14px; background: #fff; box-shadow: 0 4px 16px rgb(24 60 110 / 4%); }
 .transaction-row { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; min-width: 0; padding: 14px 16px; border-bottom: 1px solid #edf1f7; transition: background .15s ease; }
 .attachment-pill { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 4px; border: 1px solid #d6e4fb; border-radius: 999px; padding: 3px 9px; color: #1769e8; background: #f2f7ff; font-size: 11px; font-weight: 700; cursor: pointer; transition: background .15s ease; }
@@ -585,7 +592,7 @@ onMounted(load)
   .create-actions { margin-top: 14px; }
   .create-button { flex: 1; }
   .list-toolbar { display: block; }
-  .search-caption { margin-top: 10px; }
+  .transaction-search { margin-top: 10px; }
   .type-filters { display: flex; width: 100%; }
   .type-filters button { flex: 1; padding: 10px 8px; font-size: 13px; }
   .totals-summary { grid-template-columns: 1fr; }

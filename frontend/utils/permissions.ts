@@ -89,6 +89,15 @@ export const PERMISSION_CATALOG: {
   { code: P.SettingsManage, name: 'Manage Settings', module: 'Settings', description: 'Change application settings' },
 ]
 
+/** Permission modules in the same order as the sidebar (Settings holds Categories). */
+export const PERMISSION_MODULE_ORDER = ['Dashboard', 'Transactions', 'Income', 'Expenses', 'Reports', 'Branches', 'Roles', 'Users', 'Settings', 'Audit']
+
+/** Sort key for a module: sidebar order, unknown modules last. */
+export function permissionModuleRank(module: string) {
+  const index = PERMISSION_MODULE_ORDER.indexOf(module)
+  return index === -1 ? PERMISSION_MODULE_ORDER.length : index
+}
+
 /** Route → any-of permissions required to enter */
 export const ROUTE_PERMISSIONS: Record<string, PermissionCode[]> = {
   '/dashboard': [P.DashboardView],

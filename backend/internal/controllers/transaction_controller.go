@@ -278,6 +278,9 @@ func txnJSON(t *models.Transaction) gin.H {
 }
 
 func writeTxnError(c *gin.Context, err error) {
+	if writeInternalError(c, err) {
+		return
+	}
 	msg := err.Error()
 	status := http.StatusBadRequest
 	switch msg {

@@ -62,7 +62,7 @@ func (rc *RoleController) Get(c *gin.Context) {
 }
 
 func (rc *RoleController) List(c *gin.Context) {
-	roles, err := rc.svc.List(c.Request.Context())
+	roles, err := rc.svc.List(c.Request.Context(), c.Query("search"))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "list failed"})
 		return
