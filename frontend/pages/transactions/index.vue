@@ -663,16 +663,20 @@ onMounted(load)
   .amount-date { display: block; color: #8796ab; font-size: 11px; white-space: nowrap; }
   /* Narrow column: "by … · time" drops under the status, lined up with its text. */
   .pending-hint { flex-wrap: wrap; row-gap: 2px; margin-top: 6px; font-size: 11.5px; }
+  /* Stays beside its icon and wraps when a long amount leaves little room. */
+  .pending-hint strong { flex: 1 1 0; min-width: 0; white-space: normal; }
   /* No hover on phones, so show the whole reason instead of cutting it off. */
   .people-line { margin-top: 6px; font-size: 11.5px; }
   .people-outcome { align-items: flex-start; white-space: normal; overflow-wrap: anywhere; }
   .people-outcome svg { margin-top: 2px; }
-  .pending-by { flex: 1 0 100%; padding-left: 17px; white-space: nowrap; }
+  .pending-by { flex: 1 0 100%; padding-left: 17px; white-space: normal; overflow-wrap: break-word; }
   .pending-by::before { content: none; }
-  .row-footer { display: flex; grid-column: 2 / -1; grid-row: 2; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; }
-  .row-tags { display: flex; min-width: 0; align-items: center; gap: 6px; }
+  /* The bar uses the full row width; when status, file and actions still don't fit (pending rows
+     with files on narrow phones), the actions wrap to their own line, on the right. */
+  .row-footer { display: flex; grid-column: 1 / -1; grid-row: 2; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; }
+  .row-tags { display: flex; flex-wrap: wrap; min-width: 0; align-items: center; gap: 6px; }
   .row-tags .attachment-pill { padding: 5px 10px; }
-  .row-actions { gap: 6px; }
+  .row-actions { gap: 6px; margin-left: auto; }
   .row-action { width: 34px; height: 34px; }
 }
 </style>
