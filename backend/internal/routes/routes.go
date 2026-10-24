@@ -114,7 +114,8 @@ func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config, store storage.Store, 
 				roles.PUT("/:id/permissions", middleware.RequireAnyPermission(db, permissions.PermissionsManage), middleware.RequireFullAccess(db), roleCtrl.SetPermissions)
 				roles.DELETE("/:id", middleware.RequireAnyPermission(db, permissions.RolesManage), middleware.RequireFullAccess(db), roleCtrl.Delete)
 			}
-			api.GET("/permissions", middleware.RequireAnyPermission(db, permissions.RolesView, permissions.RolesManage), roleCtrl.ListPermissions)
+			// The catalog: the Permission Codes page (permissions.view) and the role editor (roles.*).
+			api.GET("/permissions", middleware.RequireAnyPermission(db, permissions.PermissionsView, permissions.RolesView, permissions.RolesManage), roleCtrl.ListPermissions)
 
 			cats := api.Group("/categories")
 			{

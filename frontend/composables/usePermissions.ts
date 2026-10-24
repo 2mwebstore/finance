@@ -80,6 +80,8 @@ export function usePermissions() {
   const canViewUsers = computed(() => can(P.UsersView, P.UsersManage))
   const canCreateUser = computed(() => can(P.UsersCreate, P.UsersManage))
   const canViewRoles = computed(() => can(P.RolesView, P.RolesManage))
+  // The Permission Codes page has its own permission, so it can be shown or hidden apart from roles.
+  const canViewPermissionCodes = computed(() => can(P.PermissionsView))
   const canViewAudit = computed(() => can(P.AuditLogsView))
   const canManageSettings = computed(() => can(P.SettingsManage))
   // The API also requires full access (owner / Super Admin) for backups.
@@ -117,6 +119,7 @@ export function usePermissions() {
     canViewUsers,
     canCreateUser,
     canViewRoles,
+    canViewPermissionCodes,
     canViewAudit,
     canManageSettings,
     canManageBackups,

@@ -35,6 +35,8 @@ const (
 	RolesView         = "roles.view"
 	RolesManage       = "roles.manage"
 	PermissionsManage = "permissions.manage"
+	// PermissionsView shows the Permission Codes page (the list of every permission).
+	PermissionsView = "permissions.view"
 
 	CategoriesManage       = "categories.manage"
 	CurrencySettingsManage = "currency-settings.manage"
@@ -84,6 +86,7 @@ func AllPermissions() []struct {
 		{RolesView, "View Roles", "Roles", "View roles and their permissions"},
 		{RolesManage, "Manage Roles", "Roles", "Create, edit, and delete non-system roles"},
 		{PermissionsManage, "Manage Permissions", "Roles", "Assign permissions to roles"},
+		{PermissionsView, "View Permission Codes", "Roles", "See the Permission Codes page with every permission in the system"},
 
 		{CategoriesManage, "Manage Categories", "Settings", "Create, edit, and deactivate income/expense categories"},
 		{CurrencySettingsManage, "Manage Currency Settings", "Settings", "Configure currency options"},
@@ -134,7 +137,7 @@ func DefaultRoles() map[string]struct {
 				ReportsView, ReportsExport,
 				BranchesView, BranchesCreate, BranchesEdit, BranchesManage,
 				UsersView, UsersCreate, UsersEdit, UsersManage,
-				RolesView, RolesManage,
+				RolesView, RolesManage, PermissionsView,
 				CategoriesManage, AuditLogsView, SettingsManage,
 			},
 		},

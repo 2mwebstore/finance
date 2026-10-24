@@ -24,7 +24,7 @@
       <div class="section-label">ADMINISTRATION</div>
       <Can perm="branches.view"><NuxtLink to="/admin/branches"><span>Branches</span><small>Manage business locations</small><ChevronRight :size="17" /></NuxtLink></Can>
       <Can perm="roles.view"><NuxtLink to="/admin/roles"><span>Roles &amp; permissions</span><small>Control team access</small><ChevronRight :size="17" /></NuxtLink></Can>
-      <Can perm="roles.view"><NuxtLink to="/admin/permissions"><span>Permission codes</span><small>Review available permissions</small><ChevronRight :size="17" /></NuxtLink></Can>
+      <Can perm="permissions.view"><NuxtLink to="/admin/permissions"><span>Permission codes</span><small>Review available permissions</small><ChevronRight :size="17" /></NuxtLink></Can>
       <Can perm="users.view"><NuxtLink to="/admin/users"><span>Users</span><small>Manage team accounts</small><ChevronRight :size="17" /></NuxtLink></Can>
       <Can perm="categories.manage"><NuxtLink to="/admin/categories"><span>Categories</span><small>Manage expense categories</small><ChevronRight :size="17" /></NuxtLink></Can>
       <Can perm="audit-logs.view"><NuxtLink to="/admin/audit"><span>Audit log</span><small>Review account activity</small><ChevronRight :size="17" /></NuxtLink></Can>
@@ -42,8 +42,8 @@
 <script setup lang="ts">
 import { ChevronRight, LogOut } from 'lucide-vue-next'
 const { user, logout } = useAuth()
-const { isSuperAdmin, permissions, canViewBranches, canViewUsers, canViewRoles, canViewAudit, canManageBackups } = usePermissions()
-const showAdmin = computed(() => canViewBranches.value || canViewUsers.value || canViewRoles.value || canViewAudit.value || canManageBackups.value)
+const { isSuperAdmin, permissions, canViewBranches, canViewUsers, canViewRoles, canViewPermissionCodes, canViewAudit, canManageBackups } = usePermissions()
+const showAdmin = computed(() => canViewBranches.value || canViewUsers.value || canViewRoles.value || canViewPermissionCodes.value || canViewAudit.value || canManageBackups.value)
 const initials = computed(() => (user.value?.full_name || user.value?.username || 'A').split(/\s+/).filter(Boolean).slice(0, 2).map(part => part[0]?.toUpperCase()).join(''))
 async function onLogout() { await logout(); navigateTo('/login') }
 </script>

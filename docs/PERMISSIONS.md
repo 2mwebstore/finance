@@ -34,6 +34,7 @@ Server-side authorization is enforced on every protected API. The UI uses the sa
 | `roles.view` | View Roles | Roles | View roles and their permissions |
 | `roles.manage` | Manage Roles | Roles | Create, edit, and delete non-system roles |
 | `permissions.manage` | Manage Permissions | Roles | Assign permissions to roles |
+| `permissions.view` | View Permission Codes | Roles | See the Permission Codes page with every permission in the system |
 | `categories.manage` | Manage Categories | Settings | Create, edit, and deactivate income/expense categories |
 | `currency-settings.manage` | Manage Currency Settings | Settings | Configure currency options |
 | `audit-logs.view` | View Audit Logs | Audit | View system audit logs |
@@ -98,6 +99,7 @@ Server-side authorization is enforced on every protected API. The UI uses the sa
 | `roles.view` | View roles and their permissions |
 | `roles.manage` | Create, edit, and delete non-system roles |
 | `permissions.manage` | Assign permissions to roles |
+| `permissions.view` | Show the Permission Codes page (menu item and page); without it the page is hidden |
 
 ### Settings & Audit
 | Code | Description |

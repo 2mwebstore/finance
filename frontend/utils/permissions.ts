@@ -33,6 +33,7 @@ export const P = {
   RolesView: 'roles.view',
   RolesManage: 'roles.manage',
   PermissionsManage: 'permissions.manage',
+  PermissionsView: 'permissions.view',
 
   CategoriesManage: 'categories.manage',
   CurrencySettingsManage: 'currency-settings.manage',
@@ -83,6 +84,7 @@ export const PERMISSION_CATALOG: {
   { code: P.RolesView, name: 'View Roles', module: 'Roles', description: 'View roles and their permissions' },
   { code: P.RolesManage, name: 'Manage Roles', module: 'Roles', description: 'Create, edit, and delete non-system roles' },
   { code: P.PermissionsManage, name: 'Manage Permissions', module: 'Roles', description: 'Assign permissions to roles' },
+  { code: P.PermissionsView, name: 'View Permission Codes', module: 'Roles', description: 'See the Permission Codes page with every permission in the system' },
 
   { code: P.CategoriesManage, name: 'Manage Categories', module: 'Settings', description: 'Create, edit, and deactivate income/expense categories' },
   { code: P.CurrencySettingsManage, name: 'Manage Currency Settings', module: 'Settings', description: 'Configure currency options' },
@@ -111,6 +113,6 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionCode[]> = {
   '/admin/roles': [P.RolesView, P.RolesManage],
   '/admin/audit': [P.AuditLogsView],
   '/admin/backups': [P.BackupsManage],
-  '/admin/permissions': [P.RolesView],
+  '/admin/permissions': [P.PermissionsView],
   '/admin/categories': [P.CategoriesManage],
 }

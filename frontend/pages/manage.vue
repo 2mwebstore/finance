@@ -31,13 +31,13 @@ import { Building2, ChevronRight, DatabaseBackup, KeyRound, ReceiptText, ShieldC
 
 type ManageItem = { label: string; description: string; to: string; icon: Component }
 
-const { can, canViewBranches, canViewUsers, canViewRoles, canViewAudit, canManageBackups } = usePermissions()
+const { can, canViewBranches, canViewUsers, canViewRoles, canViewPermissionCodes, canViewAudit, canManageBackups } = usePermissions()
 
 const manageItems = computed<ManageItem[]>(() => {
   const items: ManageItem[] = []
   if (canViewBranches.value) items.push({ label: 'Branches', description: 'Create and update business locations.', to: '/admin/branches', icon: Building2 })
   if (canViewRoles.value) items.push({ label: 'Roles & Permissions', description: 'Manage team roles and access.', to: '/admin/roles', icon: ShieldCheck })
-  if (canViewRoles.value) items.push({ label: 'Permission Codes', description: 'Review the permissions available in the system.', to: '/admin/permissions', icon: KeyRound })
+  if (canViewPermissionCodes.value) items.push({ label: 'Permission Codes', description: 'Review the permissions available in the system.', to: '/admin/permissions', icon: KeyRound })
   if (canViewUsers.value) items.push({ label: 'Users', description: 'Manage user accounts, roles, and status.', to: '/admin/users', icon: UsersRound })
   if (can('categories.manage')) items.push({ label: 'Categories', description: 'Manage expense categories.', to: '/admin/categories', icon: Tags })
   if (canViewAudit.value) items.push({ label: 'Audit Log', description: 'Review account activity and filter by date.', to: '/admin/audit', icon: ReceiptText })

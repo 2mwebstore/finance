@@ -86,13 +86,22 @@ func SeedPermissionsAndRoles(db *gorm.DB) error {
 // EnsureRequiredPermissions adds permissions that features depend on when they are missing, and
 // grants them to the roles that get every permission (super_admin, owner). It runs on every start,
 // even with AUTO_SEED off, so a new feature's page appears without a full seed. It only adds.
+//
+// A permission that takes over from another one (permissions.view used to be part of roles.view)
+// is also granted, when it is first added, to every role that has the old one, so nobody loses a
+// page they could open before.
 func EnsureRequiredPermissions(db *gorm.DB) error {
 	if !db.Migrator().HasTable(&models.Permission{}) {
 		return nil
 	}
-	required := map[string]bool{permissions.BackupsManage: true}
+	// code -> the permission whose roles get it when it is first added ("" for none).
+	required := map[string]string{
+		permissions.BackupsManage:   "",
+		permissions.PermissionsView: permissions.RolesView,
+	}
 	for _, p := range permissions.AllPermissions() {
-		if !required[p.Code] {
+		from, ok := required[p.Code]
+		if !ok {
 			continue
 		}
 		var perm models.Permission
@@ -103,6 +112,11 @@ func EnsureRequiredPermissions(db *gorm.DB) error {
 				return fmt.Errorf("create permission %s: %w", p.Code, err)
 			}
 			log.Printf("added permission %s", p.Code)
+			if from != "" {
+				if err := grantToHoldersOf(db, &perm, from); err != nil {
+					return err
+				}
+			}
 		} else if err != nil {
 			return err
 		}
@@ -117,6 +131,31 @@ func EnsureRequiredPermissions(db *gorm.DB) error {
 				}
 			}
 		}
+	}
+	return nil
+}
+
+// grantToHoldersOf gives perm to every role that has the permission with code from.
+func grantToHoldersOf(db *gorm.DB, perm *models.Permission, from string) error {
+	var roleIDs []uuid.UUID
+	err := db.Table("role_permissions").
+		Joins("JOIN permissions ON permissions.id = role_permissions.permission_id").
+		Where("permissions.code = ?", from).
+		Pluck("role_permissions.role_id", &roleIDs).Error
+	if err != nil {
+		return fmt.Errorf("find roles with %s: %w", from, err)
+	}
+	for _, id := range roleIDs {
+		var role models.Role
+		if err := db.First(&role, "id = ?", id).Error; err != nil {
+			continue // a deleted role
+		}
+		if err := db.Model(&role).Association("Permissions").Append(perm); err != nil {
+			return fmt.Errorf("grant %s to role %s: %w", perm.Code, id, err)
+		}
+	}
+	if len(roleIDs) > 0 {
+		log.Printf("granted %s to %d role(s) that have %s", perm.Code, len(roleIDs), from)
 	}
 	return nil
 }

@@ -133,6 +133,7 @@ const {
   canViewBranches,
   canViewUsers,
   canViewRoles,
+  canViewPermissionCodes,
   canViewAudit,
   canManageBackups,
   isSuperAdmin,
@@ -154,7 +155,7 @@ const adminNav = computed<NavItem[]>(() => {
   const items: NavItem[] = []
   if (canViewBranches.value) items.push({ label: 'Branches', to: '/admin/branches', icon: Building2 })
   if (canViewRoles.value) items.push({ label: 'Roles & Permissions', to: '/admin/roles', icon: ShieldCheck })
-  if (canViewRoles.value) items.push({ label: 'Permission Codes', to: '/admin/permissions', icon: KeyRound })
+  if (canViewPermissionCodes.value) items.push({ label: 'Permission Codes', to: '/admin/permissions', icon: KeyRound })
   if (canViewUsers.value) items.push({ label: 'Users', to: '/admin/users', icon: UsersRound })
   if (can('categories.manage')) items.push({ label: 'Categories', to: '/admin/categories', icon: Tags })
   if (canViewAudit.value) items.push({ label: 'Audit Log', to: '/admin/audit', icon: ReceiptText })

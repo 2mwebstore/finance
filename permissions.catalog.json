@@ -28,11 +28,12 @@
     { "code": "roles.view", "name": "View Roles", "module": "Roles", "description": "View roles and their permissions" },
     { "code": "roles.manage", "name": "Manage Roles", "module": "Roles", "description": "Create, edit, and delete non-system roles" },
     { "code": "permissions.manage", "name": "Manage Permissions", "module": "Roles", "description": "Assign permissions to roles" },
+    { "code": "permissions.view", "name": "View Permission Codes", "module": "Roles", "description": "See the Permission Codes page with every permission in the system" },
     { "code": "categories.manage", "name": "Manage Categories", "module": "Settings", "description": "Create, edit, and deactivate income/expense categories" },
     { "code": "currency-settings.manage", "name": "Manage Currency Settings", "module": "Settings", "description": "Configure currency options" },
     { "code": "audit-logs.view", "name": "View Audit Logs", "module": "Audit", "description": "View system audit logs" },
     { "code": "settings.manage", "name": "Manage Settings", "module": "Settings", "description": "Change application settings" },
     { "code": "backups.manage", "name": "Manage Backups", "module": "Backups", "description": "Back up the database, send backups to Telegram, and restore from a backup" }
   ],
-  "count": 31
+  "count": 32
 }
