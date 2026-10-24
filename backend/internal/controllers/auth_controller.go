@@ -195,17 +195,27 @@ func (ac *AuthController) Me(c *gin.Context) {
 		})
 	}
 
+	// Data scope: every branch, or the branches the user's roles let them see (the app's branch
+	// pickers offer exactly these; "branches" stays the ones the user is assigned to).
+	scopeBranches := []gin.H{}
+	inScope, allBranches := ac.svc.ScopeBranches(c.Request.Context(), user)
+	for _, b := range inScope {
+		scopeBranches = append(scopeBranches, gin.H{"id": b.ID, "code": b.Code, "name": b.Name})
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"id":                   user.ID,
-		"username":             user.Username,
-		"email":                user.Email,
-		"full_name":            user.FullName,
-		"is_active":            user.IsActive,
-		"is_super_admin":       user.IsSuperAdmin,
-		"roles":                roleCodes(user),
-		"permissions":          perms,
-		"branches":             branches,
-		"last_login_at":        user.LastLoginAt,
+		"id":             user.ID,
+		"username":       user.Username,
+		"email":          user.Email,
+		"full_name":      user.FullName,
+		"is_active":      user.IsActive,
+		"is_super_admin": user.IsSuperAdmin,
+		"roles":          roleCodes(user),
+		"permissions":    perms,
+		"branches":       branches,
+		"all_branches":   allBranches,
+		"scope_branches": scopeBranches,
+		"last_login_at":  user.LastLoginAt,
 	})
 }
 

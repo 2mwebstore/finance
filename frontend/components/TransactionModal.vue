@@ -341,7 +341,9 @@ function initializeForm() {
   form.currency = txn?.currency || 'USD'
   form.amount = txn?.amount || ''
   form.transaction_date = txn?.transaction_date?.slice(0, 10) || localDate()
-  form.branch_id = txn?.branch_id || user.value?.branches?.[0]?.id || ''
+  // Default to the user's own branch when it is in their scope, else the first branch they may use.
+  const ownBranch = user.value?.branches?.find(b => (user.value?.scope_branches || user.value?.branches || []).some(s => s.id === b.id))
+  form.branch_id = txn?.branch_id || ownBranch?.id || user.value?.scope_branches?.[0]?.id || ''
   form.category_id = txn?.category_id || ''
   form.description = txn?.description || ''
   form.pending = false
@@ -381,7 +383,8 @@ async function loadCategories() {
 }
 
 async function loadBranches() {
-  branches.value = user.value?.branches || []
+  // The branches the user's roles let them work in (their data scope).
+  branches.value = user.value?.scope_branches || user.value?.branches || []
   if (canViewBranches.value) {
     try {
       const result = await api<{ items: Branch[] }>('/branches', { query: { is_active: true, page_size: 100 } })

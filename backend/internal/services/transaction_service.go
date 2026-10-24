@@ -749,7 +749,8 @@ func (s *TransactionService) assertCanDecide(ctx context.Context, txn *models.Tr
 	if err != nil {
 		return err
 	}
-	_, full, err := middleware.GetAuthorizedBranchIDs(s.db, actorID)
+	// Owners/admins may decide on anyone's transactions; seeing every branch alone doesn't allow that.
+	full, err := middleware.HasFullAccess(s.db, actorID)
 	if err != nil {
 		return err
 	}

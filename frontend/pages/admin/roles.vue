@@ -14,6 +14,9 @@
           <div class="min-w-0">
             <div class="flex flex-wrap items-center gap-2"><h2 class="text-sm font-semibold text-navy">{{ role.name }}</h2><span v-if="role.is_system" class="rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-bold uppercase text-muted">System</span></div>
             <p class="mt-1 font-mono text-[10px] text-muted">{{ role.code }}</p>
+            <p class="mt-2 inline-flex max-w-full items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold" :class="scopeTone(role)" :title="scopeHint(role)">
+              <Building2 :size="11" class="shrink-0" /><span class="truncate">{{ scopeLabel(role) }}</span>
+            </p>
           </div>
           <div v-if="canManage" class="flex shrink-0 gap-1.5">
             <button class="action-chip action-edit" @click="openEdit(role)"><Pencil :size="13" /> Edit</button>
@@ -45,6 +48,27 @@
             <label class="space-y-1.5 text-xs font-semibold text-navy sm:col-span-2">Description<textarea v-model.trim="form.description" rows="2" maxlength="512" class="w-full rounded-lg border border-border px-3 py-2.5 text-sm font-normal" /></label>
           </div>
           <div>
+            <h3 class="mb-1 text-sm font-semibold text-navy">Data scope</h3>
+            <p class="mb-3 text-xs text-muted">Which branches’ data people with this role see and work in: transactions, reports, users, categories and the audit log.</p>
+            <div class="grid grid-cols-1 gap-2 sm:grid-cols-3" role="radiogroup" aria-label="Data scope">
+              <label
+                v-for="option in scopeOptions"
+                :key="option.value"
+                class="flex cursor-pointer flex-col gap-1 rounded-xl border px-3 py-2.5 text-xs transition-colors"
+                :class="form.data_scope === option.value ? 'border-primary bg-blue-50 ring-2 ring-blue-100' : 'border-border bg-white hover:bg-canvas'"
+              >
+                <input v-model="form.data_scope" type="radio" name="data-scope" :value="option.value" class="sr-only" />
+                <strong class="text-[13px] font-semibold text-navy">{{ option.label }}</strong>
+                <small class="text-muted">{{ option.hint }}</small>
+              </label>
+            </div>
+            <div v-if="form.data_scope === 'custom'" class="mt-3 space-y-1.5 text-xs font-semibold text-navy">
+              <span>Branches</span>
+              <SearchSelect v-model="form.branch_ids" :options="branchOptions" multiple placeholder="Choose branches" search-placeholder="Search branches…" aria-label="Data scope branches" :aria-invalid="formCheck.invalid('branch_ids')" />
+            </div>
+            <p v-if="form.data_scope !== 'all' && form.permission_codes.includes('branches.manage')" class="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">This role has “Manage Branches”, so its users see every branch whatever the data scope.</p>
+          </div>
+          <div>
             <h3 class="mb-1 text-sm font-semibold text-navy">Permissions</h3>
             <p class="mb-3 text-xs text-muted">Tick what this role can do. Use a module's top checkbox to give or remove the whole module.</p>
             <PermissionPanel v-model="form.permission_codes" :permissions="permissions" :disabled="saving" />
@@ -70,8 +94,8 @@
 </template>
 
 <script setup lang="ts">
-import { Pencil, Plus, Trash2, X } from 'lucide-vue-next'
-import type { Permission, Role } from '~/types/api'
+import { Building2, Pencil, Plus, Trash2, X } from 'lucide-vue-next'
+import type { Branch, DataScope, Permission, Role } from '~/types/api'
 import { useToast } from '~/composables/useToast'
 import { rule } from '~/utils/validation'
 import { PERMISSION_CATALOG, permissionModuleRank } from '~/utils/permissions'
@@ -93,15 +117,49 @@ const modalOpen = ref(false)
 const formMode = ref<'create' | 'edit'>('create')
 const editingRole = ref<Role | null>(null)
 const deleteTarget = ref<Role | null>(null)
-const form = reactive({ code: '', name: '', description: '', permission_codes: [] as string[] })
+const form = reactive({ code: '', name: '', description: '', permission_codes: [] as string[], data_scope: 'assigned' as DataScope, branch_ids: [] as string[] })
 // Same rules as the API (CreateRoleInput / UpdateRoleInput); the code is set only when creating.
 const formCheck = reactive(useFormErrors(
   () => ({ ...form }),
   () => ({
     name: [rule.required('name'), rule.minLength('name', 2), rule.maxLength('name', 128)],
     ...(formMode.value === 'create' ? { code: [rule.required('code'), rule.minLength('code', 2), rule.maxLength('code', 64)] } : {}),
+    ...(form.data_scope === 'custom' ? { branch_ids: [(value: unknown) => (value as string[]).length ? '' : 'choose at least one branch for this data scope'] } : {}),
   }),
 ))
+
+// Data scope: which branches' data the role's users see.
+const scopeOptions: { value: DataScope; label: string; hint: string }[] = [
+  { value: 'assigned', label: 'Own branches', hint: 'Each user sees the branches they are assigned to.' },
+  { value: 'custom', label: 'Specific branches', hint: 'Users see only the branches you pick here.' },
+  { value: 'all', label: 'All branches', hint: 'Every branch, including ones added later.' },
+]
+const branches = ref<Branch[]>([])
+const branchOptions = computed(() => branches.value.map(branch => ({ value: branch.id, label: `${branch.code} — ${branch.name}` })))
+
+function effectiveScope(role: Role): DataScope {
+  // Manage Branches (owner/admin) always sees every branch.
+  if (role.permissions?.some(permission => permission.code === 'branches.manage')) return 'all'
+  return role.data_scope || 'assigned'
+}
+
+function scopeLabel(role: Role) {
+  const scope = effectiveScope(role)
+  if (scope === 'all') return 'All branches'
+  if (scope === 'custom') return `Branches: ${(role.branches || []).map(branch => branch.code).join(', ') || 'none'}`
+  return 'Own branches'
+}
+
+function scopeHint(role: Role) {
+  const scope = effectiveScope(role)
+  if (scope === 'all') return 'Sees every branch'
+  if (scope === 'custom') return `Sees only ${(role.branches || []).map(branch => `${branch.code} — ${branch.name}`).join(', ')}`
+  return 'Each user sees the branches they are assigned to'
+}
+
+function scopeTone(role: Role) {
+  return { all: 'bg-emerald-50 text-emerald-700', custom: 'bg-amber-50 text-amber-800', assigned: 'bg-blue-50 text-primary' }[effectiveScope(role)]
+}
 // Long permission lists are cut to a preview so a role card stays short on phones.
 const PERMISSION_PREVIEW = 8
 const expandedRoles = reactive<Record<string, boolean>>({})
@@ -123,13 +181,15 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [roleResult, permissionResult] = await Promise.all([
+    const [roleResult, permissionResult, branchResult] = await Promise.all([
       api<{ items: Role[] }>('/roles', { query: { search: search.value || undefined } }),
       permissions.value.length ? Promise.resolve({ items: permissions.value }) : api<{ items: Permission[] }>('/permissions').catch(() => ({ items: [] })),
+      branches.value.length || !canManage.value ? Promise.resolve({ items: branches.value }) : api<{ items: Branch[] }>('/branches', { query: { page_size: 100 } }).catch(() => ({ items: [] })),
     ])
     if (request !== loadRequest) return
     roles.value = roleResult.items || []
     permissions.value = permissionResult.items || []
+    branches.value = branchResult.items || []
   } catch (e: any) {
     if (request === loadRequest) error.value = e?.data?.error || 'Could not load roles.'
   } finally {
@@ -141,7 +201,7 @@ watch(search, () => load())
 function openCreate() {
   formMode.value = 'create'
   editingRole.value = null
-  Object.assign(form, { code: '', name: '', description: '', permission_codes: [] })
+  Object.assign(form, { code: '', name: '', description: '', permission_codes: [], data_scope: 'assigned', branch_ids: [] })
   formError.value = ''
   formCheck.reset()
   modalOpen.value = true
@@ -155,6 +215,8 @@ function openEdit(role: Role) {
     name: role.name,
     description: role.description || '',
     permission_codes: (role.permissions || []).map((permission) => permission.code),
+    data_scope: role.data_scope || 'assigned',
+    branch_ids: (role.branches || []).map((branch) => branch.id),
   })
   formError.value = ''
   formCheck.reset()
@@ -171,9 +233,9 @@ async function save() {
   saving.value = true
   try {
     if (formMode.value === 'create') {
-      await api('/roles', { method: 'POST', body: { code: form.code, name: form.name, description: form.description, permission_codes: form.permission_codes } })
+      await api('/roles', { method: 'POST', body: { code: form.code, name: form.name, description: form.description, permission_codes: form.permission_codes, ...scopeBody() } })
     } else if (editingRole.value) {
-      await api(`/roles/${editingRole.value.id}`, { method: 'PATCH', body: { name: form.name, description: form.description, permission_codes: form.permission_codes } })
+      await api(`/roles/${editingRole.value.id}`, { method: 'PATCH', body: { name: form.name, description: form.description, permission_codes: form.permission_codes, ...scopeBody() } })
     }
     modalOpen.value = false
     toast.success(`${form.name} is ready to assign.`, { title: formMode.value === 'create' ? 'Role created' : 'Role updated' })
@@ -183,6 +245,10 @@ async function save() {
   } finally {
     saving.value = false
   }
+}
+
+function scopeBody() {
+  return { data_scope: form.data_scope, branch_ids: form.data_scope === 'custom' ? form.branch_ids : [] }
 }
 
 function closeDelete() {

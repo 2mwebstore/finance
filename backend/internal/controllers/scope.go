@@ -3,6 +3,8 @@ package controllers
 import (
 	"net/http"
 
+	"github.com/cambodia-finance/income-expense/internal/access"
+	"github.com/cambodia-finance/income-expense/internal/middleware"
 	"github.com/cambodia-finance/income-expense/internal/models"
 	"github.com/cambodia-finance/income-expense/internal/permissions"
 	"github.com/gin-gonic/gin"
@@ -10,12 +12,15 @@ import (
 	"gorm.io/gorm"
 )
 
-// accessScope is what the acting user may manage. Owners, admins and Super Admins
-// (anyone with branches.manage) have full access; everyone else is limited to the
-// branches they are assigned to.
+// accessScope is what the acting user may see and manage.
+//   - Full: owner/admin/Super Admin authority (branches.manage): shared categories, roles,
+//     managing anyone.
+//   - AllBranches / BranchIDs: whose data they see, from their roles' data scopes (see
+//     access.BranchScope). Full implies AllBranches, not the other way round.
 type accessScope struct {
 	ActorID     uuid.UUID
 	Full        bool
+	AllBranches bool
 	BranchIDs   []uuid.UUID
 	branchSet   map[uuid.UUID]bool
 	permissions map[string]bool
@@ -27,8 +32,8 @@ func loadScope(c *gin.Context, db *gorm.DB) (*accessScope, bool) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return nil, false
 	}
-	var user models.User
-	if err := db.Preload("Roles.Permissions").Preload("Branches").First(&user, "id = ?", actorID).Error; err != nil {
+	user, err := middleware.LoadForScope(db, actorID)
+	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not found"})
 		return nil, false
 	}
@@ -42,22 +47,22 @@ func loadScope(c *gin.Context, db *gorm.DB) (*accessScope, bool) {
 			s.permissions[p.Code] = true
 		}
 	}
-	s.Full = user.IsSuperAdmin || s.permissions[permissions.BranchesManage]
-	for _, b := range user.Branches {
-		s.BranchIDs = append(s.BranchIDs, b.ID)
-		s.branchSet[b.ID] = true
+	s.Full = access.IsFullAccess(user)
+	s.BranchIDs, s.AllBranches = access.BranchScope(user)
+	for _, id := range s.BranchIDs {
+		s.branchSet[id] = true
 	}
 	return s, true
 }
 
-// HasBranch reports whether the actor may work in the given branch.
+// HasBranch reports whether the branch is in the actor's data scope.
 func (s *accessScope) HasBranch(id uuid.UUID) bool {
-	return s.Full || s.branchSet[id]
+	return s.AllBranches || s.branchSet[id]
 }
 
-// SharesBranch reports whether the target user belongs to at least one of the actor's branches.
+// SharesBranch reports whether the target user belongs to at least one branch in the actor's scope.
 func (s *accessScope) SharesBranch(target *models.User) bool {
-	if s.Full {
+	if s.AllBranches {
 		return true
 	}
 	for _, b := range target.Branches {
@@ -68,8 +73,9 @@ func (s *accessScope) SharesBranch(target *models.User) bool {
 	return false
 }
 
-// CoversPermissions reports whether every permission in roles is one the actor also holds,
-// so a branch-level manager can never hand out (or manage) more power than they have.
+// CoversPermissions reports whether the actor holds every permission in roles and sees at least
+// the branches those roles' data scopes reach, so a branch-level manager can never hand out (or
+// manage) more power or more branches than they have. Roles need Permissions and Branches loaded.
 func (s *accessScope) CoversPermissions(roles []models.Role) bool {
 	if s.Full {
 		return true
@@ -81,6 +87,18 @@ func (s *accessScope) CoversPermissions(roles []models.Role) bool {
 		for _, p := range role.Permissions {
 			if !s.permissions[p.Code] {
 				return false
+			}
+		}
+		switch role.DataScope {
+		case models.DataScopeAll:
+			if !s.AllBranches {
+				return false
+			}
+		case models.DataScopeCustom:
+			for _, b := range role.Branches {
+				if !s.HasBranch(b.ID) {
+					return false
+				}
 			}
 		}
 	}

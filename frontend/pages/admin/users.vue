@@ -75,6 +75,8 @@
               <span v-if="!(item.roles || []).length && !item.is_super_admin" class="text-xs text-muted">No role assigned</span>
             </div>
             <p class="mt-2 text-xs text-muted">Branches: <span class="text-navy">{{ (item.branches || []).map(branch => branch.code).join(', ') || '—' }}</span></p>
+            <!-- Data scope from the user's roles: whose data they actually see. -->
+            <p class="mt-1 text-xs text-muted" :title="scopeTitle(item)">Sees data of: <span class="font-medium" :class="item.data_scope?.all ? 'text-income' : 'text-navy'">{{ scopeText(item) }}</span></p>
             <p v-if="(item.managers || []).length" class="mt-1 text-xs text-muted">Managers: <span class="font-medium text-navy">{{ (item.managers || []).map(manager => manager.full_name || manager.username).join(', ') }}</span></p>
             <div class="mt-2">
               <button type="button" class="text-[11px] font-semibold text-primary" @click="togglePerms(item.id)">{{ expandedPerms[item.id] ? 'Hide permissions' : `Permissions (${permCount(item)})` }}</button>
@@ -189,6 +191,25 @@ function togglePerms(userId: string) {
 
 function initials(name: string) {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map(part => part[0]!.toUpperCase()).join('')
+}
+
+// "All branches", or the branch codes the user's roles let them see.
+function scopeText(item: AdminUser) {
+  if (item.is_super_admin || item.data_scope?.all) return 'All branches'
+  const ids = item.data_scope?.branch_ids || []
+  if (!ids.length) return 'No branches'
+  const codes = ids.map(id => branches.value.find(branch => branch.id === id)?.code).filter(Boolean)
+  const hidden = ids.length - codes.length
+  return [codes.join(', '), hidden ? `${hidden} more` : ''].filter(Boolean).join(' + ')
+}
+
+function scopeTitle(item: AdminUser) {
+  const scopes = new Set((item.roles || []).map(role => role.data_scope || 'assigned'))
+  const parts = []
+  if (scopes.has('all')) parts.push('a role sees all branches')
+  if (scopes.has('custom')) parts.push('a role sees specific branches')
+  if (scopes.has('assigned')) parts.push('own assigned branches')
+  return parts.length ? `From roles: ${parts.join(', ')}` : ''
 }
 
 function permCount(item: AdminUser) {

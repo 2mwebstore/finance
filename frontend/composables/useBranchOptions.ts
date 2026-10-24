@@ -1,15 +1,15 @@
 import type { Branch } from '~/types/api'
 
 /**
- * Branches the signed-in user can see, for branch filters on lists.
- * GET /branches is already limited to the user's branches (owners/admins get all);
- * people who cannot call it fall back to the branches on their profile.
+ * Branches the signed-in user can see (their roles' data scope), for branch filters on lists.
+ * GET /branches is limited the same way; people who cannot call it use scope_branches from
+ * their profile.
  */
 export function useBranchOptions(allLabel = 'All branches') {
   const { api } = useApi()
   const { user } = useAuth()
   const { can } = usePermissions()
-  const branches = ref<Pick<Branch, 'id' | 'code' | 'name'>[]>([...(user.value?.branches || [])])
+  const branches = ref<Pick<Branch, 'id' | 'code' | 'name'>[]>([...(user.value?.scope_branches || user.value?.branches || [])])
 
   const options = computed(() => [
     { value: '', label: allLabel },

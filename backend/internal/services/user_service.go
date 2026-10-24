@@ -275,6 +275,7 @@ func (s *UserService) GetByID(ctx context.Context, id uuid.UUID) (*models.User, 
 	var user models.User
 	err := s.db.WithContext(ctx).
 		Preload("Roles.Permissions").
+		Preload("Roles.Branches").
 		Preload("Branches").
 		First(&user, "id = ?", id).Error
 	if err != nil {
@@ -336,7 +337,7 @@ func (s *UserService) List(ctx context.Context, f UserListFilter) ([]models.User
 		size = 20
 	}
 	var users []models.User
-	err := q.Preload("Roles.Permissions").Preload("Branches").
+	err := q.Preload("Roles.Permissions").Preload("Roles.Branches").Preload("Branches").
 		Order("username ASC").
 		Offset((page - 1) * size).Limit(size).
 		Find(&users).Error

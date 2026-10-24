@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/cambodia-finance/income-expense/internal/access"
 	"github.com/cambodia-finance/income-expense/internal/middleware"
 	"github.com/cambodia-finance/income-expense/internal/models"
 	"github.com/gin-gonic/gin"
@@ -79,6 +80,16 @@ func writeServiceError(c *gin.Context, err error) {
 	}
 }
 
+// dataScopeJSON: whose data the user sees, from their roles (needs Roles.Permissions,
+// Roles.Branches and Branches loaded): every branch, or these branch IDs.
+func dataScopeJSON(u *models.User) gin.H {
+	ids, all := access.BranchScope(u)
+	if ids == nil {
+		ids = []uuid.UUID{}
+	}
+	return gin.H{"all": all, "branch_ids": ids}
+}
+
 func roleSummary(roles []models.Role) []gin.H {
 	out := make([]gin.H, 0, len(roles))
 	for _, r := range roles {
@@ -96,6 +107,7 @@ func roleSummary(roles []models.Role) []gin.H {
 			"code":             r.Code,
 			"name":             r.Name,
 			"permission_codes": codes,
+			"data_scope":       dataScopeName(r.DataScope),
 		})
 	}
 	return out
@@ -121,6 +133,7 @@ func userJSON(u *models.User) gin.H {
 		"last_login_at":     u.LastLoginAt,
 		"roles":             roleSummary(u.Roles),
 		"branches":          branchSummary(u.Branches),
+		"data_scope":        dataScopeJSON(u),
 		"permission_codes":  permissionCodesFromRoles(u),
 		"created_at":        u.CreatedAt,
 		"updated_at":        u.UpdatedAt,
@@ -159,6 +172,14 @@ func branchJSON(b *models.Branch) gin.H {
 	}
 }
 
+// dataScopeName treats an empty scope (rows from before data scopes) as "assigned".
+func dataScopeName(scope string) string {
+	if scope == "" {
+		return models.DataScopeAssigned
+	}
+	return scope
+}
+
 func roleJSON(r *models.Role) gin.H {
 	perms := make([]gin.H, 0, len(r.Permissions))
 	for _, p := range r.Permissions {
@@ -176,6 +197,8 @@ func roleJSON(r *models.Role) gin.H {
 		"description": r.Description,
 		"is_system":   r.IsSystem,
 		"permissions": perms,
+		"data_scope":  dataScopeName(r.DataScope),
+		"branches":    branchSummary(r.Branches),
 		"created_at":  r.CreatedAt,
 		"updated_at":  r.UpdatedAt,
 	}

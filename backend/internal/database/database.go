@@ -143,7 +143,37 @@ func EnsureRequiredTables(db *gorm.DB) error {
 			return err
 		}
 	}
+	if err := ensureRoleDataScope(db); err != nil {
+		return err
+	}
 	return migrateLegacyAttachments(db)
+}
+
+// ensureRoleDataScope adds roles.data_scope and the role_branches table (see migration 000012).
+// The roles that run the whole system see every branch.
+func ensureRoleDataScope(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&models.Role{}) {
+		return nil
+	}
+	if !db.Migrator().HasColumn(&models.Role{}, "data_scope") {
+		log.Println("adding column roles.data_scope")
+		if err := db.Exec("ALTER TABLE roles ADD COLUMN data_scope VARCHAR(16) NOT NULL DEFAULT 'assigned'").Error; err != nil {
+			return err
+		}
+		if err := db.Exec("UPDATE roles SET data_scope = 'all' WHERE code IN ('super_admin', 'owner', 'admin')").Error; err != nil {
+			return err
+		}
+	}
+	if !db.Migrator().HasTable("role_branches") {
+		log.Println("creating missing table role_branches")
+		return db.Exec(`CREATE TABLE IF NOT EXISTS role_branches (
+	role_id CHAR(36) NOT NULL,
+	branch_id CHAR(36) NOT NULL,
+	PRIMARY KEY (role_id, branch_id),
+	KEY idx_role_branches_branch_id (branch_id)
+)`).Error
+	}
+	return nil
 }
 
 // migrateLegacyAttachments moves each transaction's old single attachment into

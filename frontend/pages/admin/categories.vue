@@ -229,13 +229,14 @@ async function save() {
 }
 
 async function loadBranches() {
-  branches.value = [...(user.value?.branches || [])]
+  // The branches in the user's data scope (from their roles); owners/admins load every branch.
+  branches.value = [...(user.value?.scope_branches || user.value?.branches || [])]
   if (!hasFullAccess.value) return
   try {
     const result = await api<{ items: Branch[] }>('/branches', { query: { page_size: 100 } })
     branches.value = result.items || branches.value
   } catch {
-    // Assigned branches from the profile remain as a fallback.
+    // The profile's scope branches remain as a fallback.
   }
 }
 

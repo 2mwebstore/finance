@@ -53,7 +53,7 @@ func (uc *UserController) checkAssignableRoles(c *gin.Context, scope *accessScop
 		return true
 	}
 	var roles []models.Role
-	if err := uc.db.Preload("Permissions").Where("code IN ?", codes).Find(&roles).Error; err != nil {
+	if err := uc.db.Preload("Permissions").Preload("Branches").Where("code IN ?", codes).Find(&roles).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "role lookup failed"})
 		return false
 	}
@@ -64,9 +64,9 @@ func (uc *UserController) checkAssignableRoles(c *gin.Context, scope *accessScop
 	return true
 }
 
-// checkAssignableBranches requires branch-level managers to stay within their own branches.
+// checkAssignableBranches keeps actors within the branches of their data scope.
 func (uc *UserController) checkAssignableBranches(c *gin.Context, scope *accessScope, branchIDs []string) bool {
-	if scope.Full {
+	if scope.AllBranches {
 		return true
 	}
 	for _, raw := range branchIDs {
@@ -172,7 +172,7 @@ func (uc *UserController) Create(c *gin.Context) {
 	if !bindJSON(c, &in) {
 		return
 	}
-	if !scope.Full && len(in.BranchIDs) == 0 {
+	if !scope.AllBranches && len(in.BranchIDs) == 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "choose at least one of your branches for the new user"})
 		return
 	}
@@ -312,7 +312,7 @@ func (uc *UserController) List(c *gin.Context) {
 	f := services.UserListFilter{
 		Search:     c.Query("search"),
 		RoleCode:   c.Query("role"),
-		Restricted: !scope.Full,
+		Restricted: !scope.AllBranches,
 		BranchIDs:  scope.BranchIDs,
 	}
 	if v := c.Query("is_active"); v != "" {
@@ -406,8 +406,8 @@ func (uc *UserController) AssignBranches(c *gin.Context) {
 		return
 	}
 	branchIDs := body.BranchIDs
-	if !scope.Full {
-		// A branch manager only edits their own branches; keep the user's other branches as they are.
+	if !scope.AllBranches {
+		// A branch manager only edits branches in their scope; keep the user's other branches as they are.
 		for _, b := range target.Branches {
 			if !scope.HasBranch(b.ID) {
 				branchIDs = append(branchIDs, b.ID.String())

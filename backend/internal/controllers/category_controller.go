@@ -26,7 +26,7 @@ func (cc *CategoryController) List(c *gin.Context) {
 	}
 	typ := c.Query("type")
 	activeOnly := c.Query("active") == "true" || c.Query("active") == "1"
-	listScope := services.CategoryListScope{All: scope.Full, BranchIDs: scope.BranchIDs, Search: c.Query("search")}
+	listScope := services.CategoryListScope{All: scope.AllBranches, BranchIDs: scope.BranchIDs, Search: c.Query("search")}
 	if v := c.Query("branch_id"); v != "" {
 		branchID, err := uuid.Parse(v)
 		if err != nil {

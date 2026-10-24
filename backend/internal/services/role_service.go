@@ -32,12 +32,44 @@ type CreateRoleInput struct {
 	Name            string   `json:"name" binding:"required,min=2,max=128"`
 	Description     string   `json:"description"`
 	PermissionCodes []string `json:"permission_codes"`
+	// DataScope: which branches' data the role's users see (assigned | custom | all; default assigned).
+	DataScope string `json:"data_scope" binding:"omitempty,oneof=assigned custom all"`
+	// BranchIDs are the branches of a custom data scope.
+	BranchIDs []string `json:"branch_ids"`
 }
 
 type UpdateRoleInput struct {
 	Name            *string  `json:"name" binding:"omitempty,min=2,max=128"`
 	Description     *string  `json:"description"`
 	PermissionCodes []string `json:"permission_codes"`
+	DataScope       *string  `json:"data_scope" binding:"omitempty,oneof=assigned custom all"`
+	BranchIDs       []string `json:"branch_ids"`
+}
+
+// scopeBranches checks the branches of a custom data scope (at least one, all existing).
+func (s *RoleService) scopeBranches(tx *gorm.DB, scope string, raw []string) ([]models.Branch, error) {
+	if scope != models.DataScopeCustom {
+		return []models.Branch{}, nil
+	}
+	ids := make([]uuid.UUID, 0, len(raw))
+	for _, r := range raw {
+		id, err := uuid.Parse(r)
+		if err != nil {
+			return nil, fieldError("branch_ids", "choose valid branches")
+		}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		return nil, fieldError("branch_ids", "choose at least one branch for this data scope")
+	}
+	var branches []models.Branch
+	if err := tx.Where("id IN ?", ids).Find(&branches).Error; err != nil {
+		return nil, err
+	}
+	if len(branches) != len(ids) {
+		return nil, fieldError("branch_ids", "one or more branches were not found")
+	}
+	return branches, nil
 }
 
 func (s *RoleService) Create(ctx context.Context, in CreateRoleInput) (*models.Role, error) {
@@ -49,17 +81,31 @@ func (s *RoleService) Create(ctx context.Context, in CreateRoleInput) (*models.R
 		return nil, err
 	}
 
+	scope := in.DataScope
+	if scope == "" {
+		scope = models.DataScopeAssigned
+	}
 	role := models.Role{
 		Base:        models.Base{ID: uuid.New()},
 		Code:        code,
 		Name:        strings.TrimSpace(in.Name),
 		Description: in.Description,
 		IsSystem:    false,
+		DataScope:   scope,
 	}
 
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		branches, err := s.scopeBranches(tx, scope, in.BranchIDs)
+		if err != nil {
+			return err
+		}
 		if err := tx.Create(&role).Error; err != nil {
 			return err
+		}
+		if len(branches) > 0 {
+			if err := tx.Model(&role).Association("Branches").Replace(branches); err != nil {
+				return err
+			}
 		}
 		if len(in.PermissionCodes) > 0 {
 			return s.setPermissionsTx(tx, &role, in.PermissionCodes)
@@ -103,6 +149,24 @@ func (s *RoleService) Update(ctx context.Context, id uuid.UUID, in UpdateRoleInp
 		if in.Description != nil {
 			updates["description"] = *in.Description
 		}
+		// Data scope: a new scope, or new branches for the custom scope it already has.
+		if in.DataScope != nil || in.BranchIDs != nil {
+			scope := role.DataScope
+			if in.DataScope != nil {
+				scope = *in.DataScope
+			}
+			if scope == "" {
+				scope = models.DataScopeAssigned
+			}
+			branches, err := s.scopeBranches(tx, scope, in.BranchIDs)
+			if err != nil {
+				return err
+			}
+			updates["data_scope"] = scope
+			if err := tx.Model(&role).Association("Branches").Replace(branches); err != nil {
+				return err
+			}
+		}
 		if len(updates) > 0 {
 			if err := tx.Model(&role).Updates(updates).Error; err != nil {
 				return err
@@ -123,7 +187,7 @@ func (s *RoleService) Update(ctx context.Context, id uuid.UUID, in UpdateRoleInp
 
 func (s *RoleService) GetByID(ctx context.Context, id uuid.UUID) (*models.Role, error) {
 	var role models.Role
-	err := s.db.WithContext(ctx).Preload("Permissions").First(&role, "id = ?", id).Error
+	err := s.db.WithContext(ctx).Preload("Permissions").Preload("Branches").First(&role, "id = ?", id).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrRoleNotFound
@@ -135,7 +199,7 @@ func (s *RoleService) GetByID(ctx context.Context, id uuid.UUID) (*models.Role, 
 
 // List returns the roles; search (optional) matches the name, code or description.
 func (s *RoleService) List(ctx context.Context, search string) ([]models.Role, error) {
-	q := s.db.WithContext(ctx).Preload("Permissions")
+	q := s.db.WithContext(ctx).Preload("Permissions").Preload("Branches")
 	if strings.TrimSpace(search) != "" {
 		like := textsearch.Contains(search)
 		q = q.Where("name LIKE ? OR code LIKE ? OR description LIKE ?", like, like, like)

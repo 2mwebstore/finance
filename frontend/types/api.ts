@@ -7,9 +7,17 @@ export interface User {
   is_super_admin: boolean
   roles: string[]
   permissions: string[]
+  /** Branches the user is assigned to. */
   branches: { id: string; code: string; name: string }[]
+  /** Data scope from the user's roles: every branch, or the branches in scope_branches. */
+  all_branches?: boolean
+  /** Active branches whose data the user may see and work in (use these for branch pickers). */
+  scope_branches?: { id: string; code: string; name: string }[]
   last_login_at?: string
 }
+
+/** Which branches' data a role's users see. */
+export type DataScope = 'assigned' | 'custom' | 'all'
 
 export interface LoginResponse {
   access_token: string
@@ -154,6 +162,9 @@ export interface Role {
   description?: string
   is_system?: boolean
   permissions?: { id: string; code: string; name: string; module?: string }[]
+  /** assigned: each user's own branches; custom: the branches below; all: every branch. */
+  data_scope?: DataScope
+  branches?: { id: string; code: string; name: string }[]
 }
 
 export interface Permission {
@@ -176,8 +187,10 @@ export interface AdminUser {
   is_active: boolean
   is_super_admin: boolean
   default_branch_id?: string | null
-  roles: { id: string; code: string; name: string; permission_codes?: string[] }[]
+  roles: { id: string; code: string; name: string; permission_codes?: string[]; data_scope?: DataScope }[]
   branches: { id: string; code: string; name: string; is_active?: boolean }[]
+  /** Whose data this user sees, from their roles: every branch, or these branch IDs. */
+  data_scope?: { all: boolean; branch_ids: string[] }
   permission_codes?: string[]
   last_login_at?: string | null
   created_at?: string

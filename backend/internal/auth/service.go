@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cambodia-finance/income-expense/internal/access"
 	"github.com/cambodia-finance/income-expense/internal/config"
 	"github.com/cambodia-finance/income-expense/internal/models"
 	"github.com/google/uuid"
@@ -371,10 +372,28 @@ func (s *Service) GetUserByID(ctx context.Context, id uuid.UUID) (*models.User, 
 	var user models.User
 	err := s.db.WithContext(ctx).
 		Preload("Roles.Permissions").
+		Preload("Roles.Branches").
 		Preload("Branches").
 		First(&user, "id = ?", id).Error
 	if err != nil {
 		return nil, err
 	}
 	return &user, nil
+}
+
+// ScopeBranches returns the active branches in the user's data scope (every active branch when
+// all is true). The user needs Roles.Permissions, Roles.Branches and Branches loaded.
+func (s *Service) ScopeBranches(ctx context.Context, user *models.User) (branches []models.Branch, all bool) {
+	ids, all := access.BranchScope(user)
+	q := s.db.WithContext(ctx).Where("is_active = ?", true).Order("code ASC")
+	if !all {
+		if len(ids) == 0 {
+			return []models.Branch{}, false
+		}
+		q = q.Where("id IN ?", ids)
+	}
+	if err := q.Find(&branches).Error; err != nil {
+		return []models.Branch{}, all
+	}
+	return branches, all
 }

@@ -27,7 +27,7 @@ func (ac *AuditController) List(c *gin.Context) {
 		return
 	}
 	f := audit.ListFilter{
-		Restricted: !scope.Full,
+		Restricted: !scope.AllBranches,
 		BranchIDs:  scope.BranchIDs,
 		Action:     c.Query("action"),
 		EntityType: c.Query("entity_type"),
