@@ -372,7 +372,6 @@ func (s *Service) GetUserByID(ctx context.Context, id uuid.UUID) (*models.User, 
 	var user models.User
 	err := s.db.WithContext(ctx).
 		Preload("Roles.Permissions").
-		Preload("Roles.Branches").
 		Preload("Branches").
 		First(&user, "id = ?", id).Error
 	if err != nil {
@@ -382,7 +381,7 @@ func (s *Service) GetUserByID(ctx context.Context, id uuid.UUID) (*models.User, 
 }
 
 // ScopeBranches returns the active branches in the user's data scope (every active branch when
-// all is true). The user needs Roles.Permissions, Roles.Branches and Branches loaded.
+// all is true). The user needs Roles.Permissions and Branches loaded.
 func (s *Service) ScopeBranches(ctx context.Context, user *models.User) (branches []models.Branch, all bool) {
 	ids, all := access.BranchScope(user)
 	q := s.db.WithContext(ctx).Where("is_active = ?", true).Order("code ASC")

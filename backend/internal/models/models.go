@@ -48,23 +48,16 @@ type Role struct {
 	Name        string `gorm:"size:128;not null" json:"name"`
 	Description string `gorm:"size:512" json:"description"`
 	IsSystem    bool   `gorm:"default:false;not null" json:"is_system"` // cannot delete system roles
-	// DataScope decides which branches' data the role's users see: DataScopeAssigned (the
-	// branches each user is assigned to) or DataScopeCustom (Branches below). Seeing every branch
-	// comes from full access (Manage Branches).
+	// DataScope is always DataScopeAssigned: users see only the branches they are assigned to;
+	// data is not shared between branches. Seeing every branch comes from full access (Manage
+	// Branches). Older values are converted on start (see database.ownBranchesOnly).
 	DataScope string `gorm:"size:16;not null;default:'assigned'" json:"data_scope"`
 
 	Permissions []Permission `gorm:"many2many:role_permissions;" json:"permissions,omitempty"`
-	Branches    []Branch     `gorm:"many2many:role_branches;" json:"branches,omitempty"`
 }
 
-// Role data scopes.
-const (
-	DataScopeAssigned = "assigned"
-	DataScopeCustom   = "custom"
-	// DataScopeAll is retired: no longer offered, and converted on start (see
-	// database.retireAllDataScope). Still honoured for rows from older backups until then.
-	DataScopeAll = "all"
-)
+// DataScopeAssigned is the only role data scope (the retired "custom" and "all" are converted to it).
+const DataScopeAssigned = "assigned"
 
 // Permission is a granular capability.
 type Permission struct {

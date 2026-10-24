@@ -9,8 +9,6 @@ import (
 
 	"github.com/cambodia-finance/income-expense/internal/config"
 	"github.com/cambodia-finance/income-expense/internal/models"
-	"github.com/cambodia-finance/income-expense/internal/permissions"
-	"github.com/google/uuid"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -148,13 +146,13 @@ func EnsureRequiredTables(db *gorm.DB) error {
 	if err := ensureRoleDataScope(db); err != nil {
 		return err
 	}
-	if err := retireAllDataScope(db); err != nil {
+	if err := ownBranchesOnly(db); err != nil {
 		return err
 	}
 	return migrateLegacyAttachments(db)
 }
 
-// ensureRoleDataScope adds roles.data_scope and the role_branches table (see migration 000012).
+// ensureRoleDataScope adds roles.data_scope (see migration 000012).
 func ensureRoleDataScope(db *gorm.DB) error {
 	if !db.Migrator().HasTable(&models.Role{}) {
 		return nil
@@ -165,67 +163,27 @@ func ensureRoleDataScope(db *gorm.DB) error {
 			return err
 		}
 	}
-	if !db.Migrator().HasTable("role_branches") {
-		log.Println("creating missing table role_branches")
-		return db.Exec(`CREATE TABLE IF NOT EXISTS role_branches (
-	role_id CHAR(36) NOT NULL,
-	branch_id CHAR(36) NOT NULL,
-	PRIMARY KEY (role_id, branch_id),
-	KEY idx_role_branches_branch_id (branch_id)
-)`).Error
-	}
 	return nil
 }
 
-// retireAllDataScope: "All branches" is no longer a data scope; seeing every branch comes from full
-// access (Manage Branches) only. Roles that still have it keep what their users see: with Manage
-// Branches they become "assigned" (they see every branch anyway), the others "custom" with every
-// branch there is now. Changed roles no longer match, so it is safe on every start and after a
-// restore of an older backup.
-func retireAllDataScope(db *gorm.DB) error {
+// ownBranchesOnly: data is never shared between branches, so every role sees only its users'
+// own branches. Roles with the retired scopes ("custom" with picked branches, "all") become
+// "assigned" and their picked branches are cleared. Safe on every start and after a restore.
+func ownBranchesOnly(db *gorm.DB) error {
 	if !db.Migrator().HasTable(&models.Role{}) || !db.Migrator().HasColumn(&models.Role{}, "data_scope") {
 		return nil
 	}
-	var roles []models.Role
-	if err := db.Where("data_scope = ?", models.DataScopeAll).Find(&roles).Error; err != nil {
-		return err
+	res := db.Model(&models.Role{}).Where("data_scope <> ?", models.DataScopeAssigned).Update("data_scope", models.DataScopeAssigned)
+	if res.Error != nil {
+		return res.Error
 	}
-	if len(roles) == 0 {
-		return nil
+	if res.RowsAffected > 0 {
+		log.Printf("%d role(s) now see only their users' own branches", res.RowsAffected)
 	}
-	var fullRoleIDs []uuid.UUID
-	if err := db.Table("role_permissions").
-		Joins("JOIN permissions ON permissions.id = role_permissions.permission_id").
-		Where("permissions.code = ?", permissions.BranchesManage).
-		Pluck("role_permissions.role_id", &fullRoleIDs).Error; err != nil {
-		return err
-	}
-	full := map[uuid.UUID]bool{}
-	for _, id := range fullRoleIDs {
-		full[id] = true
-	}
-	var branches []models.Branch
-	if err := db.Find(&branches).Error; err != nil {
-		return err
-	}
-	for i := range roles {
-		role := &roles[i]
-		scope := models.DataScopeCustom
-		if full[role.ID] || len(branches) == 0 {
-			scope = models.DataScopeAssigned
+	if db.Migrator().HasTable("role_branches") {
+		if err := db.Exec("DELETE FROM role_branches").Error; err != nil {
+			return err
 		}
-		err := db.Transaction(func(tx *gorm.DB) error {
-			if scope == models.DataScopeCustom {
-				if err := tx.Model(role).Association("Branches").Replace(branches); err != nil {
-					return err
-				}
-			}
-			return tx.Model(&models.Role{}).Where("id = ?", role.ID).Update("data_scope", scope).Error
-		})
-		if err != nil {
-			return fmt.Errorf("data scope of role %s: %w", role.Code, err)
-		}
-		log.Printf("role %s: data scope \"all\" is now %q", role.Code, scope)
 	}
 	return nil
 }

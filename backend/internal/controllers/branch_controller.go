@@ -12,12 +12,13 @@ import (
 )
 
 type BranchController struct {
-	svc *services.BranchService
-	db  *gorm.DB
+	svc      *services.BranchService
+	db       *gorm.DB
+	telegram *services.BranchTelegramService
 }
 
-func NewBranchController(svc *services.BranchService, db *gorm.DB) *BranchController {
-	return &BranchController{svc: svc, db: db}
+func NewBranchController(svc *services.BranchService, db *gorm.DB, telegram *services.BranchTelegramService) *BranchController {
+	return &BranchController{svc: svc, db: db, telegram: telegram}
 }
 
 func (bc *BranchController) Create(c *gin.Context) {
@@ -139,9 +140,18 @@ func (bc *BranchController) List(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "list failed"})
 		return
 	}
+	// telegram_enabled: the branch sends its transaction updates to Telegram.
+	telegramOn := map[uuid.UUID]bool{}
+	if bc.telegram != nil {
+		if on, err := bc.telegram.EnabledBranches(c.Request.Context()); err == nil {
+			telegramOn = on
+		}
+	}
 	items := make([]gin.H, 0, len(branches))
 	for i := range branches {
-		items = append(items, branchJSON(&branches[i]))
+		item := branchJSON(&branches[i])
+		item["telegram_enabled"] = telegramOn[branches[i].ID]
+		items = append(items, item)
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"items":     items,

@@ -9,7 +9,7 @@ export interface User {
   permissions: string[]
   /** Branches the user is assigned to. */
   branches: { id: string; code: string; name: string }[]
-  /** Data scope from the user's roles: every branch, or the branches in scope_branches. */
+  /** Owner/admin access (Manage Branches): every branch; otherwise only scope_branches (their own). */
   all_branches?: boolean
   /** Active branches whose data the user may see and work in (use these for branch pickers). */
   scope_branches?: { id: string; code: string; name: string }[]
@@ -17,7 +17,8 @@ export interface User {
 }
 
 /** Which branches' data a role's users see. */
-export type DataScope = 'assigned' | 'custom' | 'all'
+/** Role data scope: always "assigned" (own branches; data is not shared between branches). */
+export type DataScope = 'assigned'
 
 export interface LoginResponse {
   access_token: string
@@ -153,6 +154,20 @@ export interface Branch {
   email?: string
   manager_id?: string | null
   is_active: boolean
+  /** From the branch list: the branch sends its transaction updates to Telegram. */
+  telegram_enabled?: boolean
+}
+
+/** A branch's Telegram chat for transaction updates (the bot token is never sent back). */
+export interface BranchTelegramSettings {
+  enabled: boolean
+  chat_id: string
+  events: string[]
+  /** A bot token is saved for this branch. */
+  own_bot: boolean
+  /** The default bot (Backups page or server environment) exists. */
+  default_bot_ready: boolean
+  ready: boolean
 }
 
 export interface Role {
@@ -162,9 +177,8 @@ export interface Role {
   description?: string
   is_system?: boolean
   permissions?: { id: string; code: string; name: string; module?: string }[]
-  /** assigned: each user's own branches; custom: the branches below; all: retired (older data). */
+  /** Always "assigned": users see only their own branches (Manage Branches sees every branch). */
   data_scope?: DataScope
-  branches?: { id: string; code: string; name: string }[]
   /** From the role list: whether the signed-in user may edit (and delete) this role. */
   can_manage?: boolean
 }

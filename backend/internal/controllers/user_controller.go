@@ -53,7 +53,7 @@ func (uc *UserController) checkAssignableRoles(c *gin.Context, scope *accessScop
 		return true
 	}
 	var roles []models.Role
-	if err := uc.db.Preload("Permissions").Preload("Branches").Where("code IN ?", codes).Find(&roles).Error; err != nil {
+	if err := uc.db.Preload("Permissions").Where("code IN ?", codes).Find(&roles).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "role lookup failed"})
 		return false
 	}

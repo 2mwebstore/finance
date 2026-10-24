@@ -23,36 +23,16 @@ func IsFullAccess(user *models.User) bool {
 	return false
 }
 
-// BranchScope works out which branches' data a user may see, from their roles' data scopes
-// (user loaded with Branches, Roles.Permissions and Roles.Branches):
-//   - Super Admin, branches.manage, or a role with the retired scope "all" (left by an older
-//     backup until the next start converts it): every branch (all = true);
-//   - otherwise the union of the user's assigned branches (roles with scope "assigned") and the
-//     branches picked on roles with scope "custom".
+// BranchScope works out which branches' data a user may see (user loaded with Branches and
+// Roles.Permissions). Data is never shared between branches:
+//   - Super Admin or branches.manage (owner/admin): every branch (all = true);
+//   - everyone else: only the branches they are assigned to.
 func BranchScope(user *models.User) (ids []uuid.UUID, all bool) {
 	if IsFullAccess(user) {
 		return nil, true
 	}
-	seen := map[uuid.UUID]bool{}
-	add := func(id uuid.UUID) {
-		if !seen[id] {
-			seen[id] = true
-			ids = append(ids, id)
-		}
-	}
-	for _, role := range user.Roles {
-		switch role.DataScope {
-		case models.DataScopeAll:
-			return nil, true
-		case models.DataScopeCustom:
-			for _, b := range role.Branches {
-				add(b.ID)
-			}
-		default:
-			for _, b := range user.Branches {
-				add(b.ID)
-			}
-		}
+	for _, b := range user.Branches {
+		ids = append(ids, b.ID)
 	}
 	return ids, false
 }

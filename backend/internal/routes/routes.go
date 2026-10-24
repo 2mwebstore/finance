@@ -34,13 +34,15 @@ func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config, store storage.Store, 
 	cashSvc := services.NewCashService(db)
 	settingsSvc := services.NewSettingsService(db)
 
-	branchCtrl := controllers.NewBranchController(branchSvc, db)
+	branchTelegram := services.NewBranchTelegramService(db, cfg.Timezone)
+	branchCtrl := controllers.NewBranchController(branchSvc, db, branchTelegram)
+	branchTelegramCtrl := controllers.NewBranchTelegramController(branchTelegram, db, auditSvc)
 	userCtrl := controllers.NewUserController(userSvc, db)
 	roleCtrl := controllers.NewRoleController(roleSvc, db)
 	catCtrl := controllers.NewCategoryController(catSvc, db)
 	pmCtrl := controllers.NewPaymentMethodController(pmSvc)
 	attachmentSvc := services.NewAttachmentService(db, txnSvc, store)
-	txnCtrl := controllers.NewTransactionController(txnSvc, attachmentSvc, auditSvc)
+	txnCtrl := controllers.NewTransactionController(txnSvc, attachmentSvc, auditSvc, branchTelegram)
 	reportCtrl := controllers.NewReportController(reportSvc, auditSvc)
 	auditCtrl := controllers.NewAuditController(auditSvc, db, cfg.Timezone)
 	notifyCtrl := controllers.NewNotificationController(tg)
@@ -89,6 +91,10 @@ func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config, store storage.Store, 
 				branches.PATCH("/:id", middleware.RequireAnyPermission(db, permissions.BranchesEdit, permissions.BranchesManage), branchCtrl.Update)
 				branches.DELETE("/:id", middleware.RequireAnyPermission(db, permissions.BranchesManage), branchCtrl.Delete)
 				branches.POST("/:id/users", middleware.RequireAnyPermission(db, permissions.BranchesManage), branchCtrl.AssignUsers)
+				// The branch's Telegram chat for transaction updates (only branches the user sees).
+				branches.GET("/:id/telegram", middleware.RequireAnyPermission(db, permissions.BranchesEdit, permissions.BranchesManage), branchTelegramCtrl.Get)
+				branches.PUT("/:id/telegram", middleware.RequireAnyPermission(db, permissions.BranchesEdit, permissions.BranchesManage), branchTelegramCtrl.Save)
+				branches.POST("/:id/telegram/test", middleware.RequireAnyPermission(db, permissions.BranchesEdit, permissions.BranchesManage), branchTelegramCtrl.Test)
 			}
 
 			users := api.Group("/users")

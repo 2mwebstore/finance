@@ -383,7 +383,7 @@ async function loadCategories() {
 }
 
 async function loadBranches() {
-  // The branches the user's roles let them work in (their data scope).
+  // The branches the user works in: their own (owners/admins: every branch).
   branches.value = user.value?.scope_branches || user.value?.branches || []
   if (canViewBranches.value) {
     try {

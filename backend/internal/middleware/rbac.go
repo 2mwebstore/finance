@@ -85,7 +85,7 @@ func HasFullAccess(db *gorm.DB, userID uuid.UUID) (bool, error) {
 // LoadForScope loads a user with what access.BranchScope and access.IsFullAccess need.
 func LoadForScope(db *gorm.DB, userID uuid.UUID) (*models.User, error) {
 	var user models.User
-	err := db.Preload("Roles.Permissions").Preload("Roles.Branches").Preload("Branches").First(&user, "id = ?", userID).Error
+	err := db.Preload("Roles.Permissions").Preload("Branches").First(&user, "id = ?", userID).Error
 	return &user, err
 }
 

@@ -15,8 +15,8 @@ import (
 // accessScope is what the acting user may see and manage.
 //   - Full: owner/admin/Super Admin authority (branches.manage): shared categories, roles,
 //     managing anyone.
-//   - AllBranches / BranchIDs: whose data they see, from their roles' data scopes (see
-//     access.BranchScope). Full implies AllBranches, not the other way round.
+//   - AllBranches / BranchIDs: whose data they see (see access.BranchScope): every branch with
+//     full access, otherwise only their own branches.
 type accessScope struct {
 	ActorID     uuid.UUID
 	Full        bool
@@ -73,9 +73,9 @@ func (s *accessScope) SharesBranch(target *models.User) bool {
 	return false
 }
 
-// CoversPermissions reports whether the actor holds every permission in roles and sees at least
-// the branches those roles' data scopes reach, so a branch-level manager can never hand out (or
-// manage) more power or more branches than they have. Roles need Permissions and Branches loaded.
+// CoversPermissions reports whether the actor holds every permission in roles, so a branch-level
+// manager can never hand out (or manage) more power than they have. Roles need Permissions loaded.
+// (Roles carry no branches: everyone sees only their own branches.)
 func (s *accessScope) CoversPermissions(roles []models.Role) bool {
 	if s.Full {
 		return true
@@ -87,18 +87,6 @@ func (s *accessScope) CoversPermissions(roles []models.Role) bool {
 		for _, p := range role.Permissions {
 			if !s.permissions[p.Code] {
 				return false
-			}
-		}
-		switch role.DataScope {
-		case models.DataScopeAll:
-			if !s.AllBranches {
-				return false
-			}
-		case models.DataScopeCustom:
-			for _, b := range role.Branches {
-				if !s.HasBranch(b.ID) {
-					return false
-				}
 			}
 		}
 	}

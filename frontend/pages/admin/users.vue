@@ -193,7 +193,7 @@ function initials(name: string) {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map(part => part[0]!.toUpperCase()).join('')
 }
 
-// "All branches", or the branch codes the user's roles let them see.
+// "All branches" (owner/admin), or the codes of the user's own branches.
 function scopeText(item: AdminUser) {
   if (item.is_super_admin || item.data_scope?.all) return 'All branches'
   const ids = item.data_scope?.branch_ids || []
@@ -204,12 +204,7 @@ function scopeText(item: AdminUser) {
 }
 
 function scopeTitle(item: AdminUser) {
-  const scopes = new Set((item.roles || []).map(role => role.data_scope || 'assigned'))
-  const parts = []
-  if (scopes.has('all')) parts.push('a role sees all branches')
-  if (scopes.has('custom')) parts.push('a role sees specific branches')
-  if (scopes.has('assigned')) parts.push('own assigned branches')
-  return parts.length ? `From roles: ${parts.join(', ')}` : ''
+  return item.is_super_admin || item.data_scope?.all ? 'Owner/admin access (Manage Branches): every branch' : 'Only the branches this user is assigned to'
 }
 
 function permCount(item: AdminUser) {

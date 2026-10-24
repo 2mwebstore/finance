@@ -80,8 +80,8 @@ func writeServiceError(c *gin.Context, err error) {
 	}
 }
 
-// dataScopeJSON: whose data the user sees, from their roles (needs Roles.Permissions,
-// Roles.Branches and Branches loaded): every branch, or these branch IDs.
+// dataScopeJSON: whose data the user sees (needs Roles.Permissions and Branches loaded): every
+// branch, or these branch IDs (their own).
 func dataScopeJSON(u *models.User) gin.H {
 	ids, all := access.BranchScope(u)
 	if ids == nil {
@@ -107,7 +107,7 @@ func roleSummary(roles []models.Role) []gin.H {
 			"code":             r.Code,
 			"name":             r.Name,
 			"permission_codes": codes,
-			"data_scope":       dataScopeName(r.DataScope),
+			"data_scope":       models.DataScopeAssigned,
 		})
 	}
 	return out
@@ -172,14 +172,6 @@ func branchJSON(b *models.Branch) gin.H {
 	}
 }
 
-// dataScopeName treats an empty scope (rows from before data scopes) as "assigned".
-func dataScopeName(scope string) string {
-	if scope == "" {
-		return models.DataScopeAssigned
-	}
-	return scope
-}
-
 func roleJSON(r *models.Role) gin.H {
 	perms := make([]gin.H, 0, len(r.Permissions))
 	for _, p := range r.Permissions {
@@ -197,8 +189,7 @@ func roleJSON(r *models.Role) gin.H {
 		"description": r.Description,
 		"is_system":   r.IsSystem,
 		"permissions": perms,
-		"data_scope":  dataScopeName(r.DataScope),
-		"branches":    branchSummary(r.Branches),
+		"data_scope":  models.DataScopeAssigned,
 		"created_at":  r.CreatedAt,
 		"updated_at":  r.UpdatedAt,
 	}

@@ -4,32 +4,15 @@ import (
 	"testing"
 
 	"github.com/cambodia-finance/income-expense/internal/models"
-	"github.com/google/uuid"
 )
 
 func TestSpecRoleIsCheckedAgainstTheActor(t *testing.T) {
-	mine, other := uuid.New(), uuid.New()
-	manager := &accessScope{
-		BranchIDs:   []uuid.UUID{mine},
-		branchSet:   map[uuid.UUID]bool{mine: true},
-		permissions: map[string]bool{"income.view": true, "roles.manage": true},
+	manager := &accessScope{permissions: map[string]bool{"income.view": true, "roles.manage": true}}
+	if !manager.CoversPermissions([]models.Role{specRole([]string{"income.view"})}) {
+		t.Error("own permissions should be allowed")
 	}
-	cases := []struct {
-		name string
-		role models.Role
-		want bool
-	}{
-		{"own permissions, assigned", specRole([]string{"income.view"}, models.DataScopeAssigned, nil), true},
-		{"own branch", specRole([]string{"income.view"}, models.DataScopeCustom, []string{mine.String()}), true},
-		{"another branch", specRole(nil, models.DataScopeCustom, []string{mine.String(), other.String()}), false},
-		{"a permission they lack", specRole([]string{"income.view", "users.manage"}, models.DataScopeAssigned, nil), false},
-		{"retired all scope", specRole(nil, models.DataScopeAll, nil), false},
-		{"bad branch ids are left to the service", specRole(nil, models.DataScopeCustom, []string{"nope"}), true},
-	}
-	for _, tc := range cases {
-		if got := manager.CoversPermissions([]models.Role{tc.role}); got != tc.want {
-			t.Errorf("%s: got %v, want %v", tc.name, got, tc.want)
-		}
+	if manager.CoversPermissions([]models.Role{specRole([]string{"income.view", "users.manage"})}) {
+		t.Error("a permission the actor lacks should be refused")
 	}
 }
 

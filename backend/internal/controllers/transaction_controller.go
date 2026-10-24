@@ -23,10 +23,11 @@ type TransactionController struct {
 	svc         *services.TransactionService
 	attachments *services.AttachmentService
 	audit       *audit.Service
+	telegram    *services.BranchTelegramService // the branch's Telegram chat (optional)
 }
 
-func NewTransactionController(svc *services.TransactionService, attachments *services.AttachmentService, auditSvc *audit.Service) *TransactionController {
-	return &TransactionController{svc: svc, attachments: attachments, audit: auditSvc}
+func NewTransactionController(svc *services.TransactionService, attachments *services.AttachmentService, auditSvc *audit.Service, telegram *services.BranchTelegramService) *TransactionController {
+	return &TransactionController{svc: svc, attachments: attachments, audit: auditSvc, telegram: telegram}
 }
 
 func (tc *TransactionController) Create(c *gin.Context) {
@@ -56,6 +57,7 @@ func (tc *TransactionController) Create(c *gin.Context) {
 			},
 		})
 	}
+	tc.telegram.NotifyTransaction(services.TelegramEventCreated, txn.ID, actorID, "")
 	c.JSON(http.StatusCreated, txnJSON(txn))
 }
 
@@ -182,6 +184,7 @@ func (tc *TransactionController) Void(c *gin.Context) {
 			IPAddress: c.ClientIP(), Details: map[string]interface{}{"reason": body.Reason},
 		})
 	}
+	tc.telegram.NotifyTransaction(services.TelegramEventVoided, txn.ID, actorID, body.Reason)
 	c.JSON(http.StatusOK, txnJSON(txn))
 }
 
@@ -334,6 +337,7 @@ func (tc *TransactionController) Approve(c *gin.Context) {
 			IPAddress: c.ClientIP(), Details: map[string]interface{}{"notes": body.Notes},
 		})
 	}
+	tc.telegram.NotifyTransaction(services.TelegramEventApproved, txn.ID, actorID, body.Notes)
 	c.JSON(http.StatusOK, txnJSON(txn))
 }
 
@@ -365,6 +369,7 @@ func (tc *TransactionController) Reject(c *gin.Context) {
 			IPAddress: c.ClientIP(), Details: map[string]interface{}{"notes": body.Notes},
 		})
 	}
+	tc.telegram.NotifyTransaction(services.TelegramEventRejected, txn.ID, actorID, body.Notes)
 	c.JSON(http.StatusOK, txnJSON(txn))
 }
 
@@ -400,6 +405,7 @@ func (tc *TransactionController) Reverse(c *gin.Context) {
 			IPAddress: c.ClientIP(), Details: map[string]interface{}{"reason": body.Reason, "reverses": id.String()},
 		})
 	}
+	tc.telegram.NotifyTransaction(services.TelegramEventReversed, txn.ID, actorID, body.Reason)
 	c.JSON(http.StatusCreated, txnJSON(txn))
 }
 

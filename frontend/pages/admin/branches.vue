@@ -36,6 +36,8 @@
       </template>
     </AppModal>
 
+    <BranchTelegramModal :model-value="!!telegramBranch" :branch="telegramBranch" @update:model-value="(open) => { if (!open) telegramBranch = null }" @saved="onTelegramSaved" />
+
     <ListSearch v-model="search" placeholder="Search by code, name, address, phone or email…" />
     <div v-if="loading" class="text-sm text-muted">Loading…</div>
     <AppAlert v-else-if="err" title="Couldn’t load branches" :message="err"><template #action><button type="button" @click="load">Try again</button></template></AppAlert>
@@ -45,6 +47,7 @@
           <div class="flex flex-wrap items-center gap-2">
             <h2 class="text-sm font-semibold text-navy">{{ branch.name }}</h2>
             <span class="rounded-full px-2 py-1 text-[10px] font-semibold uppercase" :class="branch.is_active ? 'bg-green-50 text-income' : 'bg-slate-100 text-muted'">{{ branch.is_active ? 'Active' : 'Inactive' }}</span>
+            <span v-if="branch.telegram_enabled" class="inline-flex items-center gap-1 rounded-full bg-sky-50 px-2 py-1 text-[10px] font-semibold text-sky-700" title="Sends transaction updates to Telegram"><Send :size="10" /> Telegram</span>
           </div>
           <p class="mt-1 font-mono text-xs text-muted">{{ branch.code }}</p>
           <p v-if="branch.address || branch.phone || branch.email" class="mt-1 break-words text-xs text-muted">
@@ -53,6 +56,7 @@
         </div>
         <div v-if="canEdit || canManage" class="flex flex-wrap gap-2 sm:shrink-0 sm:justify-end">
           <button v-if="canEdit" type="button" class="action-chip action-edit" @click="openEdit(branch)"><Pencil :size="13" /> Edit</button>
+          <button v-if="canEdit" type="button" class="action-chip action-edit" @click="telegramBranch = branch"><Send :size="13" /> Telegram</button>
           <button v-if="canManage && branch.is_active" type="button" class="action-chip action-danger" @click="confirmDelete(branch)"><Trash2 :size="13" /> Delete</button>
           <button v-else-if="canManage" type="button" class="action-chip action-success" :disabled="saving" @click="setActive(branch, true)"><RotateCcw :size="13" /> Restore</button>
         </div>
@@ -75,8 +79,8 @@
 </template>
 
 <script setup lang="ts">
-import { Building2, Pencil, Plus, RotateCcw, Trash2 } from 'lucide-vue-next'
-import type { Branch } from '~/types/api'
+import { Building2, Pencil, Plus, RotateCcw, Send, Trash2 } from 'lucide-vue-next'
+import type { Branch, BranchTelegramSettings } from '~/types/api'
 import { useToast } from '~/composables/useToast'
 import { rule } from '~/utils/validation'
 import { useFormErrors } from '~/composables/useFormErrors'
@@ -96,6 +100,13 @@ const formError = ref('')
 const archiveError = ref('')
 const editing = ref<Branch | null>(null)
 const archiveTarget = ref<Branch | null>(null)
+// The branch whose Telegram settings are open.
+const telegramBranch = ref<Branch | null>(null)
+
+function onTelegramSaved(settings: BranchTelegramSettings) {
+  const branch = items.value.find(item => item.id === telegramBranch.value?.id)
+  if (branch) branch.telegram_enabled = settings.enabled && !!settings.chat_id
+}
 const form = reactive({ code: '', name: '', address: '', phone: '', email: '' })
 
 const search = ref('')

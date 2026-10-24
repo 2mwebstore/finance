@@ -37,7 +37,9 @@ await store.syncCatalogFromApi(api)
 
 - **Categories:** shared categories (`branch_id: null`) appear in every branch and only full-access users may create or edit them. Branch managers create and edit categories for their own branches. An expense can use a shared category or one from its own branch.
 - **Users:** branch managers see users in their branches only, and can't manage owners/admins or anyone holding a permission they lack. They can only assign roles whose permissions they hold, and only their own branches.
-- **Roles & permissions:** anyone with `roles.manage` can add roles. The owner/admin (full access) can change any role; others can give a role only permissions and branches they have themselves, and can change or delete only non-system roles within those limits whose users are all in their branches. A role's data scope is "Own branches" or "Specific branches"; seeing every branch comes from full access (`branches.manage`).
+- **Roles & permissions:** anyone with `roles.manage` can add roles. The owner/admin (full access) can change any role; others can give a role only permissions they have themselves, and can change or delete only non-system roles within those limits whose users are all in their branches.
+- **Branch data:** everyone sees only the branches they are assigned to; data is never shared between branches. Only full access (`branches.manage`, owner/admin) sees every branch.
+- **Branch Telegram:** people with `branches.edit` or `branches.manage` set up the Telegram chat (and optionally the branch's own bot) for the branches they see, and choose which transaction updates are sent (new, approved, rejected, voided, reversed). Without an own bot the default bot from the Backups page is used. Each branch's updates go only to its own chat; the bot token is never sent back to the browser.
 - **Audit log:** branch managers with `audit-logs.view` see events from their branches and their branch users. Cleanup (`POST /audit-logs/cleanup`, keep 1–3 months) needs full access plus `settings.manage`.
 
 ## Managers (who approves whose transactions)

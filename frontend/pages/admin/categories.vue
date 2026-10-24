@@ -229,7 +229,7 @@ async function save() {
 }
 
 async function loadBranches() {
-  // The branches in the user's data scope (from their roles); owners/admins load every branch.
+  // The user's own branches; owners/admins load every branch.
   branches.value = [...(user.value?.scope_branches || user.value?.branches || [])]
   if (!hasFullAccess.value) return
   try {
