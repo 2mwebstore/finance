@@ -96,10 +96,6 @@ func AllPermissions() []struct {
 	}
 }
 
-// DefaultRoleDataScopes: system roles that see every branch. The rest see the branches their
-// users are assigned to ("assigned", the default).
-var DefaultRoleDataScopes = map[string]string{"super_admin": "all", "owner": "all", "admin": "all"}
-
 // DefaultRoles returns system roles and their permission codes.
 func DefaultRoles() map[string]struct {
 	Name        string

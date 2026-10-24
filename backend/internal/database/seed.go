@@ -48,17 +48,13 @@ func SeedPermissionsAndRoles(db *gorm.DB) error {
 		var role models.Role
 		err := db.Where("code = ?", code).First(&role).Error
 		if err == gorm.ErrRecordNotFound {
-			scope := permissions.DefaultRoleDataScopes[code]
-			if scope == "" {
-				scope = models.DataScopeAssigned
-			}
 			role = models.Role{
 				Base:        models.Base{ID: uuid.New()},
 				Code:        code,
 				Name:        def.Name,
 				Description: def.Description,
 				IsSystem:    true,
-				DataScope:   scope,
+				DataScope:   models.DataScopeAssigned,
 			}
 			if err := db.Create(&role).Error; err != nil {
 				return fmt.Errorf("create role %s: %w", code, err)

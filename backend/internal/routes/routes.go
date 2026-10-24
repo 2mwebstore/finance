@@ -36,7 +36,7 @@ func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config, store storage.Store, 
 
 	branchCtrl := controllers.NewBranchController(branchSvc, db)
 	userCtrl := controllers.NewUserController(userSvc, db)
-	roleCtrl := controllers.NewRoleController(roleSvc)
+	roleCtrl := controllers.NewRoleController(roleSvc, db)
 	catCtrl := controllers.NewCategoryController(catSvc, db)
 	pmCtrl := controllers.NewPaymentMethodController(pmSvc)
 	attachmentSvc := services.NewAttachmentService(db, txnSvc, store)
@@ -107,12 +107,13 @@ func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config, store storage.Store, 
 			roles := api.Group("/roles")
 			{
 				roles.GET("", middleware.RequireAnyPermission(db, permissions.RolesView, permissions.RolesManage, permissions.UsersCreate, permissions.UsersManage), roleCtrl.List)
-				// Roles and permissions are system-wide: only the owner/admin (full access) may change them.
-				roles.POST("", middleware.RequireAnyPermission(db, permissions.RolesManage), middleware.RequireFullAccess(db), roleCtrl.Create)
+				// Roles are system-wide: without full access (owner/admin) the controller limits changes
+				// to roles within the actor's own permissions and branches.
+				roles.POST("", middleware.RequireAnyPermission(db, permissions.RolesManage), roleCtrl.Create)
 				roles.GET("/:id", middleware.RequireAnyPermission(db, permissions.RolesView, permissions.RolesManage), roleCtrl.Get)
-				roles.PATCH("/:id", middleware.RequireAnyPermission(db, permissions.RolesManage), middleware.RequireFullAccess(db), roleCtrl.Update)
-				roles.PUT("/:id/permissions", middleware.RequireAnyPermission(db, permissions.PermissionsManage), middleware.RequireFullAccess(db), roleCtrl.SetPermissions)
-				roles.DELETE("/:id", middleware.RequireAnyPermission(db, permissions.RolesManage), middleware.RequireFullAccess(db), roleCtrl.Delete)
+				roles.PATCH("/:id", middleware.RequireAnyPermission(db, permissions.RolesManage), roleCtrl.Update)
+				roles.PUT("/:id/permissions", middleware.RequireAnyPermission(db, permissions.PermissionsManage), roleCtrl.SetPermissions)
+				roles.DELETE("/:id", middleware.RequireAnyPermission(db, permissions.RolesManage), roleCtrl.Delete)
 			}
 			// The catalog: the Permission Codes page (permissions.view) and the role editor (roles.*).
 			api.GET("/permissions", middleware.RequireAnyPermission(db, permissions.PermissionsView, permissions.RolesView, permissions.RolesManage), roleCtrl.ListPermissions)

@@ -37,7 +37,7 @@ await store.syncCatalogFromApi(api)
 
 - **Categories:** shared categories (`branch_id: null`) appear in every branch and only full-access users may create or edit them. Branch managers create and edit categories for their own branches. An expense can use a shared category or one from its own branch.
 - **Users:** branch managers see users in their branches only, and can't manage owners/admins or anyone holding a permission they lack. They can only assign roles whose permissions they hold, and only their own branches.
-- **Roles & permissions:** changing them needs full access (`roles.manage` or `permissions.manage` alone is not enough).
+- **Roles & permissions:** anyone with `roles.manage` can add roles. The owner/admin (full access) can change any role; others can give a role only permissions and branches they have themselves, and can change or delete only non-system roles within those limits whose users are all in their branches. A role's data scope is "Own branches" or "Specific branches"; seeing every branch comes from full access (`branches.manage`).
 - **Audit log:** branch managers with `audit-logs.view` see events from their branches and their branch users. Cleanup (`POST /audit-logs/cleanup`, keep 1–3 months) needs full access plus `settings.manage`.
 
 ## Managers (who approves whose transactions)

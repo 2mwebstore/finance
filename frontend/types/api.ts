@@ -162,9 +162,11 @@ export interface Role {
   description?: string
   is_system?: boolean
   permissions?: { id: string; code: string; name: string; module?: string }[]
-  /** assigned: each user's own branches; custom: the branches below; all: every branch. */
+  /** assigned: each user's own branches; custom: the branches below; all: retired (older data). */
   data_scope?: DataScope
   branches?: { id: string; code: string; name: string }[]
+  /** From the role list: whether the signed-in user may edit (and delete) this role. */
+  can_manage?: boolean
 }
 
 export interface Permission {

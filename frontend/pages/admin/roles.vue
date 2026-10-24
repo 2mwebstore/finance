@@ -18,7 +18,7 @@
               <Building2 :size="11" class="shrink-0" /><span class="truncate">{{ scopeLabel(role) }}</span>
             </p>
           </div>
-          <div v-if="canManage" class="flex shrink-0 gap-1.5">
+          <div v-if="canManage && role.can_manage !== false" class="flex shrink-0 gap-1.5">
             <button class="action-chip action-edit" @click="openEdit(role)"><Pencil :size="13" /> Edit</button>
             <button v-if="!role.is_system" class="action-chip action-danger" @click="deleteTarget = role"><Trash2 :size="13" /> Delete</button>
           </div>
@@ -50,7 +50,7 @@
           <div>
             <h3 class="mb-1 text-sm font-semibold text-navy">Data scope</h3>
             <p class="mb-3 text-xs text-muted">Which branches’ data people with this role see and work in: transactions, reports, users, categories and the audit log.</p>
-            <div class="grid grid-cols-1 gap-2 sm:grid-cols-3" role="radiogroup" aria-label="Data scope">
+            <div class="grid grid-cols-1 gap-2 sm:grid-cols-2" role="radiogroup" aria-label="Data scope">
               <label
                 v-for="option in scopeOptions"
                 :key="option.value"
@@ -66,12 +66,12 @@
               <span>Branches</span>
               <SearchSelect v-model="form.branch_ids" :options="branchOptions" multiple placeholder="Choose branches" search-placeholder="Search branches…" aria-label="Data scope branches" :aria-invalid="formCheck.invalid('branch_ids')" />
             </div>
-            <p v-if="form.data_scope !== 'all' && form.permission_codes.includes('branches.manage')" class="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">This role has “Manage Branches”, so its users see every branch whatever the data scope.</p>
+            <p v-if="form.permission_codes.includes('branches.manage')" class="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">This role has “Manage Branches”, so its users see every branch whatever the data scope.</p>
           </div>
           <div>
             <h3 class="mb-1 text-sm font-semibold text-navy">Permissions</h3>
-            <p class="mb-3 text-xs text-muted">Tick what this role can do. Use a module's top checkbox to give or remove the whole module.</p>
-            <PermissionPanel v-model="form.permission_codes" :permissions="permissions" :disabled="saving" />
+            <p class="mb-3 text-xs text-muted">Tick what this role can do. Use a module's top checkbox to give or remove the whole module.<template v-if="!hasFullAccess"> You can give only permissions you have yourself.</template></p>
+            <PermissionPanel v-model="form.permission_codes" :permissions="grantablePermissions" :disabled="saving" />
           </div>
           <AppAlert v-if="formError || formCheck.messages.length" :title="formError ? 'Couldn’t save this role' : 'Check the highlighted fields'" :message="formError" :items="formCheck.messages" dismissible @dismiss="formError = ''; formCheck.reset()" />
           <footer class="flex justify-end gap-2 border-t border-border pt-4">
@@ -103,8 +103,9 @@ import { useFormErrors } from '~/composables/useFormErrors'
 
 const { api } = useApi()
 const { can, hasFullAccess } = usePermissions()
-// Roles and permissions are system-wide, so only the owner/admin may change them.
-const canManage = computed(() => can('roles.manage') && hasFullAccess.value)
+// Anyone with Manage Roles may add roles. The owner/admin may change every role; others only
+// roles within their own permissions and branches (the API sends can_manage per role).
+const canManage = computed(() => can('roles.manage'))
 const roles = ref<Role[]>([])
 const permissions = ref<Permission[]>([])
 const loading = ref(true)
@@ -132,8 +133,9 @@ const formCheck = reactive(useFormErrors(
 const scopeOptions: { value: DataScope; label: string; hint: string }[] = [
   { value: 'assigned', label: 'Own branches', hint: 'Each user sees the branches they are assigned to.' },
   { value: 'custom', label: 'Specific branches', hint: 'Users see only the branches you pick here.' },
-  { value: 'all', label: 'All branches', hint: 'Every branch, including ones added later.' },
 ]
+// Without full access a role can only get permissions the signed-in user has (the API checks too).
+const grantablePermissions = computed(() => hasFullAccess.value ? permissions.value : permissions.value.filter(permission => can(permission.code)))
 const branches = ref<Branch[]>([])
 const branchOptions = computed(() => branches.value.map(branch => ({ value: branch.id, label: `${branch.code} — ${branch.name}` })))
 
@@ -218,6 +220,8 @@ function openEdit(role: Role) {
     data_scope: role.data_scope || 'assigned',
     branch_ids: (role.branches || []).map((branch) => branch.id),
   })
+  // "All branches" is retired (the server converts it on start); show it as every branch picked.
+  if (form.data_scope === 'all') Object.assign(form, { data_scope: 'custom', branch_ids: branches.value.map(branch => branch.id) })
   formError.value = ''
   formCheck.reset()
   modalOpen.value = true

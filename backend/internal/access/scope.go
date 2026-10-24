@@ -25,7 +25,8 @@ func IsFullAccess(user *models.User) bool {
 
 // BranchScope works out which branches' data a user may see, from their roles' data scopes
 // (user loaded with Branches, Roles.Permissions and Roles.Branches):
-//   - Super Admin, branches.manage, or any role with scope "all": every branch (all = true);
+//   - Super Admin, branches.manage, or a role with the retired scope "all" (left by an older
+//     backup until the next start converts it): every branch (all = true);
 //   - otherwise the union of the user's assigned branches (roles with scope "assigned") and the
 //     branches picked on roles with scope "custom".
 func BranchScope(user *models.User) (ids []uuid.UUID, all bool) {

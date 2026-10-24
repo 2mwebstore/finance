@@ -32,8 +32,9 @@ type CreateRoleInput struct {
 	Name            string   `json:"name" binding:"required,min=2,max=128"`
 	Description     string   `json:"description"`
 	PermissionCodes []string `json:"permission_codes"`
-	// DataScope: which branches' data the role's users see (assigned | custom | all; default assigned).
-	DataScope string `json:"data_scope" binding:"omitempty,oneof=assigned custom all"`
+	// DataScope: which branches' data the role's users see (assigned | custom; default assigned).
+	// Seeing every branch comes from full access (Manage Branches), not from a data scope.
+	DataScope string `json:"data_scope" binding:"omitempty,oneof=assigned custom"`
 	// BranchIDs are the branches of a custom data scope.
 	BranchIDs []string `json:"branch_ids"`
 }
@@ -42,7 +43,7 @@ type UpdateRoleInput struct {
 	Name            *string  `json:"name" binding:"omitempty,min=2,max=128"`
 	Description     *string  `json:"description"`
 	PermissionCodes []string `json:"permission_codes"`
-	DataScope       *string  `json:"data_scope" binding:"omitempty,oneof=assigned custom all"`
+	DataScope       *string  `json:"data_scope" binding:"omitempty,oneof=assigned custom"`
 	BranchIDs       []string `json:"branch_ids"`
 }
 
