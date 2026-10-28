@@ -52,6 +52,8 @@ type Role struct {
 	// data is not shared between branches. Seeing every branch comes from full access (Manage
 	// Branches). Older values are converted on start (see database.ownBranchesOnly).
 	DataScope string `gorm:"size:16;not null;default:'assigned'" json:"data_scope"`
+	// BranchID: a role for one branch (shown and given only there); nil = shared by every branch.
+	BranchID *uuid.UUID `gorm:"type:char(36);index" json:"branch_id,omitempty"`
 
 	Permissions []Permission `gorm:"many2many:role_permissions;" json:"permissions,omitempty"`
 }

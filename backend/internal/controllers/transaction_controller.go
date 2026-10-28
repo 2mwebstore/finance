@@ -209,6 +209,16 @@ func (tc *TransactionController) Totals(c *gin.Context) {
 		writeTxnError(c, err)
 		return
 	}
+	// by_currency covers every currency; the USD/KHR fields stay for older screens.
+	byCurrency := gin.H{}
+	for key := range totals {
+		if !strings.HasPrefix(key, "net_") {
+			continue
+		}
+		cur := strings.ToUpper(strings.TrimPrefix(key, "net_"))
+		low := strings.ToLower(cur)
+		byCurrency[cur] = gin.H{"income": decStr(totals["income_"+low]), "expense": decStr(totals["expense_"+low]), "net": decStr(totals[key])}
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"income_usd":  decStr(totals["income_usd"]),
 		"expense_usd": decStr(totals["expense_usd"]),
@@ -216,6 +226,7 @@ func (tc *TransactionController) Totals(c *gin.Context) {
 		"income_khr":  decStr(totals["income_khr"]),
 		"expense_khr": decStr(totals["expense_khr"]),
 		"net_khr":     decStr(totals["net_khr"]),
+		"by_currency": byCurrency,
 	})
 }
 

@@ -95,6 +95,16 @@ func EnsureRequiredPermissions(db *gorm.DB) error {
 		permissions.BackupsManage:   "",
 		permissions.PermissionsView: permissions.RolesView,
 	}
+	// Inventory: owner/admin (Manage Branches) get every inventory permission; other roles get
+	// them from the Roles page (or the default roles with AUTO_SEED).
+	for _, code := range []string{
+		permissions.InventoryView, permissions.InventoryManage, permissions.InventoryAdjust, permissions.InventoryTransfer,
+		permissions.SalesView, permissions.SalesCreate, permissions.SalesVoid,
+		permissions.PurchasesView, permissions.PurchasesCreate, permissions.PurchasesApprove, permissions.PurchasesVoid,
+		permissions.InventoryExpensesView, permissions.InventoryExpensesCreate, permissions.InventoryExpensesVoid,
+	} {
+		required[code] = permissions.BranchesManage
+	}
 	for _, p := range permissions.AllPermissions() {
 		from, ok := required[p.Code]
 		if !ok {

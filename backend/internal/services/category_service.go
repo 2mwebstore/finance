@@ -27,7 +27,7 @@ func NewCategoryService(db *gorm.DB) *CategoryService {
 type CreateCategoryInput struct {
 	Code        string `json:"code" binding:"required,min=2,max=64"`
 	Name        string `json:"name" binding:"required,min=2,max=128"`
-	Type        string `json:"type" binding:"required,oneof=expense"`
+	Type        string `json:"type" binding:"required,oneof=expense inv_expense"` // ledger expense, or inventory expense
 	Description string `json:"description"`
 	// BranchID empty = shared category. The controller decides who may create which.
 	BranchID *string `json:"branch_id"`

@@ -29,7 +29,7 @@ type CreatePaymentMethodInput struct {
 }
 
 type UpdatePaymentMethodInput struct {
-	Name     *string `json:"name"`
+	Name     *string `json:"name" binding:"omitempty,min=2,max=128"`
 	IsActive *bool   `json:"is_active"`
 }
 
@@ -67,6 +67,16 @@ func (s *PaymentMethodService) Update(ctx context.Context, id uuid.UUID, in Upda
 		updates["name"] = strings.TrimSpace(*in.Name)
 	}
 	if in.IsActive != nil {
+		// Forms default to Cash, else the first method that is on: keep at least one on.
+		if !*in.IsActive && pm.IsActive {
+			var others int64
+			if err := s.db.WithContext(ctx).Model(&models.PaymentMethod{}).Where("is_active = ? AND id <> ?", true, pm.ID).Count(&others).Error; err != nil {
+				return nil, err
+			}
+			if others == 0 {
+				return nil, fieldError("is_active", "keep at least one payment method turned on")
+			}
+		}
 		updates["is_active"] = *in.IsActive
 	}
 	if len(updates) > 0 {

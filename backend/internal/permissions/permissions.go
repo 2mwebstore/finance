@@ -44,6 +44,23 @@ const (
 	SettingsManage         = "settings.manage"
 	// BackupsManage: back up, download, upload and restore the whole database.
 	BackupsManage = "backups.manage"
+
+	// Inventory: products and stock per branch, sales, purchases, transfers.
+	InventoryView     = "inventory.view"
+	InventoryManage   = "inventory.manage"
+	InventoryAdjust   = "inventory.adjust"
+	InventoryTransfer = "inventory.transfer"
+	SalesView         = "sales.view"
+	SalesCreate       = "sales.create"
+	SalesVoid         = "sales.void"
+	PurchasesView     = "purchases.view"
+	PurchasesCreate   = "purchases.create"
+	PurchasesApprove  = "purchases.approve"
+	PurchasesVoid     = "purchases.void"
+
+	InventoryExpensesView   = "inventory-expenses.view"
+	InventoryExpensesCreate = "inventory-expenses.create"
+	InventoryExpensesVoid   = "inventory-expenses.void"
 )
 
 // AllPermissions returns the full list for seeding.
@@ -93,6 +110,21 @@ func AllPermissions() []struct {
 		{AuditLogsView, "View Audit Logs", "Audit", "View system audit logs"},
 		{SettingsManage, "Manage Settings", "Settings", "Change application settings"},
 		{BackupsManage, "Manage Backups", "Backups", "Back up the database, send backups to Telegram, and restore from a backup"},
+
+		{InventoryView, "View Inventory", "Inventory", "See products, stock levels and stock history of your branches"},
+		{InventoryManage, "Manage Products", "Inventory", "Create and edit products and product categories (shared by every branch)"},
+		{InventoryAdjust, "Adjust Stock", "Inventory", "Add, remove or count stock in your branches, with a reason"},
+		{InventoryTransfer, "Transfer Stock", "Inventory", "Move stock between branches"},
+		{SalesView, "View Sales", "Sales", "See sales of your branches"},
+		{SalesCreate, "Create Sales", "Sales", "Record sales; their stock goes out right away"},
+		{SalesVoid, "Void Sales", "Sales", "Void a sale and put its stock back"},
+		{PurchasesView, "View Purchases", "Purchases", "See purchases of your branches"},
+		{PurchasesCreate, "Create Purchases", "Purchases", "Record purchases from suppliers; stock goes in once approved"},
+		{PurchasesApprove, "Approve Purchases", "Purchases", "Approve or reject purchases; approved purchases add stock"},
+		{PurchasesVoid, "Void Purchases", "Purchases", "Void a purchase and take its stock back out"},
+		{InventoryExpensesView, "View Inventory Expenses", "Inventory Expenses", "See inventory expenses of your branches"},
+		{InventoryExpensesCreate, "Create Inventory Expenses", "Inventory Expenses", "Record inventory expenses (shipping, packaging, storage…)"},
+		{InventoryExpensesVoid, "Void Inventory Expenses", "Inventory Expenses", "Void an inventory expense"},
 	}
 }
 
@@ -135,6 +167,10 @@ func DefaultRoles() map[string]struct {
 				UsersView, UsersCreate, UsersEdit, UsersManage,
 				RolesView, RolesManage, PermissionsView,
 				CategoriesManage, AuditLogsView, SettingsManage,
+				InventoryView, InventoryManage, InventoryAdjust, InventoryTransfer,
+				SalesView, SalesCreate, SalesVoid,
+				PurchasesView, PurchasesCreate, PurchasesApprove, PurchasesVoid,
+				InventoryExpensesView, InventoryExpensesCreate, InventoryExpensesVoid,
 			},
 		},
 		"manager": {
@@ -149,6 +185,10 @@ func DefaultRoles() map[string]struct {
 				BranchesView,
 				UsersView,
 				CategoriesManage,
+				InventoryView, InventoryAdjust,
+				SalesView, SalesCreate, SalesVoid,
+				PurchasesView, PurchasesCreate, PurchasesApprove,
+				InventoryExpensesView, InventoryExpensesCreate,
 			},
 		},
 		"accountant": {
@@ -161,6 +201,8 @@ func DefaultRoles() map[string]struct {
 				TransactionsView,
 				ReportsView, ReportsExport,
 				BranchesView,
+				InventoryView, SalesView, PurchasesView, PurchasesCreate,
+				InventoryExpensesView, InventoryExpensesCreate,
 			},
 		},
 		"cashier": {
@@ -171,6 +213,7 @@ func DefaultRoles() map[string]struct {
 				IncomeView, IncomeCreate,
 				ExpenseView, ExpenseCreate,
 				TransactionsView,
+				InventoryView, SalesView, SalesCreate,
 			},
 		},
 		"viewer": {
@@ -183,6 +226,7 @@ func DefaultRoles() map[string]struct {
 				TransactionsView,
 				ReportsView,
 				BranchesView,
+				InventoryView, SalesView, PurchasesView, InventoryExpensesView,
 			},
 		},
 	}

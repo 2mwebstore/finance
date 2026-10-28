@@ -29,13 +29,26 @@ func NewNumberGenerator(db *gorm.DB, timezone string) *NumberGenerator {
 // Next returns the next transaction number for the given type (income|expense).
 // Uses row-level lock on the sequence table so concurrent requests cannot duplicate.
 func (g *NumberGenerator) Next(ctx context.Context, txnType string) (string, error) {
-	now := time.Now().In(g.loc)
 	prefixCode := "INC"
 	if txnType == models.TxnTypeExpense {
 		prefixCode = "EXP"
 	}
-	prefix := fmt.Sprintf("%s-%s", prefixCode, now.Format("200601"))
+	return g.NextFor(ctx, prefixCode)
+}
 
+// NextFor returns the next number for a document code, e.g. "PUR" → PUR-202610-000001
+// (sales SAL, purchases PUR, stock transfers TRF, inventory expenses IEX).
+func (g *NumberGenerator) NextFor(ctx context.Context, prefixCode string) (string, error) {
+	now := time.Now().In(g.loc)
+	return g.next(ctx, fmt.Sprintf("%s-%s", prefixCode, now.Format("200601")))
+}
+
+// NextPlain returns the next number of a sequence that never restarts, e.g. "SKU" → SKU-000001.
+func (g *NumberGenerator) NextPlain(ctx context.Context, prefix string) (string, error) {
+	return g.next(ctx, prefix)
+}
+
+func (g *NumberGenerator) next(ctx context.Context, prefix string) (string, error) {
 	var number string
 	err := g.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var seq models.TransactionNumberSeq

@@ -108,6 +108,7 @@ func roleSummary(roles []models.Role) []gin.H {
 			"name":             r.Name,
 			"permission_codes": codes,
 			"data_scope":       models.DataScopeAssigned,
+			"branch_id":        r.BranchID,
 		})
 	}
 	return out
@@ -190,6 +191,7 @@ func roleJSON(r *models.Role) gin.H {
 		"is_system":   r.IsSystem,
 		"permissions": perms,
 		"data_scope":  models.DataScopeAssigned,
+		"branch_id":   r.BranchID,
 		"created_at":  r.CreatedAt,
 		"updated_at":  r.UpdatedAt,
 	}

@@ -80,6 +80,9 @@ func AutoMigrate(db *gorm.DB) error {
 	if err != nil {
 		return err
 	}
+	if err := db.AutoMigrate(models.InventoryModels()...); err != nil {
+		return err
+	}
 	// 4-digit PINs are valid again (PINs are 4 to 6 digits), so nobody has to replace theirs;
 	// drop the flag that sent those users to the profile page (see migration 000009).
 	if db.Migrator().HasColumn(&models.User{}, "pin_upgrade_required") {
@@ -149,6 +152,9 @@ func EnsureRequiredTables(db *gorm.DB) error {
 	if err := ownBranchesOnly(db); err != nil {
 		return err
 	}
+	if err := ensureInventoryTables(db); err != nil {
+		return err
+	}
 	return migrateLegacyAttachments(db)
 }
 
@@ -160,6 +166,13 @@ func ensureRoleDataScope(db *gorm.DB) error {
 	if !db.Migrator().HasColumn(&models.Role{}, "data_scope") {
 		log.Println("adding column roles.data_scope")
 		if err := db.Exec("ALTER TABLE roles ADD COLUMN data_scope VARCHAR(16) NOT NULL DEFAULT 'assigned'").Error; err != nil {
+			return err
+		}
+	}
+	// Roles for one branch (nil = shared).
+	if !db.Migrator().HasColumn(&models.Role{}, "branch_id") {
+		log.Println("adding column roles.branch_id")
+		if err := db.Exec("ALTER TABLE roles ADD COLUMN branch_id CHAR(36) NULL, ADD INDEX idx_roles_branch_id (branch_id)").Error; err != nil {
 			return err
 		}
 	}
@@ -186,6 +199,65 @@ func ownBranchesOnly(db *gorm.DB) error {
 		}
 	}
 	return nil
+}
+
+// ensureInventoryTables creates the inventory tables, or brings them up to date, when a table or
+// a newer column is missing (see models/inventory.go; they have no foreign keys to older tables,
+// so this can't fail on an older table's collation). It only adds.
+func ensureInventoryTables(db *gorm.DB) error {
+	if !inventoryUpToDate(db) {
+		log.Println("updating inventory tables")
+		if err := db.AutoMigrate(models.InventoryModels()...); err != nil {
+			return err
+		}
+	}
+	// The current KHR-per-USD rate (see services.CurrencyService), for rows saved before rates.
+	const rate = "(SELECT COALESCE(MAX(CAST(`value` AS DECIMAL(19,4))), 4100) FROM settings WHERE `key` = 'currency.rate_khr')"
+	// Rows from before discounts, shipping and landed cost: their totals and costs stay as they were.
+	// Then rows from before USD-based inventory: KHR-priced products move to USD, and documents get
+	// their rate and USD amounts (a KHR purchase's landed cost is converted once, while its USD
+	// total is still unset).
+	for _, q := range []string{
+		"UPDATE purchase_items SET landed_cost = unit_cost WHERE landed_cost = 0 AND unit_cost <> 0",
+		"UPDATE purchases SET subtotal = total WHERE subtotal = 0 AND total <> 0 AND discount = 0 AND shipping = 0",
+		"UPDATE sales SET subtotal = total WHERE subtotal = 0 AND total <> 0 AND discount = 0 AND shipping = 0",
+		"UPDATE sale_items SET net_total = line_total WHERE net_total = 0 AND line_total <> 0",
+		"UPDATE stock_levels sl JOIN products p ON p.id = sl.product_id SET sl.avg_cost = ROUND(sl.avg_cost / " + rate + ", 4) WHERE p.currency = 'KHR'",
+		"UPDATE products SET sale_price = ROUND(sale_price / " + rate + ", 4), cost_price = ROUND(cost_price / " + rate + ", 4), currency = 'USD' WHERE currency = 'KHR'",
+		"UPDATE purchases SET exchange_rate = " + rate + " WHERE exchange_rate = 0",
+		"UPDATE sales SET exchange_rate = " + rate + " WHERE exchange_rate = 0",
+		"UPDATE inventory_expenses SET exchange_rate = " + rate + " WHERE exchange_rate = 0",
+		"UPDATE purchase_items pi JOIN purchases p ON p.id = pi.purchase_id SET pi.landed_cost = ROUND(pi.landed_cost / p.exchange_rate, 4) WHERE p.currency = 'KHR' AND p.total_base = 0 AND p.total <> 0",
+		"UPDATE purchases SET total_base = CASE WHEN currency = 'KHR' THEN ROUND(total / exchange_rate, 4) ELSE total END WHERE total_base = 0 AND total <> 0",
+		"UPDATE sales SET total_base = CASE WHEN currency = 'KHR' THEN ROUND(total / exchange_rate, 4) ELSE total END WHERE total_base = 0 AND total <> 0",
+		"UPDATE sale_items si JOIN sales s ON s.id = si.sale_id SET si.net_total_base = CASE WHEN s.currency = 'KHR' THEN ROUND(si.net_total / s.exchange_rate, 4) ELSE si.net_total END WHERE si.net_total_base = 0 AND si.net_total <> 0",
+		"UPDATE inventory_expenses SET amount_base = CASE WHEN currency = 'KHR' THEN ROUND(amount / exchange_rate, 4) ELSE amount END WHERE amount_base = 0 AND amount <> 0",
+		// A document's rate is units of its currency per 1 USD, so USD documents have rate 1.
+		"UPDATE purchases SET exchange_rate = 1 WHERE currency = 'USD' AND exchange_rate <> 1",
+		"UPDATE sales SET exchange_rate = 1 WHERE currency = 'USD' AND exchange_rate <> 1",
+		"UPDATE inventory_expenses SET exchange_rate = 1 WHERE currency = 'USD' AND exchange_rate <> 1",
+	} {
+		if err := db.Exec(q).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func inventoryUpToDate(db *gorm.DB) bool {
+	for _, m := range models.InventoryModels() {
+		if !db.Migrator().HasTable(m) {
+			return false
+		}
+	}
+	for m, cols := range models.InventoryColumns {
+		for _, col := range cols {
+			if !db.Migrator().HasColumn(m, col) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // migrateLegacyAttachments moves each transaction's old single attachment into

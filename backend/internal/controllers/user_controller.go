@@ -47,15 +47,30 @@ func (uc *UserController) manageableUser(c *gin.Context, scope *accessScope) (*m
 	return user, true
 }
 
-// checkAssignableRoles rejects roles that would give the target more power than the actor has.
-func (uc *UserController) checkAssignableRoles(c *gin.Context, scope *accessScope, codes []string) bool {
-	if scope.Full || len(codes) == 0 {
+// checkAssignableRoles rejects roles that would give the target more power than the actor has,
+// and branch roles of a branch the user isn't in.
+func (uc *UserController) checkAssignableRoles(c *gin.Context, scope *accessScope, codes []string, userBranches []uuid.UUID) bool {
+	if len(codes) == 0 {
 		return true
 	}
 	var roles []models.Role
 	if err := uc.db.Preload("Permissions").Where("code IN ?", codes).Find(&roles).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "role lookup failed"})
 		return false
+	}
+	in := map[uuid.UUID]bool{}
+	for _, id := range userBranches {
+		in[id] = true
+	}
+	for _, r := range roles {
+		if r.BranchID != nil && !in[*r.BranchID] {
+			msg := "the role " + r.Name + " is for another branch; add the user to that branch first"
+			c.JSON(http.StatusBadRequest, gin.H{"error": msg, "fields": gin.H{"role_codes": msg}})
+			return false
+		}
+	}
+	if scope.Full {
+		return true
 	}
 	if !scope.CoversPermissions(roles) {
 		c.JSON(http.StatusForbidden, gin.H{"error": errRoleTooPowerful})
@@ -176,7 +191,7 @@ func (uc *UserController) Create(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "choose at least one of your branches for the new user"})
 		return
 	}
-	if !uc.checkAssignableBranches(c, scope, in.BranchIDs) || !uc.checkAssignableRoles(c, scope, in.RoleCodes) {
+	if !uc.checkAssignableBranches(c, scope, in.BranchIDs) {
 		return
 	}
 	newBranches := make([]uuid.UUID, 0, len(in.BranchIDs))
@@ -184,6 +199,9 @@ func (uc *UserController) Create(c *gin.Context) {
 		if id, err := uuid.Parse(raw); err == nil {
 			newBranches = append(newBranches, id)
 		}
+	}
+	if !uc.checkAssignableRoles(c, scope, in.RoleCodes, newBranches) {
+		return
 	}
 	managerIDs, ok := uc.checkManagers(c, scope, uuid.Nil, newBranches, in.ManagerIDs)
 	if !ok {
@@ -376,7 +394,11 @@ func (uc *UserController) AssignRoles(c *gin.Context) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "cannot escalate your own privileges"})
 		return
 	}
-	if !uc.checkAssignableRoles(c, scope, body.RoleCodes) {
+	userBranches := make([]uuid.UUID, 0, len(target.Branches))
+	for _, b := range target.Branches {
+		userBranches = append(userBranches, b.ID)
+	}
+	if !uc.checkAssignableRoles(c, scope, body.RoleCodes, userBranches) {
 		return
 	}
 	if err := uc.svc.AssignRoles(c.Request.Context(), target.ID, body.RoleCodes, actorIsSuperAdmin(c, uc.db)); err != nil {

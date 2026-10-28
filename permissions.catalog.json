@@ -33,7 +33,21 @@
     { "code": "currency-settings.manage", "name": "Manage Currency Settings", "module": "Settings", "description": "Configure currency options" },
     { "code": "audit-logs.view", "name": "View Audit Logs", "module": "Audit", "description": "View system audit logs" },
     { "code": "settings.manage", "name": "Manage Settings", "module": "Settings", "description": "Change application settings" },
-    { "code": "backups.manage", "name": "Manage Backups", "module": "Backups", "description": "Back up the database, send backups to Telegram, and restore from a backup" }
+    { "code": "backups.manage", "name": "Manage Backups", "module": "Backups", "description": "Back up the database, send backups to Telegram, and restore from a backup" },
+    { "code": "inventory.view", "name": "View Inventory", "module": "Inventory", "description": "See products, stock levels and stock history of your branches" },
+    { "code": "inventory.manage", "name": "Manage Products", "module": "Inventory", "description": "Create and edit products and product categories (shared by every branch)" },
+    { "code": "inventory.adjust", "name": "Adjust Stock", "module": "Inventory", "description": "Add, remove or count stock in your branches, with a reason" },
+    { "code": "inventory.transfer", "name": "Transfer Stock", "module": "Inventory", "description": "Move stock between branches" },
+    { "code": "sales.view", "name": "View Sales", "module": "Sales", "description": "See sales of your branches" },
+    { "code": "sales.create", "name": "Create Sales", "module": "Sales", "description": "Record sales; their stock goes out right away" },
+    { "code": "sales.void", "name": "Void Sales", "module": "Sales", "description": "Void a sale and put its stock back" },
+    { "code": "purchases.view", "name": "View Purchases", "module": "Purchases", "description": "See purchases of your branches" },
+    { "code": "purchases.create", "name": "Create Purchases", "module": "Purchases", "description": "Record purchases from suppliers; stock goes in once approved" },
+    { "code": "purchases.approve", "name": "Approve Purchases", "module": "Purchases", "description": "Approve or reject purchases; approved purchases add stock" },
+    { "code": "purchases.void", "name": "Void Purchases", "module": "Purchases", "description": "Void a purchase and take its stock back out" },
+    { "code": "inventory-expenses.view", "name": "View Inventory Expenses", "module": "Inventory Expenses", "description": "See inventory expenses of your branches" },
+    { "code": "inventory-expenses.create", "name": "Create Inventory Expenses", "module": "Inventory Expenses", "description": "Record inventory expenses (shipping, packaging, storage…)" },
+    { "code": "inventory-expenses.void", "name": "Void Inventory Expenses", "module": "Inventory Expenses", "description": "Void an inventory expense" }
   ],
-  "count": 32
+  "count": 46
 }

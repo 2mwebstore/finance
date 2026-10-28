@@ -39,6 +39,20 @@ Server-side authorization is enforced on every protected API. The UI uses the sa
 | `currency-settings.manage` | Manage Currency Settings | Settings | Configure currency options |
 | `audit-logs.view` | View Audit Logs | Audit | View system audit logs |
 | `settings.manage` | Manage Settings | Settings | Change application settings |
+| `inventory.view` | View Inventory | Inventory | See products, stock levels and stock history of your branches |
+| `inventory.manage` | Manage Products | Inventory | Create and edit products and product categories (shared by every branch) |
+| `inventory.adjust` | Adjust Stock | Inventory | Add, remove or count stock in your branches, with a reason |
+| `inventory.transfer` | Transfer Stock | Inventory | Move stock between branches |
+| `sales.view` | View Sales | Sales | See sales of your branches |
+| `sales.create` | Create Sales | Sales | Record sales; their stock goes out right away |
+| `sales.void` | Void Sales | Sales | Void a sale and put its stock back |
+| `purchases.view` | View Purchases | Purchases | See purchases of your branches |
+| `purchases.create` | Create Purchases | Purchases | Record purchases from suppliers; stock goes in once approved |
+| `purchases.approve` | Approve Purchases | Purchases | Approve or reject purchases; approved purchases add stock |
+| `purchases.void` | Void Purchases | Purchases | Void a purchase and take its stock back out |
+| `inventory-expenses.view` | View Inventory Expenses | Inventory Expenses | See inventory expenses of your branches |
+| `inventory-expenses.create` | Create Inventory Expenses | Inventory Expenses | Record inventory expenses (shipping, packaging, storage…) |
+| `inventory-expenses.void` | Void Inventory Expenses | Inventory Expenses | Void an inventory expense |
 
 ## By module
 
@@ -105,9 +119,31 @@ Server-side authorization is enforced on every protected API. The UI uses the sa
 | Code | Description |
 |------|-------------|
 | `categories.manage` | Create, edit, and deactivate income/expense categories |
-| `currency-settings.manage` | Configure currency options |
+| `currency-settings.manage` | Add, change and turn off currencies (rate per 1 USD) and set the default currency (Manage → Currency) |
 | `settings.manage` | Change application settings |
 | `audit-logs.view` | View system audit logs |
+
+### Inventory, sales & purchases
+Inventory is separate from income/expense. Products are shared by every branch; stock is kept per branch at average cost, and everyone works only in their own branches (owner/admin see every branch).
+
+| Code | Description |
+|------|-------------|
+| `inventory.view` | See products, stock levels and stock history of your branches |
+| `inventory.manage` | Create and edit products and product categories (shared by every branch) |
+| `inventory.adjust` | Add, remove or count stock in your branches, with a reason |
+| `inventory.transfer` | Move stock between branches |
+| `sales.view` | See sales of your branches |
+| `sales.create` | Record sales; their stock goes out right away |
+| `sales.void` | Void a sale and put its stock back |
+| `purchases.view` | See purchases of your branches |
+| `purchases.create` | Record purchases from suppliers; stock goes in once approved |
+| `purchases.approve` | Approve or reject purchases; approved purchases add stock |
+| `purchases.void` | Void a purchase and take its stock back out |
+| `inventory-expenses.view` | See inventory expenses of your branches |
+| `inventory-expenses.create` | Record inventory expenses (shipping, packaging, storage…) |
+| `inventory-expenses.void` | Void an inventory expense |
+
+Inventory expenses use their own categories (type `inv_expense`, managed with `inventory.manage` on Inventory → Expense categories) and come off the sales profit as net profit. Inventory reports (stock value, sales and profit, purchases, expenses, low stock) need both `reports.view` and `inventory.view`. Nobody approves a purchase they created; people with `purchases.approve` record their own purchases as approved unless they send them for approval.
 
 ## Default system roles (summary)
 
@@ -124,7 +160,7 @@ Exact role → permission mappings are seeded in `backend/internal/permissions` 
 
 ## Machine-readable catalog
 
-Project root: [`permissions.catalog.json`](../permissions.catalog.json) (30 entries, versioned).
+Project root: [`permissions.catalog.json`](../permissions.catalog.json) (46 entries, versioned).
 
 ## Source of truth
 

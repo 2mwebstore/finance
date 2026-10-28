@@ -76,7 +76,7 @@ type CreateTransactionInput struct {
 	BranchID        string `json:"branch_id" binding:"required,uuid"`
 	CategoryID      string `json:"category_id" binding:"omitempty,uuid"`
 	PaymentMethodID string `json:"payment_method_id"`
-	Currency        string `json:"currency" binding:"required,oneof=USD KHR"`
+	Currency        string `json:"currency" binding:"required,len=3"`
 	Amount          string `json:"amount" binding:"required"` // string to avoid float
 	TransactionDate string `json:"transaction_date"`          // RFC3339 or YYYY-MM-DD; default now
 	Description     string `json:"description"`
@@ -108,7 +108,7 @@ type TransactionListFilter struct {
 }
 
 func (s *TransactionService) Create(ctx context.Context, in CreateTransactionInput, actorID uuid.UUID) (*models.Transaction, error) {
-	if err := accounting.ValidateCurrency(in.Currency); err != nil {
+	if err := validateCurrency(ctx, s.db, in.Currency); err != nil {
 		return nil, err
 	}
 	if err := accounting.ValidateTxnType(in.Type); err != nil {
@@ -521,6 +521,7 @@ func (s *TransactionService) TotalsByCurrency(ctx context.Context, actorID uuid.
 		return nil, err
 	}
 
+	// income_<code>, expense_<code> and net_<code> for USD, KHR and every other currency found.
 	out := map[string]decimal.Decimal{
 		"income_usd":  accounting.Zero(),
 		"expense_usd": accounting.Zero(),
@@ -529,12 +530,17 @@ func (s *TransactionService) TotalsByCurrency(ctx context.Context, actorID uuid.
 	}
 	for _, r := range rows {
 		key := r.Type + "_" + toLower(r.Currency)
-		if _, ok := out[key]; ok {
-			out[key] = r.Total
+		out[key] = out[key].Add(r.Total)
+	}
+	for key := range out {
+		if strings.HasPrefix(key, "income_") {
+			cur := strings.TrimPrefix(key, "income_")
+			out["net_"+cur] = out[key].Sub(out["expense_"+cur])
+		} else if strings.HasPrefix(key, "expense_") {
+			cur := strings.TrimPrefix(key, "expense_")
+			out["net_"+cur] = out["income_"+cur].Sub(out[key])
 		}
 	}
-	out["net_usd"] = out["income_usd"].Sub(out["expense_usd"])
-	out["net_khr"] = out["income_khr"].Sub(out["expense_khr"])
 	return out, nil
 }
 

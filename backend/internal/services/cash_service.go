@@ -29,14 +29,14 @@ func NewCashService(db *gorm.DB) *CashService {
 
 type CreateOpeningBalanceInput struct {
 	BranchID    string `json:"branch_id" binding:"required,uuid"`
-	Currency    string `json:"currency" binding:"required,oneof=USD KHR"`
+	Currency    string `json:"currency" binding:"required,len=3"`
 	Amount      string `json:"amount" binding:"required"`
 	BalanceDate string `json:"balance_date" binding:"required"`
 	Notes       string `json:"notes"`
 }
 
 func (s *CashService) CreateOpeningBalance(ctx context.Context, in CreateOpeningBalanceInput, actorID uuid.UUID) (*models.OpeningBalance, error) {
-	if err := accounting.ValidateCurrency(in.Currency); err != nil {
+	if err := validateCurrency(ctx, s.db, in.Currency); err != nil {
 		return nil, err
 	}
 	amount, err := parseNonNegativeAmount(in.Amount)
@@ -92,7 +92,7 @@ func (s *CashService) ListOpeningBalances(ctx context.Context, actorID uuid.UUID
 
 type CreateReconciliationInput struct {
 	BranchID       string `json:"branch_id" binding:"required,uuid"`
-	Currency       string `json:"currency" binding:"required,oneof=USD KHR"`
+	Currency       string `json:"currency" binding:"required,len=3"`
 	ReconcileDate  string `json:"reconcile_date" binding:"required"`
 	ExpectedAmount string `json:"expected_amount" binding:"required"`
 	ActualAmount   string `json:"actual_amount" binding:"required"`
@@ -100,7 +100,7 @@ type CreateReconciliationInput struct {
 }
 
 func (s *CashService) CreateReconciliation(ctx context.Context, in CreateReconciliationInput, actorID uuid.UUID) (*models.CashReconciliation, error) {
-	if err := accounting.ValidateCurrency(in.Currency); err != nil {
+	if err := validateCurrency(ctx, s.db, in.Currency); err != nil {
 		return nil, err
 	}
 	expected, err := parseNonNegativeAmount(in.ExpectedAmount)

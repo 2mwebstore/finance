@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/cambodia-finance/income-expense/internal/models"
+	"github.com/cambodia-finance/income-expense/internal/permissions"
 	"github.com/cambodia-finance/income-expense/internal/services"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -61,6 +62,9 @@ func (cc *CategoryController) Create(c *gin.Context) {
 	if !bindJSON(c, &in) {
 		return
 	}
+	if !canManageCategoryType(c, scope, in.Type) {
+		return
+	}
 	var branchID *uuid.UUID
 	if in.BranchID != nil && *in.BranchID != "" {
 		id, err := uuid.Parse(*in.BranchID)
@@ -99,6 +103,9 @@ func (cc *CategoryController) Update(c *gin.Context) {
 	existing, err := cc.svc.GetByID(c.Request.Context(), id)
 	if err != nil {
 		writeServiceError(c, err)
+		return
+	}
+	if !canManageCategoryType(c, scope, existing.Type) {
 		return
 	}
 	if !scope.Full {
@@ -151,4 +158,18 @@ func categoryJSON(cat *models.Category, branchNames map[uuid.UUID]string) gin.H 
 		out["branch_name"] = branchNames[*cat.BranchID]
 	}
 	return out
+}
+
+// canManageCategoryType: financial (ledger) expense categories need categories.manage; inventory
+// expense categories need inventory.manage. They are managed on separate pages.
+func canManageCategoryType(c *gin.Context, scope *accessScope, typ string) bool {
+	need := permissions.CategoriesManage
+	if typ == models.CategoryTypeInventoryExpense {
+		need = permissions.InventoryManage
+	}
+	if scope.Can(need) {
+		return true
+	}
+	c.JSON(http.StatusForbidden, gin.H{"error": "you don't have permission to manage these categories"})
+	return false
 }

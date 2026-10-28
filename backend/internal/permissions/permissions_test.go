@@ -7,8 +7,8 @@ import (
 
 func TestAllPermissionsUniqueAndNonEmpty(t *testing.T) {
 	list := AllPermissions()
-	if len(list) != 32 {
-		t.Fatalf("expected 32 permissions, got %d", len(list))
+	if len(list) != 46 {
+		t.Fatalf("expected 46 permissions, got %d", len(list))
 	}
 	seen := map[string]bool{}
 	for _, p := range list {

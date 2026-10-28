@@ -22,7 +22,7 @@ import (
 // A full backup is a .tar.gz archive with
 //
 //	database.sql               the database (see Dump)
-//	attachments/<storage key>  every transaction attachment (receipts, invoices…)
+//	attachments/<storage key>  every transaction attachment (receipts, invoices…) and product picture
 //	manifest.json              what the archive holds
 //
 // Backups made before attachments were included, and uploaded .sql / .sql.gz files, hold the
@@ -35,9 +35,10 @@ const (
 	maxArchivedFile = 25 << 20
 )
 
-// storageKeyRule is the shape of attachment keys (see services.AttachmentService.Add), so a
-// restored file can only ever land in the attachments area of the storage.
-var storageKeyRule = regexp.MustCompile(`^transactions/[0-9a-fA-F-]{36}/[A-Za-z0-9._-]+$`)
+// storageKeyRule is the shape of stored file keys (transaction attachments, see
+// services.AttachmentService.Add, and product pictures, see services.SetProductImage), so a
+// restored file can only ever land in those areas of the storage.
+var storageKeyRule = regexp.MustCompile(`^(transactions|products)/[0-9a-fA-F-]{36}/[A-Za-z0-9._-]+$`)
 
 type manifest struct {
 	Version     int       `json:"version"`
@@ -75,6 +76,13 @@ func (s *Service) writeArchive(ctx context.Context, w io.Writer) (files, missing
 	if s.store != nil {
 		if err := s.db.WithContext(ctx).Model(&models.TransactionAttachment{}).Distinct("storage_key").Pluck("storage_key", &keys).Error; err != nil {
 			return 0, 0, err
+		}
+		if s.db.Migrator().HasTable(&models.Product{}) && s.db.Migrator().HasColumn(&models.Product{}, "image_key") {
+			var pictures []string
+			if err := s.db.WithContext(ctx).Unscoped().Model(&models.Product{}).Where("image_key <> ''").Pluck("image_key", &pictures).Error; err != nil {
+				return 0, 0, err
+			}
+			keys = append(keys, pictures...)
 		}
 	}
 
@@ -184,7 +192,7 @@ func loadBackup(r io.Reader) (loaded, error) {
 			foundDB = true
 		case strings.HasPrefix(hdr.Name, archiveFilesDir):
 			if !storageKeyRule.MatchString(strings.TrimPrefix(hdr.Name, archiveFilesDir)) || hdr.Size > maxArchivedFile {
-				return loaded{}, fmt.Errorf("the archive has a file that isn't a transaction attachment: %s", preview(hdr.Name))
+				return loaded{}, fmt.Errorf("the archive has a file that isn't an attachment or product picture: %s", preview(hdr.Name))
 			}
 			out.files++
 		}

@@ -24,6 +24,12 @@ type accessScope struct {
 	BranchIDs   []uuid.UUID
 	branchSet   map[uuid.UUID]bool
 	permissions map[string]bool
+	superAdmin  bool
+}
+
+// Can reports whether the actor holds the permission (Super Admin holds every one).
+func (s *accessScope) Can(code string) bool {
+	return s.superAdmin || s.permissions[code]
 }
 
 func loadScope(c *gin.Context, db *gorm.DB) (*accessScope, bool) {
@@ -48,6 +54,7 @@ func loadScope(c *gin.Context, db *gorm.DB) (*accessScope, bool) {
 		}
 	}
 	s.Full = access.IsFullAccess(user)
+	s.superAdmin = user.IsSuperAdmin
 	s.BranchIDs, s.AllBranches = access.BranchScope(user)
 	for _, id := range s.BranchIDs {
 		s.branchSet[id] = true

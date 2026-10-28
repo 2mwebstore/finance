@@ -24,21 +24,53 @@ func NewReportService(db *gorm.DB, timezone string) *ReportService {
 	return &ReportService{db: db, timezone: timezone}
 }
 
+// CurrencyFlow is income, expense and net in one currency (by_currency maps cover every
+// currency, beside the older USD/KHR fields).
+type CurrencyFlow struct {
+	Income  string `json:"income"`
+	Expense string `json:"expense"`
+	Net     string `json:"net"`
+}
+
+type flowAcc struct{ income, expense decimal.Decimal }
+
+func addFlow(m map[string]*flowAcc, currency, typ string, total decimal.Decimal) {
+	f := m[currency]
+	if f == nil {
+		f = &flowAcc{}
+		m[currency] = f
+	}
+	if typ == models.TxnTypeIncome {
+		f.income = f.income.Add(total)
+	} else {
+		f.expense = f.expense.Add(total)
+	}
+}
+
+func flows(m map[string]*flowAcc) map[string]CurrencyFlow {
+	out := make(map[string]CurrencyFlow, len(m))
+	for cur, f := range m {
+		out[cur] = CurrencyFlow{Income: f.income.StringFixed(4), Expense: f.expense.StringFixed(4), Net: f.income.Sub(f.expense).StringFixed(4)}
+	}
+	return out
+}
+
 type DashboardSummary struct {
-	Period       string               `json:"period"`
-	DateFrom     string               `json:"date_from"`
-	DateTo       string               `json:"date_to"` // inclusive display
-	IncomeUSD    decimal.Decimal      `json:"-"`
-	ExpenseUSD   decimal.Decimal      `json:"-"`
-	NetUSD       decimal.Decimal      `json:"-"`
-	IncomeKHR    decimal.Decimal      `json:"-"`
-	ExpenseKHR   decimal.Decimal      `json:"-"`
-	NetKHR       decimal.Decimal      `json:"-"`
-	TxnCount     int64                `json:"transaction_count"`
-	IncomeByCat  []CatTotal           `json:"income_by_category"`
-	ExpenseByCat []CatTotal           `json:"expense_by_category"`
-	ByBranch     []BranchTotal        `json:"by_branch"`
-	Recent       []models.Transaction `json:"-"`
+	Period       string                  `json:"period"`
+	DateFrom     string                  `json:"date_from"`
+	DateTo       string                  `json:"date_to"` // inclusive display
+	IncomeUSD    decimal.Decimal         `json:"-"`
+	ExpenseUSD   decimal.Decimal         `json:"-"`
+	NetUSD       decimal.Decimal         `json:"-"`
+	IncomeKHR    decimal.Decimal         `json:"-"`
+	ExpenseKHR   decimal.Decimal         `json:"-"`
+	NetKHR       decimal.Decimal         `json:"-"`
+	TxnCount     int64                   `json:"transaction_count"`
+	ByCurrency   map[string]CurrencyFlow `json:"by_currency"`
+	IncomeByCat  []CatTotal              `json:"income_by_category"`
+	ExpenseByCat []CatTotal              `json:"expense_by_category"`
+	ByBranch     []BranchTotal           `json:"by_branch"`
+	Recent       []models.Transaction    `json:"-"`
 }
 
 type CatTotal struct {
@@ -64,6 +96,9 @@ type BranchTotal struct {
 	IncomeKHRStr  string          `json:"income_khr"`
 	ExpenseKHRStr string          `json:"expense_khr"`
 	NetKHRStr     string          `json:"net_khr"`
+	// Every currency.
+	ByCurrency map[string]CurrencyFlow `json:"by_currency"`
+	flows      map[string]*flowAcc
 }
 
 type DailyRow struct {
@@ -79,6 +114,9 @@ type DailyRow struct {
 	ExpenseKHRStr string          `json:"expense_khr"`
 	NetKHRStr     string          `json:"net_khr"`
 	Count         int64           `json:"count"`
+	// Every currency.
+	ByCurrency map[string]CurrencyFlow `json:"by_currency"`
+	flows      map[string]*flowAcc
 }
 
 func (s *ReportService) scopedQuery(ctx context.Context, actorID uuid.UUID, branchID *uuid.UUID) (*gorm.DB, error) {
@@ -144,7 +182,9 @@ func (s *ReportService) Dashboard(ctx context.Context, actorID uuid.UUID, period
 		IncomeUSD: accounting.Zero(), ExpenseUSD: accounting.Zero(),
 		IncomeKHR: accounting.Zero(), ExpenseKHR: accounting.Zero(),
 	}
+	all := map[string]*flowAcc{}
 	for _, r := range curRows {
+		addFlow(all, r.Currency, r.Type, r.Total)
 		if r.Currency == models.CurrencyUSD && r.Type == models.TxnTypeIncome {
 			sum.IncomeUSD = r.Total
 		} else if r.Currency == models.CurrencyUSD && r.Type == models.TxnTypeExpense {
@@ -157,6 +197,7 @@ func (s *ReportService) Dashboard(ctx context.Context, actorID uuid.UUID, period
 	}
 	sum.NetUSD = sum.IncomeUSD.Sub(sum.ExpenseUSD)
 	sum.NetKHR = sum.IncomeKHR.Sub(sum.ExpenseKHR)
+	sum.ByCurrency = flows(all)
 
 	if err := q.Session(&gorm.Session{}).Count(&sum.TxnCount).Error; err != nil {
 		return nil, err
@@ -243,9 +284,11 @@ func (s *ReportService) branchTotals(ctx context.Context, actorID uuid.UUID, bra
 				BranchID: r.BranchID, BranchCode: r.Code, BranchName: r.Name,
 				IncomeUSD: accounting.Zero(), ExpenseUSD: accounting.Zero(),
 				IncomeKHR: accounting.Zero(), ExpenseKHR: accounting.Zero(),
+				flows: map[string]*flowAcc{},
 			}
 			m[r.BranchID] = bt
 		}
+		addFlow(bt.flows, r.Currency, r.Type, r.Total)
 		if r.Currency == models.CurrencyUSD && r.Type == models.TxnTypeIncome {
 			bt.IncomeUSD = r.Total
 		} else if r.Currency == models.CurrencyUSD && r.Type == models.TxnTypeExpense {
@@ -264,6 +307,7 @@ func (s *ReportService) branchTotals(ctx context.Context, actorID uuid.UUID, bra
 		bt.IncomeKHRStr = bt.IncomeKHR.StringFixed(4)
 		bt.ExpenseKHRStr = bt.ExpenseKHR.StringFixed(4)
 		bt.NetKHRStr = bt.IncomeKHR.Sub(bt.ExpenseKHR).StringFixed(4)
+		bt.ByCurrency = flows(bt.flows)
 		out = append(out, *bt)
 	}
 	return out, nil
@@ -303,10 +347,12 @@ func (s *ReportService) DailySummary(ctx context.Context, actorID uuid.UUID, per
 				Date:      r.Day,
 				IncomeUSD: accounting.Zero(), ExpenseUSD: accounting.Zero(),
 				IncomeKHR: accounting.Zero(), ExpenseKHR: accounting.Zero(),
+				flows: map[string]*flowAcc{},
 			}
 			m[r.Day] = d
 		}
 		d.Count += r.Cnt
+		addFlow(d.flows, r.Currency, r.Type, r.Total)
 		if r.Currency == models.CurrencyUSD && r.Type == models.TxnTypeIncome {
 			d.IncomeUSD = r.Total
 		} else if r.Currency == models.CurrencyUSD && r.Type == models.TxnTypeExpense {
@@ -325,6 +371,7 @@ func (s *ReportService) DailySummary(ctx context.Context, actorID uuid.UUID, per
 		d.IncomeKHRStr = d.IncomeKHR.StringFixed(4)
 		d.ExpenseKHRStr = d.ExpenseKHR.StringFixed(4)
 		d.NetKHRStr = d.IncomeKHR.Sub(d.ExpenseKHR).StringFixed(4)
+		d.ByCurrency = flows(d.flows)
 		out = append(out, *d)
 	}
 	// sort by date

@@ -32,12 +32,31 @@ type CreateRoleInput struct {
 	Name            string   `json:"name" binding:"required,min=2,max=128"`
 	Description     string   `json:"description"`
 	PermissionCodes []string `json:"permission_codes"`
+	// BranchID: the branch this role is for; empty = shared by every branch.
+	BranchID string `json:"branch_id"`
 }
 
 type UpdateRoleInput struct {
 	Name            *string  `json:"name" binding:"omitempty,min=2,max=128"`
 	Description     *string  `json:"description"`
 	PermissionCodes []string `json:"permission_codes"`
+	BranchID        *string  `json:"branch_id"` // "" makes it shared
+}
+
+// roleBranch checks a role's branch ("" = shared).
+func (s *RoleService) roleBranch(tx *gorm.DB, raw string) (*uuid.UUID, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	id, err := uuid.Parse(raw)
+	if err != nil {
+		return nil, fieldError("branch_id", "choose a valid branch")
+	}
+	var b models.Branch
+	if err := tx.Select("id").First(&b, "id = ?", id).Error; err != nil {
+		return nil, fieldError("branch_id", "this branch was not found")
+	}
+	return &id, nil
 }
 
 func (s *RoleService) Create(ctx context.Context, in CreateRoleInput) (*models.Role, error) {
@@ -49,6 +68,10 @@ func (s *RoleService) Create(ctx context.Context, in CreateRoleInput) (*models.R
 		return nil, err
 	}
 
+	branchID, err := s.roleBranch(s.db.WithContext(ctx), in.BranchID)
+	if err != nil {
+		return nil, err
+	}
 	// Every role sees only its users' own branches (data is not shared between branches).
 	role := models.Role{
 		Base:        models.Base{ID: uuid.New()},
@@ -57,9 +80,10 @@ func (s *RoleService) Create(ctx context.Context, in CreateRoleInput) (*models.R
 		Description: in.Description,
 		IsSystem:    false,
 		DataScope:   models.DataScopeAssigned,
+		BranchID:    branchID,
 	}
 
-	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&role).Error; err != nil {
 			return err
 		}
@@ -105,6 +129,16 @@ func (s *RoleService) Update(ctx context.Context, id uuid.UUID, in UpdateRoleInp
 		if in.Description != nil {
 			updates["description"] = *in.Description
 		}
+		if in.BranchID != nil {
+			if role.IsSystem && *in.BranchID != "" {
+				return fieldError("branch_id", "built-in roles stay shared by every branch")
+			}
+			branchID, err := s.roleBranch(tx, *in.BranchID)
+			if err != nil {
+				return err
+			}
+			updates["branch_id"] = branchID
+		}
 		if len(updates) > 0 {
 			if err := tx.Model(&role).Updates(updates).Error; err != nil {
 				return err
@@ -135,9 +169,27 @@ func (s *RoleService) GetByID(ctx context.Context, id uuid.UUID) (*models.Role, 
 	return &role, nil
 }
 
+// RoleListFilter: which roles a list shows. Without All, only shared roles and the roles of
+// BranchIDs; ForBranch narrows to shared roles and that branch's roles.
+type RoleListFilter struct {
+	Search    string
+	All       bool
+	BranchIDs []uuid.UUID
+	ForBranch *uuid.UUID
+}
+
 // List returns the roles; search (optional) matches the name, code or description.
-func (s *RoleService) List(ctx context.Context, search string) ([]models.Role, error) {
+func (s *RoleService) List(ctx context.Context, f RoleListFilter) ([]models.Role, error) {
+	search := f.Search
 	q := s.db.WithContext(ctx).Preload("Permissions")
+	switch {
+	case f.ForBranch != nil:
+		q = q.Where("branch_id IS NULL OR branch_id = ?", *f.ForBranch)
+	case !f.All && len(f.BranchIDs) > 0:
+		q = q.Where("branch_id IS NULL OR branch_id IN ?", f.BranchIDs)
+	case !f.All:
+		q = q.Where("branch_id IS NULL")
+	}
 	if strings.TrimSpace(search) != "" {
 		like := textsearch.Contains(search)
 		q = q.Where("name LIKE ? OR code LIKE ? OR description LIKE ?", like, like, like)

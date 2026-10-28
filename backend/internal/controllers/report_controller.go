@@ -71,6 +71,7 @@ func (rc *ReportController) Dashboard(c *gin.Context) {
 		"expense_khr_display": accounting.FormatDisplay("KHR", sum.ExpenseKHR),
 		"net_khr_display":     accounting.FormatDisplay("KHR", sum.NetKHR),
 		"transaction_count":   sum.TxnCount,
+		"by_currency":         sum.ByCurrency,
 		"daily":               daily,
 		"income_by_category":  sum.IncomeByCat,
 		"expense_by_category": sum.ExpenseByCat,

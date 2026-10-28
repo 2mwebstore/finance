@@ -43,10 +43,12 @@ func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config, store storage.Store, 
 	pmCtrl := controllers.NewPaymentMethodController(pmSvc)
 	attachmentSvc := services.NewAttachmentService(db, txnSvc, store)
 	txnCtrl := controllers.NewTransactionController(txnSvc, attachmentSvc, auditSvc, branchTelegram)
+	invCtrl := controllers.NewInventoryController(services.NewInventoryService(db, cfg.Timezone, store), db, auditSvc)
 	reportCtrl := controllers.NewReportController(reportSvc, auditSvc)
 	auditCtrl := controllers.NewAuditController(auditSvc, db, cfg.Timezone)
 	notifyCtrl := controllers.NewNotificationController(tg)
 	settingsCtrl := controllers.NewSettingsController(settingsSvc, auditSvc)
+	currencyCtrl := controllers.NewCurrencyController(services.NewCurrencyService(db), auditSvc)
 	cashCtrl := controllers.NewCashController(cashSvc)
 	backupCtrl := controllers.NewBackupController(backups, db, auditSvc)
 
@@ -126,15 +128,19 @@ func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config, store storage.Store, 
 
 			cats := api.Group("/categories")
 			{
-				cats.GET("", middleware.RequireAnyPermission(db, permissions.DashboardView, permissions.IncomeView, permissions.ExpenseView, permissions.IncomeCreate, permissions.ExpenseCreate, permissions.CategoriesManage), catCtrl.List)
-				cats.POST("", middleware.RequireAnyPermission(db, permissions.CategoriesManage), catCtrl.Create)
-				cats.PATCH("/:id", middleware.RequireAnyPermission(db, permissions.CategoriesManage), catCtrl.Update)
+				cats.GET("", middleware.RequireAnyPermission(db, permissions.DashboardView, permissions.IncomeView, permissions.ExpenseView, permissions.IncomeCreate, permissions.ExpenseCreate, permissions.CategoriesManage, permissions.InventoryManage, permissions.InventoryExpensesView, permissions.InventoryExpensesCreate), catCtrl.List)
+				// Financial expense categories need categories.manage, inventory expense categories
+				// inventory.manage (checked by type in the controller).
+				cats.POST("", middleware.RequireAnyPermission(db, permissions.CategoriesManage, permissions.InventoryManage), catCtrl.Create)
+				cats.PATCH("/:id", middleware.RequireAnyPermission(db, permissions.CategoriesManage, permissions.InventoryManage), catCtrl.Update)
 			}
 			pms := api.Group("/payment-methods")
 			{
-				pms.GET("", middleware.RequireAnyPermission(db, permissions.DashboardView, permissions.IncomeView, permissions.ExpenseView, permissions.CategoriesManage), pmCtrl.List)
-				pms.POST("", middleware.RequireAnyPermission(db, permissions.CategoriesManage), pmCtrl.Create)
-				pms.PATCH("/:id", middleware.RequireAnyPermission(db, permissions.CategoriesManage), pmCtrl.Update)
+				pms.GET("", middleware.RequireAnyPermission(db, permissions.DashboardView, permissions.IncomeView, permissions.ExpenseView, permissions.CategoriesManage, permissions.InventoryManage, permissions.SalesCreate, permissions.PurchasesCreate, permissions.InventoryExpensesCreate), pmCtrl.List)
+				// Payment methods are shared by transactions, sales, purchases and expenses (managed
+				// under Inventory → Payment Methods).
+				pms.POST("", middleware.RequireAnyPermission(db, permissions.CategoriesManage, permissions.InventoryManage), pmCtrl.Create)
+				pms.PATCH("/:id", middleware.RequireAnyPermission(db, permissions.CategoriesManage, permissions.InventoryManage), pmCtrl.Update)
 			}
 
 			txns := api.Group("/transactions")
@@ -178,6 +184,56 @@ func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config, store storage.Store, 
 				reports.GET("/export", middleware.RequireAnyPermission(db, permissions.ReportsExport), reportCtrl.Export)
 			}
 
+			// Inventory: shared products, stock per branch, sales, purchases, transfers (own branches only).
+			inv := api.Group("/inventory")
+			{
+				need := func(codes ...string) gin.HandlerFunc { return middleware.RequireAnyPermission(db, codes...) }
+				// Pickers on the sale/purchase/transfer forms need the catalog too.
+				catalogReaders := need(permissions.InventoryView, permissions.InventoryManage, permissions.SalesCreate, permissions.PurchasesCreate, permissions.InventoryTransfer, permissions.InventoryAdjust)
+				inv.GET("/categories", catalogReaders, invCtrl.ListCategories)
+				inv.POST("/categories", need(permissions.InventoryManage), invCtrl.SaveCategory)
+				inv.PATCH("/categories/:id", need(permissions.InventoryManage), invCtrl.SaveCategory)
+				inv.GET("/products", catalogReaders, invCtrl.ListProducts)
+				inv.POST("/products", need(permissions.InventoryManage), invCtrl.SaveProduct)
+				inv.PATCH("/products/:id", need(permissions.InventoryManage), invCtrl.SaveProduct)
+				inv.GET("/products/:id/image", catalogReaders, invCtrl.ProductImage)
+				inv.POST("/products/:id/image", need(permissions.InventoryManage), invCtrl.UploadProductImage)
+				inv.DELETE("/products/:id/image", need(permissions.InventoryManage), invCtrl.DeleteProductImage)
+
+				inv.GET("/stock", need(permissions.InventoryView), invCtrl.ListStock)
+				inv.GET("/movements", need(permissions.InventoryView), invCtrl.ListMovements)
+				inv.POST("/adjustments", need(permissions.InventoryAdjust), invCtrl.Adjust)
+
+				inv.GET("/sales", need(permissions.SalesView), invCtrl.ListSales)
+				inv.GET("/sales/:id", need(permissions.SalesView), invCtrl.GetSale)
+				inv.POST("/sales", need(permissions.SalesCreate), invCtrl.CreateSale)
+				inv.POST("/sales/:id/void", need(permissions.SalesVoid), invCtrl.VoidSale)
+
+				inv.GET("/purchases", need(permissions.PurchasesView), invCtrl.ListPurchases)
+				inv.GET("/purchases/:id", need(permissions.PurchasesView), invCtrl.GetPurchase)
+				inv.POST("/purchases", need(permissions.PurchasesCreate), invCtrl.CreatePurchase)
+				inv.POST("/purchases/:id/approve", need(permissions.PurchasesApprove), invCtrl.ApprovePurchase)
+				inv.POST("/purchases/:id/reject", need(permissions.PurchasesApprove), invCtrl.RejectPurchase)
+				inv.POST("/purchases/:id/void", need(permissions.PurchasesVoid), invCtrl.VoidPurchase)
+
+				inv.GET("/transfers", need(permissions.InventoryView, permissions.InventoryTransfer), invCtrl.ListTransfers)
+				inv.POST("/transfers", need(permissions.InventoryTransfer), invCtrl.CreateTransfer)
+				inv.POST("/transfers/:id/void", need(permissions.InventoryTransfer), invCtrl.VoidTransfer)
+
+				inv.GET("/expenses", need(permissions.InventoryExpensesView), invCtrl.ListExpenses)
+				inv.POST("/expenses", need(permissions.InventoryExpensesCreate), invCtrl.CreateExpense)
+				inv.POST("/expenses/:id/void", need(permissions.InventoryExpensesVoid), invCtrl.VoidExpense)
+
+				// Reports show stock value and profit: they need reports.view and inventory.view.
+				rep := inv.Group("/reports", need(permissions.ReportsView), need(permissions.InventoryView))
+				rep.GET("/summary", invCtrl.ReportSummary)
+				rep.GET("/stock", invCtrl.ReportStock)
+				rep.GET("/sales", invCtrl.ReportSales)
+				rep.GET("/purchases", invCtrl.ReportPurchases)
+				rep.GET("/low-stock", invCtrl.ReportLowStock)
+				rep.GET("/expenses", invCtrl.ReportExpenses)
+			}
+
 			api.GET("/audit-logs", middleware.RequireAnyPermission(db, permissions.AuditLogsView), auditCtrl.List)
 			// Retention cleanup is destructive: require audit access, system settings and full access (owner/admin/super admin).
 			api.POST("/audit-logs/cleanup",
@@ -201,6 +257,10 @@ func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config, store storage.Store, 
 				bk.DELETE("/:name", backupCtrl.Delete)
 			}
 			api.GET("/settings", middleware.RequireAnyPermission(db, permissions.SettingsManage, permissions.DashboardView), settingsCtrl.Get)
+			// Exchange rate and default currency: every signed-in user reads them (forms convert
+			// prices); changing them needs currency-settings.manage.
+			api.GET("/currency", currencyCtrl.Get)
+			api.PUT("/currency", middleware.RequireAnyPermission(db, permissions.CurrencySettingsManage), currencyCtrl.Update)
 			api.PUT("/settings", middleware.RequireAnyPermission(db, permissions.SettingsManage), settingsCtrl.Update)
 		}
 	}
