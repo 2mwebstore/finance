@@ -102,6 +102,11 @@ func EnsureRequiredPermissions(db *gorm.DB) error {
 		permissions.SalesView, permissions.SalesCreate, permissions.SalesVoid,
 		permissions.PurchasesView, permissions.PurchasesCreate, permissions.PurchasesApprove, permissions.PurchasesVoid,
 		permissions.InventoryExpensesView, permissions.InventoryExpensesCreate, permissions.InventoryExpensesVoid,
+		permissions.SalesEdit, permissions.PurchasesEdit,
+		// Platforms and daily win/lose.
+		permissions.PlatformsView, permissions.PlatformsManage, permissions.PlatformAssignmentsManage,
+		permissions.WinLoseView, permissions.WinLoseCreate, permissions.WinLoseEdit,
+		permissions.WinLoseReportsView, permissions.WinLoseReportsConsolidated, permissions.WinLoseSettlementsFinalize,
 	} {
 		required[code] = permissions.BranchesManage
 	}

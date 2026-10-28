@@ -48,14 +48,26 @@ export const P = {
   SalesView: 'sales.view',
   SalesCreate: 'sales.create',
   SalesVoid: 'sales.void',
+  SalesEdit: 'sales.edit',
   PurchasesView: 'purchases.view',
   PurchasesCreate: 'purchases.create',
   PurchasesApprove: 'purchases.approve',
   PurchasesVoid: 'purchases.void',
+  PurchasesEdit: 'purchases.edit',
 
   InventoryExpensesView: 'inventory-expenses.view',
   InventoryExpensesCreate: 'inventory-expenses.create',
   InventoryExpensesVoid: 'inventory-expenses.void',
+
+  PlatformsView: 'platforms.view',
+  PlatformsManage: 'platforms.manage',
+  PlatformAssignmentsManage: 'platform-assignments.manage',
+  WinLoseView: 'winlose.view',
+  WinLoseCreate: 'winlose.create',
+  WinLoseEdit: 'winlose.edit',
+  WinLoseReportsView: 'winlose-reports.view',
+  WinLoseReportsConsolidated: 'winlose-reports.consolidated',
+  WinLoseSettlementsFinalize: 'winlose-settlements.finalize',
 } as const
 
 export type PermissionCode = (typeof P)[keyof typeof P]
@@ -115,18 +127,30 @@ export const PERMISSION_CATALOG: {
   { code: P.SalesView, name: 'View Sales', module: 'Sales', description: 'See sales of your branches' },
   { code: P.SalesCreate, name: 'Create Sales', module: 'Sales', description: 'Record sales; their stock goes out right away' },
   { code: P.SalesVoid, name: 'Void Sales', module: 'Sales', description: 'Void a sale and put its stock back' },
+  { code: P.SalesEdit, name: 'Edit Sales', module: 'Sales', description: 'Change a sale; its goods are put back and the new lines taken out of stock' },
   { code: P.PurchasesView, name: 'View Purchases', module: 'Purchases', description: 'See purchases of your branches' },
   { code: P.PurchasesCreate, name: 'Create Purchases', module: 'Purchases', description: 'Record purchases from suppliers; stock goes in once approved' },
   { code: P.PurchasesApprove, name: 'Approve Purchases', module: 'Purchases', description: 'Approve or reject purchases; approved purchases add stock' },
   { code: P.PurchasesVoid, name: 'Void Purchases', module: 'Purchases', description: 'Void a purchase and take its stock back out' },
+  { code: P.PurchasesEdit, name: 'Edit Purchases', module: 'Purchases', description: 'Change a pending purchase (an approved one also needs Approve Purchases)' },
 
   { code: P.InventoryExpensesView, name: 'View Inventory Expenses', module: 'Inventory Expenses', description: 'See inventory expenses of your branches' },
   { code: P.InventoryExpensesCreate, name: 'Create Inventory Expenses', module: 'Inventory Expenses', description: 'Record inventory expenses (shipping, packaging, storage…)' },
   { code: P.InventoryExpensesVoid, name: 'Void Inventory Expenses', module: 'Inventory Expenses', description: 'Void an inventory expense' },
+
+  { code: P.PlatformsView, name: 'View Platforms', module: 'Platforms', description: 'See platforms and the HQs (branches) they are assigned to' },
+  { code: P.PlatformsManage, name: 'Manage Platforms', module: 'Platforms', description: 'Add and edit platforms with their default rate and currency' },
+  { code: P.PlatformAssignmentsManage, name: 'Manage HQ Platform Assignments', module: 'Platforms', description: 'Assign platforms to HQs with a commission rate; change, end or move assignments' },
+  { code: P.WinLoseView, name: 'View Win/Lose', module: 'Win/Lose', description: 'See the weekly win/lose entered for your HQs' },
+  { code: P.WinLoseCreate, name: 'Enter Win/Lose', module: 'Win/Lose', description: 'Enter a week\'s win/lose and commission for your HQs (once a week)' },
+  { code: P.WinLoseEdit, name: 'Correct Win/Lose', module: 'Win/Lose', description: 'Change a week already saved, with a reason (kept in the audit log)' },
+  { code: P.WinLoseReportsView, name: 'View Win/Lose Reports', module: 'Win/Lose Reports', description: 'The weekly report and the HQ summary for your HQs, one HQ at a time' },
+  { code: P.WinLoseReportsConsolidated, name: 'View Consolidated Win/Lose', module: 'Win/Lose Reports', description: 'Combined totals across all your HQs (Main HQ view)' },
+  { code: P.WinLoseSettlementsFinalize, name: 'Finalize Weekly Settlements', module: 'Win/Lose Reports', description: 'Finalize or reopen an HQ\'s week; a finalized week can\'t be changed' },
 ]
 
 /** Permission modules in the same order as the sidebar (Settings holds Categories). */
-export const PERMISSION_MODULE_ORDER = ['Dashboard', 'Transactions', 'Income', 'Expenses', 'Reports', 'Inventory', 'Sales', 'Purchases', 'Inventory Expenses', 'Branches', 'Roles', 'Users', 'Settings', 'Audit', 'Backups']
+export const PERMISSION_MODULE_ORDER = ['Dashboard', 'Transactions', 'Income', 'Expenses', 'Reports', 'Inventory', 'Sales', 'Purchases', 'Inventory Expenses', 'Win/Lose', 'Win/Lose Reports', 'Branches', 'Platforms', 'Roles', 'Users', 'Settings', 'Audit', 'Backups']
 
 /** Sort key for a module: sidebar order, unknown modules last. */
 export function permissionModuleRank(module: string) {
@@ -151,6 +175,7 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionCode[]> = {
   '/inventory/stock': [P.InventoryView],
   '/inventory/sales': [P.SalesView],
   '/inventory/sales/new': [P.SalesCreate],
+  '/inventory/pos': [P.SalesCreate],
   '/inventory/purchases': [P.PurchasesView],
   '/inventory/purchases/new': [P.PurchasesCreate],
   '/inventory/transfers': [P.InventoryView],
@@ -158,6 +183,10 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionCode[]> = {
   '/inventory/expense-categories': [P.InventoryManage],
   '/inventory/payment-methods': [P.InventoryManage, P.CategoriesManage],
   '/admin/currency': [P.CurrencySettingsManage],
+  '/admin/platforms': [P.PlatformsView, P.PlatformsManage],
+  '/admin/platform-assignments': [P.PlatformsView, P.PlatformAssignmentsManage],
+  '/winlose/entry': [P.WinLoseView, P.WinLoseCreate, P.WinLoseEdit],
+  '/winlose/reports': [P.WinLoseReportsView],
   // The API also needs inventory.view; the menu shows it only with both.
   '/inventory/reports': [P.ReportsView],
 }

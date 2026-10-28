@@ -44,6 +44,7 @@ func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config, store storage.Store, 
 	attachmentSvc := services.NewAttachmentService(db, txnSvc, store)
 	txnCtrl := controllers.NewTransactionController(txnSvc, attachmentSvc, auditSvc, branchTelegram)
 	invCtrl := controllers.NewInventoryController(services.NewInventoryService(db, cfg.Timezone, store), db, auditSvc)
+	platformCtrl := controllers.NewPlatformController(services.NewPlatformService(db, cfg.Timezone), db, auditSvc)
 	reportCtrl := controllers.NewReportController(reportSvc, auditSvc)
 	auditCtrl := controllers.NewAuditController(auditSvc, db, cfg.Timezone)
 	notifyCtrl := controllers.NewNotificationController(tg)
@@ -208,6 +209,7 @@ func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config, store storage.Store, 
 				inv.GET("/sales/:id", need(permissions.SalesView), invCtrl.GetSale)
 				inv.POST("/sales", need(permissions.SalesCreate), invCtrl.CreateSale)
 				inv.POST("/sales/:id/void", need(permissions.SalesVoid), invCtrl.VoidSale)
+				inv.PATCH("/sales/:id", need(permissions.SalesEdit), invCtrl.UpdateSale)
 
 				inv.GET("/purchases", need(permissions.PurchasesView), invCtrl.ListPurchases)
 				inv.GET("/purchases/:id", need(permissions.PurchasesView), invCtrl.GetPurchase)
@@ -215,6 +217,7 @@ func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config, store storage.Store, 
 				inv.POST("/purchases/:id/approve", need(permissions.PurchasesApprove), invCtrl.ApprovePurchase)
 				inv.POST("/purchases/:id/reject", need(permissions.PurchasesApprove), invCtrl.RejectPurchase)
 				inv.POST("/purchases/:id/void", need(permissions.PurchasesVoid), invCtrl.VoidPurchase)
+				inv.PATCH("/purchases/:id", need(permissions.PurchasesEdit), invCtrl.UpdatePurchase)
 
 				inv.GET("/transfers", need(permissions.InventoryView, permissions.InventoryTransfer), invCtrl.ListTransfers)
 				inv.POST("/transfers", need(permissions.InventoryTransfer), invCtrl.CreateTransfer)
@@ -232,6 +235,33 @@ func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config, store storage.Store, 
 				rep.GET("/purchases", invCtrl.ReportPurchases)
 				rep.GET("/low-stock", invCtrl.ReportLowStock)
 				rep.GET("/expenses", invCtrl.ReportExpenses)
+			}
+
+			// Platforms and weekly win/lose. An HQ is a branch: the service limits everything to the
+			// actor's own branches; the permissions below decide what they may do there.
+			{
+				need := func(codes ...string) gin.HandlerFunc { return middleware.RequireAnyPermission(db, codes...) }
+				api.GET("/platforms", need(permissions.PlatformsView, permissions.PlatformsManage, permissions.PlatformAssignmentsManage), platformCtrl.ListPlatforms)
+				api.POST("/platforms", need(permissions.PlatformsManage), platformCtrl.SavePlatform)
+				api.PATCH("/platforms/:id", need(permissions.PlatformsManage), platformCtrl.SavePlatform)
+
+				api.GET("/platform-assignments", need(permissions.PlatformsView, permissions.PlatformAssignmentsManage), platformCtrl.ListAssignments)
+				api.POST("/platform-assignments", need(permissions.PlatformAssignmentsManage), platformCtrl.Assign)
+				api.PATCH("/platform-assignments/:id", need(permissions.PlatformAssignmentsManage), platformCtrl.UpdateAssignment)
+				api.POST("/platform-assignments/:id/end", need(permissions.PlatformAssignmentsManage), platformCtrl.EndAssignment)
+				api.POST("/platform-assignments/:id/move", need(permissions.PlatformAssignmentsManage), platformCtrl.MoveAssignment)
+
+				wl := api.Group("/winlose")
+				wl.GET("/formula", need(permissions.WinLoseView, permissions.WinLoseCreate, permissions.WinLoseEdit, permissions.WinLoseReportsView), platformCtrl.Formula)
+				// New rows need winlose.create and changed saved rows winlose.edit (checked per row).
+				wl.GET("/entry", need(permissions.WinLoseView, permissions.WinLoseCreate, permissions.WinLoseEdit), platformCtrl.WeekSheet)
+				wl.POST("/entry/preview", need(permissions.WinLoseCreate, permissions.WinLoseEdit), platformCtrl.Preview)
+				wl.PUT("/entry", need(permissions.WinLoseCreate, permissions.WinLoseEdit), platformCtrl.SaveWeek)
+				// Totals across HQs also need winlose-reports.consolidated (checked in the service).
+				wl.GET("/reports", need(permissions.WinLoseReportsView), platformCtrl.Report)
+				wl.GET("/settlements", need(permissions.WinLoseReportsView, permissions.WinLoseSettlementsFinalize), platformCtrl.ListSettlements)
+				wl.POST("/settlements", need(permissions.WinLoseSettlementsFinalize), platformCtrl.FinalizeWeek)
+				wl.POST("/settlements/:id/reopen", need(permissions.WinLoseSettlementsFinalize), platformCtrl.ReopenWeek)
 			}
 
 			api.GET("/audit-logs", middleware.RequireAnyPermission(db, permissions.AuditLogsView), auditCtrl.List)

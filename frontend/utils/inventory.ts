@@ -1,5 +1,5 @@
 import { currencyMeta } from '~/utils/money'
-import type { StockMovementType } from '~/types/api'
+import type { Product, StockMovementType } from '~/types/api'
 
 /** Quantities show up to 4 decimals, without trailing zeros: 12, 1.5, 0.125. */
 export function formatQty(value: string | number | null | undefined) {
@@ -24,15 +24,40 @@ export function todayISO() {
   return new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10)
 }
 
+/** A YYYY-MM-DD day `days` later (for due dates). */
+export function addDaysISO(day: string, days: number) {
+  const [y, m, d] = day.split('-').map(Number)
+  const date = new Date(y || 0, (m || 1) - 1, (d || 1) + days)
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
 export const MOVEMENT_LABELS: Record<StockMovementType, string> = {
   sale: 'Sale',
   sale_void: 'Sale voided',
+  sale_edit: 'Sale changed',
   purchase: 'Purchase',
   purchase_void: 'Purchase voided',
+  purchase_edit: 'Purchase changed',
   transfer_out: 'Sent to branch',
   transfer_in: 'Received from branch',
   transfer_void: 'Transfer voided',
   adjustment: 'Adjustment',
+}
+
+/** A service has no stock, so it never runs out. */
+export function isService(product: Product | undefined) {
+  return product?.type === 'service'
+}
+
+/** What a branch has of a product, plus what an edited sale already holds (`held`). */
+export function availableQty(product: Product | undefined, held?: Record<string, number>) {
+  if (!product) return 0
+  return Number(product.quantity || 0) + (held?.[product.id] || 0)
+}
+
+/** Units of a product across a document's lines. */
+export function cartQty(lines: { product_id: string; quantity: string }[], productId: string) {
+  return lines.filter(l => l.product_id === productId).reduce((sum, l) => sum + (Number(l.quantity) || 0), 0)
 }
 
 /** Rounds to the currency's decimals (cents for USD, whole riel for KHR…). */

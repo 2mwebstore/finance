@@ -32,6 +32,15 @@
           </NuxtLink>
         </div>
 
+        <div v-if="platformsNav.length" class="nav-divider"></div>
+        <div v-if="platformsNav.length" class="nav-section">
+          <p class="nav-caption">PLATFORMS</p>
+          <NuxtLink v-for="item in platformsNav" :key="item.label" :to="item.to" class="sidebar-link" :class="isActive(item) ? 'is-active' : ''">
+            <component :is="item.icon" :size="18" :stroke-width="1.9" />
+            <span>{{ item.label }}</span>
+          </NuxtLink>
+        </div>
+
         <div v-if="adminNav.length" class="nav-divider"></div>
         <div v-if="adminNav.length" class="nav-section">
           <p class="nav-caption">MANAGE</p>
@@ -120,11 +129,17 @@ import {
   ArrowLeftRight,
   Boxes,
   Building2,
+  CalendarRange,
+  ChartColumn,
+  Layers,
+  Network,
+  NotebookPen,
   ChartPie,
   ChartNoAxesCombined,
   Coins,
   Package,
   ShoppingCart,
+  Store,
   Truck,
   Wallet,
   ChevronDown,
@@ -194,6 +209,7 @@ const inventoryNav = computed<NavItem[]>(() => {
   const items: NavItem[] = []
   if (canViewInventory.value) items.push({ label: 'Products', to: '/inventory/products', icon: Package })
   if (canViewInventory.value) items.push({ label: 'Stock', to: '/inventory/stock', icon: Boxes })
+  if (can('sales.create')) items.push({ label: 'POS', to: '/inventory/pos', icon: Store })
   if (canViewSales.value) items.push({ label: 'Sales', to: '/inventory/sales', icon: ShoppingCart })
   if (canViewPurchases.value) items.push({ label: 'Purchases', to: '/inventory/purchases', icon: Truck })
   if (canViewInventoryExpenses.value) items.push({ label: 'Expenses', to: '/inventory/expenses', icon: ReceiptText })
@@ -201,6 +217,19 @@ const inventoryNav = computed<NavItem[]>(() => {
   if (can('inventory.manage', 'categories.manage')) items.push({ label: 'Payment Methods', to: '/inventory/payment-methods', icon: Wallet })
   if (canViewTransfers.value) items.push({ label: 'Transfers', to: '/inventory/transfers', icon: ArrowLeftRight })
   if (canViewInventoryReports.value) items.push({ label: 'Inventory Reports', to: '/inventory/reports', icon: ChartPie })
+  return items
+})
+
+// Platforms and weekly win/lose (an HQ is a branch; results are entered once a week).
+const platformsNav = computed<NavItem[]>(() => {
+  const items: NavItem[] = []
+  if (can('winlose.view', 'winlose.create', 'winlose.edit')) items.push({ label: 'Win/Lose Entry', to: '/winlose/entry', icon: NotebookPen })
+  if (can('winlose-reports.view')) {
+    items.push({ label: 'Weekly Report', to: '/winlose/reports/weekly', icon: CalendarRange })
+    items.push({ label: 'HQ Summary', to: '/winlose/reports/hq-summary', icon: ChartColumn })
+  }
+  if (can('platforms.view', 'platforms.manage')) items.push({ label: 'Platforms', to: '/admin/platforms', icon: Layers })
+  if (can('platforms.view', 'platform-assignments.manage')) items.push({ label: 'HQ Platform Assignments', to: '/admin/platform-assignments', icon: Network })
   return items
 })
 
@@ -230,6 +259,7 @@ const mobileNav = computed<NavItem[]>(() => {
 const menuSections = computed(() => [
   { caption: 'FINANCIAL ACTIVITY', items: financialNav.value.filter(item => !mobileNav.value.some(tab => tab.to === item.to)) },
   { caption: 'INVENTORY', items: inventoryNav.value },
+  { caption: 'PLATFORMS', items: platformsNav.value },
   { caption: 'MANAGE', items: adminNav.value },
 ].filter((section) => section.items.length))
 

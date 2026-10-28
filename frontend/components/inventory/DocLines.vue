@@ -4,6 +4,7 @@
       <div class="min-w-0">
         <p class="truncate text-sm font-semibold text-navy">{{ line.name }}</p>
         <p class="text-[11px] text-muted"><span class="font-mono">{{ line.sku }}</span> · {{ formatQty(line.quantity) }} {{ line.unit }}<template v-if="currency && priceField"> × {{ formatMoney(line[priceField], currency) }}</template><template v-if="currency && Number(line.discount)"> − {{ formatMoney(line.discount, currency) }}</template></p>
+        <p v-if="line.note" class="mt-0.5 text-[11px] italic text-slate-500">{{ line.note }}</p>
         <p v-if="currency && priceField === 'unit_cost' && line.landed_cost && (currency !== 'USD' || Number(line.landed_cost) !== Number(line.unit_cost))" class="text-[11px] text-slate-400">Into stock at {{ formatMoney(line.landed_cost, 'USD') }} each (in USD, with shipping and discount)</p>
       </div>
       <p v-if="currency" class="shrink-0 text-sm font-semibold text-navy">{{ formatMoney(line.line_total, currency) }}</p>

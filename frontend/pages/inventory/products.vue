@@ -4,7 +4,7 @@
       <div>
         <p class="text-[10px] font-bold tracking-[0.14em] text-slate-400">INVENTORY</p>
         <h1 class="text-xl font-bold text-navy">Products</h1>
-        <p class="mt-1 text-xs text-muted">The products every branch buys and sells. Stock shown is for your branches.</p>
+        <p class="mt-1 text-xs text-muted">The products every branch buys and sells. Stock shown is for {{ branchFilter ? labelForBranch(branchFilter) : 'all your branches' }}.</p>
       </div>
       <div v-if="canManage" class="flex flex-wrap gap-2">
         <button type="button" class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-white px-3 py-2 text-sm font-medium text-navy" @click="categoriesOpen = true"><Tags :size="16" /> Categories</button>
@@ -14,7 +14,8 @@
 
     <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
       <div class="min-w-0 flex-1"><ListSearch v-model="search" placeholder="Search by SKU, name or barcode…" /></div>
-      <div class="grid grid-cols-2 gap-2 sm:w-[360px]">
+      <div class="grid grid-cols-2 gap-2" :class="showBranchFilter ? 'sm:w-[540px] sm:grid-cols-3' : 'sm:w-[360px]'">
+        <SearchSelect v-if="showBranchFilter" v-model="branchFilter" :options="branchOptions" aria-label="Branch stock" />
         <SearchSelect v-model="categoryFilter" :options="categoryFilterOptions" aria-label="Category" />
         <SearchSelect v-model="activeFilter" :options="activeOptions" :searchable="false" aria-label="Status" />
       </div>
@@ -22,6 +23,31 @@
 
     <div v-if="loading" class="text-sm text-muted">Loading products…</div>
     <AppAlert v-else-if="error" title="Couldn’t load products" :message="error"><template #action><button type="button" @click="load">Try again</button></template></AppAlert>
+    <!-- Under 768px: a 2-column grid of product cards. -->
+    <div v-else-if="isPhone" class="keep-cols grid grid-cols-2 gap-2.5">
+      <article v-for="product in items" :key="product.id" class="relative flex flex-col overflow-hidden rounded-xl border border-border bg-white" :class="!product.is_active ? 'opacity-70' : ''">
+        <button v-if="product.has_image || product.image_url" type="button" class="block w-full" :aria-label="`Show the picture of ${product.name}`" @click="previewing = product"><InventoryProductImage :product="product" size="card" /></button>
+        <InventoryProductImage v-else :product="product" size="card" />
+        <span v-if="!product.is_active" class="absolute left-1.5 top-1.5 rounded-full bg-slate-700/85 px-2 py-0.5 text-[9px] font-bold uppercase text-white">Inactive</span>
+        <span v-else-if="isLow(product)" class="absolute left-1.5 top-1.5 rounded-full bg-amber-500/90 px-2 py-0.5 text-[9px] font-bold uppercase text-white">Low stock</span>
+        <span v-else-if="product.type === 'service'" class="absolute left-1.5 top-1.5 rounded-full bg-violet-600/90 px-2 py-0.5 text-[9px] font-bold uppercase text-white">Service</span>
+        <button v-if="canManage" type="button" class="absolute right-1.5 top-1.5 grid h-8 w-8 place-items-center rounded-lg bg-white/90 text-primary shadow-sm" :aria-label="`Edit ${product.name}`" @click="openEdit(product)"><Pencil :size="14" /></button>
+        <div class="flex flex-1 flex-col gap-0.5 p-2.5">
+          <h2 class="line-clamp-2 text-[13px] font-semibold leading-snug text-navy">{{ product.name }}</h2>
+          <p class="truncate font-mono text-[10px] text-muted">{{ product.sku }}</p>
+          <p class="truncate text-[11px] text-muted">{{ product.category_name || 'No category' }}</p>
+          <div class="mt-auto flex items-end justify-between gap-1 pt-1.5">
+            <div class="min-w-0">
+              <p class="truncate text-sm font-bold text-navy">{{ formatMoney(product.sale_price, 'USD') }}</p>
+              <p v-if="altCurrency" class="truncate text-[10px] text-muted">{{ formatMoney(fromUSD(product.sale_price, altCurrency), altCurrency) }}</p>
+            </div>
+            <p v-if="product.type === 'service'" class="shrink-0 text-right text-[11px] font-semibold leading-tight text-violet-700">No<br><span class="font-normal">stock</span></p>
+            <p v-else class="shrink-0 text-right text-[11px] font-semibold leading-tight" :class="isLow(product) ? 'text-amber-700' : 'text-muted'">{{ formatQty(product.quantity) }}<br><span class="font-normal">{{ product.unit }}</span></p>
+          </div>
+        </div>
+      </article>
+      <p v-if="!items.length" class="col-span-2 rounded-xl border border-border bg-white p-6 text-center text-sm text-muted">{{ search ? `No products match “${search}”.` : 'No products yet.' }}</p>
+    </div>
     <ul v-else class="divide-y divide-border rounded-xl border border-border bg-white">
       <li v-for="product in items" :key="product.id" class="flex flex-col gap-3 p-4 sm:flex-row sm:items-center">
         <div class="flex min-w-0 flex-1 items-start gap-3">
@@ -32,6 +58,7 @@
               <h2 class="text-sm font-semibold text-navy">{{ product.name }}</h2>
               <span v-if="!product.is_active" class="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase text-muted">Inactive</span>
               <span v-else-if="isLow(product)" class="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold uppercase text-amber-700">Low stock</span>
+              <span v-if="product.type === 'service'" class="rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-bold uppercase text-violet-700">Service</span>
             </div>
             <p class="mt-0.5 font-mono text-[11px] text-muted">{{ product.sku }}<template v-if="product.barcode"> · {{ product.barcode }}</template></p>
             <p class="mt-0.5 text-xs text-muted">{{ product.category_name || 'No category' }} · per {{ product.unit }}</p>
@@ -40,9 +67,13 @@
         <div class="flex items-center justify-between gap-4 sm:justify-end">
           <div class="text-left sm:text-right">
             <p class="text-sm font-bold text-navy">{{ formatMoney(product.sale_price, 'USD') }}</p>
-            <p class="text-[11px] text-muted"><template v-if="altCurrency">{{ formatMoney(fromUSD(product.sale_price, altCurrency), altCurrency) }} · </template>cost {{ formatMoney(product.cost_price, 'USD') }}</p>
+            <p class="text-[11px] text-muted"><template v-if="altCurrency">{{ formatMoney(fromUSD(product.sale_price, altCurrency), altCurrency) }}</template><template v-if="altCurrency && product.type !== 'service'"> · </template><template v-if="product.type !== 'service'">cost {{ formatMoney(product.cost_price, 'USD') }}</template></p>
           </div>
-          <div class="text-right">
+          <div v-if="product.type === 'service'" class="text-right">
+            <p class="text-sm font-bold text-muted">—</p>
+            <p class="text-[11px] text-muted">no stock</p>
+          </div>
+          <div v-else class="text-right">
             <p class="text-sm font-bold" :class="isLow(product) ? 'text-amber-700' : 'text-navy'">{{ formatQty(product.quantity) }}</p>
             <p class="text-[11px] text-muted">in stock</p>
           </div>
@@ -69,16 +100,26 @@
           <p v-else class="text-[11px] text-muted">{{ editing && (editing.has_image || editing.image_url) ? 'The picture is removed when you save.' : 'No picture.' }}</p>
         </div>
       </div>
+      <div class="mb-3 space-y-1 text-xs font-medium text-muted">
+        Type
+        <div class="keep-cols grid grid-cols-2 gap-2" role="radiogroup" aria-label="Product type">
+          <button v-for="t in productTypes" :key="t.value" type="button" role="radio" :aria-checked="form.type === t.value" class="rounded-lg border px-3 py-2 text-left" :class="form.type === t.value ? 'border-primary bg-blue-50 ring-1 ring-primary' : 'border-border bg-white'" @click="form.type = t.value">
+            <span class="block text-sm font-semibold text-navy">{{ t.label }}</span>
+            <span class="block text-[11px] font-normal text-muted">{{ t.hint }}</span>
+          </button>
+        </div>
+        <small v-if="editing" class="block font-normal">The type can’t change once the product has been bought, sold or stocked.</small>
+      </div>
       <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div class="space-y-1 text-xs font-medium text-muted">SKU<p class="rounded-lg border border-dashed border-border bg-canvas px-3 py-2 font-mono text-sm text-navy">{{ editing ? editing.sku : 'Generated when you save' }}</p></div>
         <label class="space-y-1 text-xs font-medium text-muted">Name<input v-model.trim="form.name" maxlength="191" :aria-invalid="formCheck.invalid('name')" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" placeholder="e.g. Coffee beans 250 g" /></label>
-        <div class="space-y-1 text-xs font-medium text-muted">Category<SearchSelect v-model="form.category_id" :options="categoryOptions" placeholder="No category" aria-label="Category" /></div>
+        <div class="space-y-1 text-xs font-medium text-muted">Category<SearchSelect v-model="form.category_id" :options="categoryOptions" placeholder="Choose a category" aria-label="Category" :aria-invalid="formCheck.invalid('category_id')" /></div>
         <label class="space-y-1 text-xs font-medium text-muted">Unit<input v-model.trim="form.unit" maxlength="32" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" placeholder="pcs, kg, box…" /></label>
         <label class="space-y-1 text-xs font-medium text-muted">Barcode <span class="font-normal">(optional)</span><input v-model.trim="form.barcode" maxlength="64" class="w-full rounded-lg border border-border px-3 py-2 font-mono text-sm text-navy" /></label>
-        <label class="space-y-1 text-xs font-medium text-muted">Sale price (USD)<MoneyInput v-model="form.sale_price" currency="USD" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" aria-label="Sale price in USD" /><small v-if="Number(form.sale_price) && altCurrency" class="block font-normal">≈ {{ formatMoney(fromUSD(form.sale_price, altCurrency), altCurrency) }}</small></label>
-        <label class="space-y-1 text-xs font-medium text-muted">Usual cost (USD)<MoneyInput v-model="form.cost_price" currency="USD" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" aria-label="Usual cost in USD" /><small v-if="Number(form.cost_price) && altCurrency" class="block font-normal">≈ {{ formatMoney(fromUSD(form.cost_price, altCurrency), altCurrency) }}</small></label>
-        <p class="rounded-lg bg-canvas px-3 py-2 text-[11px] text-muted sm:col-span-2">Prices are in USD. A sale or purchase in another currency converts them at the rate set in Manage → Currency.</p>
-        <label class="space-y-1 text-xs font-medium text-muted">Low-stock level<input v-model.trim="form.reorder_level" type="text" inputmode="decimal" :aria-invalid="formCheck.invalid('reorder_level')" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" placeholder="0 = no alert" /></label>
+        <label class="space-y-1 text-xs font-medium text-muted">Sale price (USD)<MoneyInput v-model="form.sale_price" currency="USD" :aria-invalid="formCheck.invalid('sale_price')" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" aria-label="Sale price in USD" /><small v-if="Number(form.sale_price) && altCurrency" class="block font-normal">≈ {{ formatMoney(fromUSD(form.sale_price, altCurrency), altCurrency) }}</small></label>
+        <label v-if="form.type === 'standard'" class="space-y-1 text-xs font-medium text-muted">Usual cost (USD)<MoneyInput v-model="form.cost_price" currency="USD" :aria-invalid="formCheck.invalid('cost_price')" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" aria-label="Usual cost in USD" /><small v-if="Number(form.cost_price) && altCurrency" class="block font-normal">≈ {{ formatMoney(fromUSD(form.cost_price, altCurrency), altCurrency) }}</small></label>
+        <p class="rounded-lg bg-canvas px-3 py-2 text-[11px] text-muted sm:col-span-2"><template v-if="form.type === 'service'">A service is only sold: it has no stock and no cost. </template>Prices are in USD. A sale or purchase in another currency converts them at the rate set in Manage → Currency.</p>
+        <label v-if="form.type === 'standard'" class="space-y-1 text-xs font-medium text-muted">Low-stock level<input v-model.trim="form.reorder_level" type="text" inputmode="decimal" :aria-invalid="formCheck.invalid('reorder_level')" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" placeholder="0 = no alert" /></label>
         <label v-if="editing" class="flex items-center gap-2 self-end pb-2 text-xs font-medium text-navy"><input v-model="form.is_active" type="checkbox" class="accent-primary" /> Active (can be bought and sold)</label>
         <label class="space-y-1 text-xs font-medium text-muted sm:col-span-2">Description <span class="font-normal">(optional)</span><textarea v-model.trim="form.description" rows="2" maxlength="512" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" /></label>
       </div>
@@ -129,13 +170,15 @@
 
 <script setup lang="ts">
 import { ImageIcon, ImagePlus, Package, Pencil, Plus, Tags } from 'lucide-vue-next'
-import type { Paged, Product, ProductCategory } from '~/types/api'
+import { useMediaQuery } from '@vueuse/core'
+import type { Paged, Product, ProductCategory, ProductType } from '~/types/api'
 import { useToast } from '~/composables/useToast'
 import { useFormErrors } from '~/composables/useFormErrors'
 import { rule } from '~/utils/validation'
 import { formatMoney } from '~/utils/money'
 import { formatQty } from '~/utils/inventory'
 import { useCurrency } from '~/composables/useCurrency'
+import { useBranchOptions } from '~/composables/useBranchOptions'
 
 const { api } = useApi()
 const { can } = usePermissions()
@@ -143,6 +186,8 @@ const toast = useToast()
 const canManage = computed(() => can('inventory.manage'))
 // The product whose picture is shown large.
 const previewing = ref<Product | null>(null)
+// Phones and small tablets (under 768px) get a 2-column card grid instead of rows.
+const isPhone = useMediaQuery('(max-width: 767px)')
 const { fromUSD, load: loadCurrency, defaultCurrency, active: activeCurrencies } = useCurrency()
 // The other currency to show prices in: the default one, else the first other active currency.
 const altCurrency = computed(() => defaultCurrency.value !== 'USD' ? defaultCurrency.value : activeCurrencies.value.find(c => !c.base)?.code || '')
@@ -156,15 +201,22 @@ const error = ref('')
 const search = ref('')
 const categoryFilter = ref('')
 const activeFilter = ref('true')
+// Stock of one branch, or the total of the user's branches.
+const branchFilter = ref('')
+const { options: branchOptions, showFilter: showBranchFilter, labelFor: labelForBranch } = useBranchOptions('All my branches')
 const allCategories = ref<ProductCategory[]>([])
 
 const activeOptions = [{ value: 'true', label: 'Active' }, { value: 'false', label: 'Inactive' }, { value: '', label: 'All' }]
 const categoryFilterOptions = computed(() => [{ value: '', label: 'All categories' }, ...allCategories.value.map(c => ({ value: c.id, label: c.name }))])
-const categoryOptions = computed(() => [{ value: '', label: 'No category' }, ...allCategories.value.filter(c => c.is_active || c.id === form.category_id).map(c => ({ value: c.id, label: c.name }))])
+const categoryOptions = computed(() => allCategories.value.filter(c => c.is_active || c.id === form.category_id).map(c => ({ value: c.id, label: c.name })))
+const productTypes = [
+  { value: 'standard', label: 'Standard', hint: 'Stocked; has a cost and a sale price' },
+  { value: 'service', label: 'Service', hint: 'Only sold; a sale price, no stock' },
+] as const
 
-// Low when the branches' stock is at or under the product's low-stock level.
+// Low when the shown stock (one branch, or all of them) is at or under the product's low-stock level.
 function isLow(product: Product) {
-  return Number(product.reorder_level) > 0 && Number(product.quantity) <= Number(product.reorder_level)
+  return product.type !== 'service' && Number(product.reorder_level) > 0 && Number(product.quantity) <= Number(product.reorder_level)
 }
 
 let loadRequest = 0
@@ -174,7 +226,7 @@ async function load() {
   error.value = ''
   try {
     const result = await api<Paged<Product>>('/inventory/products', {
-      query: { page: page.value, page_size: pageSize, search: search.value || undefined, category_id: categoryFilter.value || undefined, active: activeFilter.value || undefined },
+      query: { page: page.value, page_size: pageSize, search: search.value || undefined, category_id: categoryFilter.value || undefined, active: activeFilter.value || undefined, branch_id: branchFilter.value || undefined },
     })
     if (request !== loadRequest) return
     items.value = result.items || []
@@ -194,7 +246,7 @@ async function loadCategories() {
   }
 }
 
-watch([search, categoryFilter, activeFilter], () => { page.value = 1; load() })
+watch([search, categoryFilter, activeFilter, branchFilter], () => { page.value = 1; load() })
 watch(page, load)
 onMounted(() => { load(); loadCategories(); loadCurrency() })
 
@@ -203,7 +255,7 @@ const formOpen = ref(false)
 const editing = ref<Product | null>(null)
 const saving = ref(false)
 const formError = ref('')
-const emptyForm = () => ({ name: '', category_id: '', unit: 'pcs', barcode: '', sale_price: '', cost_price: '', reorder_level: '', description: '', image_url: '', is_active: true })
+const emptyForm = () => ({ type: 'standard' as ProductType, name: '', category_id: '', unit: 'pcs', barcode: '', sale_price: '', cost_price: '', reorder_level: '', description: '', image_url: '', is_active: true })
 const form = reactive(emptyForm())
 
 // Picture: an uploaded file (stored in R2) or a web address; "none" removes it.
@@ -241,6 +293,10 @@ const formCheck = reactive(useFormErrors(
   () => ({ ...form }),
   () => ({
     name: [rule.required('name'), rule.minLength('name', 2), rule.maxLength('name', 191)],
+    category_id: [rule.required('category')],
+    // Every product needs a sale price; a standard (stocked) product also needs its usual cost.
+    sale_price: [rule.required('sale price'), rule.positiveAmount('sale price')],
+    cost_price: [(value: unknown) => form.type === 'service' ? '' : rule.required('usual cost')(value) || rule.positiveAmount('usual cost')(value)],
     image_url: [(value: unknown) => pictureMode.value !== 'url' || !value || /^https?:\/\/[^\s/]+/.test(String(value)) ? '' : 'enter a picture address starting with https://'],
     reorder_level: [(value: unknown) => value === '' || (Number(value) >= 0 && /^\d+(\.\d{1,4})?$/.test(String(value))) ? '' : 'low-stock level must be 0 or more'],
   }),
@@ -259,7 +315,7 @@ function openEdit(product: Product) {
   editing.value = product
   resetPicture(product)
   Object.assign(form, {
-    image_url: product.image_url || '', name: product.name, category_id: product.category_id || '', unit: product.unit, barcode: product.barcode || '',
+    image_url: product.image_url || '', type: product.type || 'standard', name: product.name, category_id: product.category_id || '', unit: product.unit, barcode: product.barcode || '',
     sale_price: String(Number(product.sale_price)), cost_price: String(Number(product.cost_price)),
     reorder_level: Number(product.reorder_level) ? String(Number(product.reorder_level)) : '', description: product.description || '', is_active: product.is_active,
   })

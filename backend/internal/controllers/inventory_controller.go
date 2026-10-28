@@ -173,6 +173,14 @@ func (ic *InventoryController) ListProducts(c *gin.Context) {
 		return
 	}
 	f := services.ProductFilter{Search: c.Query("search"), CategoryID: categoryID, BranchID: branchID}
+	switch v := c.Query("type"); v {
+	case models.ProductStandard, models.ProductService:
+		f.Type = v
+	case "":
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": "type must be standard or service"})
+		return
+	}
 	if v := c.Query("active"); v != "" {
 		active := v == "true"
 		f.Active = &active
@@ -373,6 +381,18 @@ type purchaseOut struct {
 	*services.PurchaseView
 	CanApprove bool `json:"can_approve"`
 	CanVoid    bool `json:"can_void"`
+	CanEdit    bool `json:"can_edit"`
+}
+
+// canEditPurchase: pending purchases with purchases.edit; approved ones also need purchases.approve.
+func canEditPurchase(status string, scope *accessScope) bool {
+	switch status {
+	case models.DocPending:
+		return scope.Can(permissions.PurchasesEdit)
+	case models.DocApproved:
+		return scope.Can(permissions.PurchasesEdit) && scope.Can(permissions.PurchasesApprove)
+	}
+	return false
 }
 
 func purchaseFlags(v *services.PurchaseView, scope *accessScope) purchaseOut {
@@ -380,6 +400,7 @@ func purchaseFlags(v *services.PurchaseView, scope *accessScope) purchaseOut {
 		PurchaseView: v,
 		CanApprove:   v.Status == models.DocPending && scope.Can(permissions.PurchasesApprove) && v.CreatedByID != scope.ActorID,
 		CanVoid:      (v.Status == models.DocPending || v.Status == models.DocApproved) && scope.Can(permissions.PurchasesVoid),
+		CanEdit:      canEditPurchase(v.Status, scope),
 	}
 }
 
@@ -437,6 +458,42 @@ func (ic *InventoryController) CreatePurchase(c *gin.Context) {
 	}
 	ic.record(c, actor.ActorID, "inventory.purchase.create", v.ID.String(), &v.BranchID, map[string]interface{}{"number": v.Number, "total": v.Total.String(), "currency": v.Currency, "status": v.Status})
 	c.JSON(http.StatusCreated, purchaseFlags(v, actor))
+}
+
+// UpdatePurchase changes a pending or approved purchase (approved: needs purchases.approve too).
+func (ic *InventoryController) UpdatePurchase(c *gin.Context) {
+	actor, scope, ok := ic.scope(c)
+	if !ok {
+		return
+	}
+	id, ok := paramID(c)
+	if !ok {
+		return
+	}
+	var in services.PurchaseInput
+	if !bindJSON(c, &in) {
+		return
+	}
+	current, err := ic.svc.GetPurchase(c.Request.Context(), id, scope)
+	if err != nil {
+		writeInventoryError(c, err)
+		return
+	}
+	if !canEditPurchase(current.Status, actor) {
+		msg := "this purchase can't be changed"
+		if current.Status == models.DocApproved {
+			msg = "only people who can approve purchases can change an approved purchase"
+		}
+		c.JSON(http.StatusForbidden, gin.H{"error": msg})
+		return
+	}
+	v, err := ic.svc.UpdatePurchase(c.Request.Context(), id, in, scope, actor.ActorID)
+	if err != nil {
+		writeInventoryError(c, err)
+		return
+	}
+	ic.record(c, actor.ActorID, "inventory.purchase.update", v.ID.String(), &v.BranchID, map[string]interface{}{"number": v.Number, "total": v.Total.String(), "currency": v.Currency, "status": v.Status, "before_total": current.Total.String()})
+	c.JSON(http.StatusOK, purchaseFlags(v, actor))
 }
 
 type decisionBody struct {
@@ -503,10 +560,35 @@ func (ic *InventoryController) VoidPurchase(c *gin.Context) {
 type saleOut struct {
 	*services.SaleView
 	CanVoid bool `json:"can_void"`
+	CanEdit bool `json:"can_edit"`
 }
 
 func saleFlags(v *services.SaleView, scope *accessScope) saleOut {
-	return saleOut{SaleView: v, CanVoid: v.Status == models.DocCompleted && scope.Can(permissions.SalesVoid)}
+	done := v.Status == models.DocCompleted
+	return saleOut{SaleView: v, CanVoid: done && scope.Can(permissions.SalesVoid), CanEdit: done && scope.Can(permissions.SalesEdit)}
+}
+
+// UpdateSale changes a completed sale (its stock is put back and taken out again).
+func (ic *InventoryController) UpdateSale(c *gin.Context) {
+	actor, scope, ok := ic.scope(c)
+	if !ok {
+		return
+	}
+	id, ok := paramID(c)
+	if !ok {
+		return
+	}
+	var in services.SaleInput
+	if !bindJSON(c, &in) {
+		return
+	}
+	v, err := ic.svc.UpdateSale(c.Request.Context(), id, in, scope, actor.ActorID)
+	if err != nil {
+		writeInventoryError(c, err)
+		return
+	}
+	ic.record(c, actor.ActorID, "inventory.sale.update", v.ID.String(), &v.BranchID, map[string]interface{}{"number": v.Number, "total": v.Total.String(), "currency": v.Currency})
+	c.JSON(http.StatusOK, saleFlags(v, actor))
 }
 
 func (ic *InventoryController) ListSales(c *gin.Context) {

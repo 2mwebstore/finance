@@ -29,8 +29,9 @@ button { -webkit-tap-highlight-color: transparent; }
 
 .pb-safe { padding-bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px)); }
 
+/* Phones: two-column forms stack. A grid that should stay two columns (product cards) adds keep-cols. */
 @media (max-width: 760px) {
-  .page-content .grid.grid-cols-2 { grid-template-columns: 1fr; }
+  .page-content .grid.grid-cols-2:not(.keep-cols) { grid-template-columns: 1fr; }
   .page-content .sm\\:grid-cols-2 { grid-template-columns: 1fr; }
   .page-content .rounded-xl { border-radius: 14px; }
 }

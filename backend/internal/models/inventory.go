@@ -26,6 +26,8 @@ type ProductCategory struct {
 // Product is an item the business buys and sells (shared by every branch). Prices and costs are
 // in USD (the base currency); a sale or purchase in KHR converts them at the exchange rate. The
 // SKU is generated.
+// A standard product is stocked (bought, sold, counted, moved); a service is only sold: it has no
+// stock and no cost.
 // Its picture is an uploaded file (ImageKey, in R2 or local storage) or a web address (ImageURL).
 type Product struct {
 	Base
@@ -34,6 +36,7 @@ type Product struct {
 	ImageType    string          `gorm:"size:64" json:"-"`
 	ImageURL     string          `gorm:"size:1024" json:"image_url"`
 	Name         string          `gorm:"size:191;index;not null" json:"name"`
+	Type         string          `gorm:"size:16;not null;default:'standard'" json:"type"` // standard or service
 	CategoryID   *uuid.UUID      `gorm:"type:char(36);index" json:"category_id,omitempty"`
 	Unit         string          `gorm:"size:32;not null;default:'pcs'" json:"unit"`
 	Barcode      string          `gorm:"size:64;index" json:"barcode"`
@@ -44,6 +47,12 @@ type Product struct {
 	Description  string          `gorm:"size:512" json:"description"`
 	IsActive     bool            `gorm:"default:true;not null" json:"is_active"`
 }
+
+// Product types.
+const (
+	ProductStandard = "standard"
+	ProductService  = "service"
+)
 
 // StockLevel is a product's stock in one branch, valued at average cost.
 type StockLevel struct {
@@ -59,8 +68,10 @@ type StockLevel struct {
 const (
 	MoveSale         = "sale"
 	MoveSaleVoid     = "sale_void"
+	MoveSaleEdit     = "sale_edit"
 	MovePurchase     = "purchase"
 	MovePurchaseVoid = "purchase_void"
+	MovePurchaseEdit = "purchase_edit"
 	MoveTransferOut  = "transfer_out"
 	MoveTransferIn   = "transfer_in"
 	MoveTransferVoid = "transfer_void"
@@ -142,6 +153,7 @@ type Sale struct {
 	BranchID        uuid.UUID  `gorm:"type:char(36);index;not null" json:"branch_id"`
 	Customer        string     `gorm:"size:191;index" json:"customer"`
 	SaleDate        time.Time  `gorm:"index;not null" json:"sale_date"`
+	DueDate         *time.Time `gorm:"index" json:"due_date"` // when the customer should pay by (optional)
 	Currency        string     `gorm:"size:3;not null" json:"currency"`
 	PaymentMethodID *uuid.UUID `gorm:"type:char(36)" json:"payment_method_id,omitempty"`
 	// Subtotal (lines after their discounts) − Discount + Shipping (charged to the customer) = Total.
@@ -173,6 +185,7 @@ type SaleItem struct {
 	// NetTotal is the line after its share of the sale's discount (for sales by product).
 	NetTotal     decimal.Decimal `gorm:"type:decimal(19,4);not null;default:0" json:"net_total"`
 	NetTotalBase decimal.Decimal `gorm:"type:decimal(19,4);not null;default:0" json:"net_total_base"` // NetTotal in USD
+	Note         string          `gorm:"size:255" json:"note"`
 }
 
 // StockTransfer moves stock from one branch to another (at the sending branch's average cost).
@@ -238,10 +251,10 @@ func InventoryModels() []interface{} {
 // InventoryColumns are columns added after the inventory tables first shipped; when one is
 // missing the start-up check brings the tables up to date.
 var InventoryColumns = map[interface{}][]string{
-	&Product{}:          {"image_key", "image_type", "image_url"},
+	&Product{}:          {"image_key", "image_type", "image_url", "type"},
 	&Purchase{}:         {"subtotal", "discount", "shipping", "payment_method_id", "exchange_rate", "total_base"},
 	&PurchaseItem{}:     {"discount", "landed_cost"},
-	&Sale{}:             {"subtotal", "discount", "shipping", "exchange_rate", "total_base"},
-	&SaleItem{}:         {"discount", "net_total", "net_total_base"},
+	&Sale{}:             {"subtotal", "discount", "shipping", "exchange_rate", "total_base", "due_date"},
+	&SaleItem{}:         {"discount", "net_total", "net_total_base", "note"},
 	&InventoryExpense{}: {"exchange_rate", "amount_base"},
 }

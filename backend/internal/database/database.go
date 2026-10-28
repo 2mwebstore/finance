@@ -83,6 +83,10 @@ func AutoMigrate(db *gorm.DB) error {
 	if err := db.AutoMigrate(models.InventoryModels()...); err != nil {
 		return err
 	}
+	// Platform tables come from SQL (with their foreign keys), not from the structs.
+	if err := EnsurePlatformTables(db); err != nil {
+		return err
+	}
 	// 4-digit PINs are valid again (PINs are 4 to 6 digits), so nobody has to replace theirs;
 	// drop the flag that sent those users to the profile page (see migration 000009).
 	if db.Migrator().HasColumn(&models.User{}, "pin_upgrade_required") {
@@ -153,6 +157,9 @@ func EnsureRequiredTables(db *gorm.DB) error {
 		return err
 	}
 	if err := ensureInventoryTables(db); err != nil {
+		return err
+	}
+	if err := EnsurePlatformTables(db); err != nil {
 		return err
 	}
 	return migrateLegacyAttachments(db)

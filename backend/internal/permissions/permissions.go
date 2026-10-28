@@ -53,14 +53,27 @@ const (
 	SalesView         = "sales.view"
 	SalesCreate       = "sales.create"
 	SalesVoid         = "sales.void"
+	SalesEdit         = "sales.edit"
 	PurchasesView     = "purchases.view"
 	PurchasesCreate   = "purchases.create"
 	PurchasesApprove  = "purchases.approve"
 	PurchasesVoid     = "purchases.void"
+	PurchasesEdit     = "purchases.edit"
 
 	InventoryExpensesView   = "inventory-expenses.view"
 	InventoryExpensesCreate = "inventory-expenses.create"
 	InventoryExpensesVoid   = "inventory-expenses.void"
+
+	// Platforms and weekly win/lose (an HQ is a branch).
+	PlatformsView              = "platforms.view"
+	PlatformsManage            = "platforms.manage"
+	PlatformAssignmentsManage  = "platform-assignments.manage"
+	WinLoseView                = "winlose.view"
+	WinLoseCreate              = "winlose.create"
+	WinLoseEdit                = "winlose.edit"
+	WinLoseReportsView         = "winlose-reports.view"
+	WinLoseReportsConsolidated = "winlose-reports.consolidated"
+	WinLoseSettlementsFinalize = "winlose-settlements.finalize"
 )
 
 // AllPermissions returns the full list for seeding.
@@ -118,13 +131,25 @@ func AllPermissions() []struct {
 		{SalesView, "View Sales", "Sales", "See sales of your branches"},
 		{SalesCreate, "Create Sales", "Sales", "Record sales; their stock goes out right away"},
 		{SalesVoid, "Void Sales", "Sales", "Void a sale and put its stock back"},
+		{SalesEdit, "Edit Sales", "Sales", "Change a sale; its goods are put back and the new lines taken out of stock"},
 		{PurchasesView, "View Purchases", "Purchases", "See purchases of your branches"},
 		{PurchasesCreate, "Create Purchases", "Purchases", "Record purchases from suppliers; stock goes in once approved"},
 		{PurchasesApprove, "Approve Purchases", "Purchases", "Approve or reject purchases; approved purchases add stock"},
 		{PurchasesVoid, "Void Purchases", "Purchases", "Void a purchase and take its stock back out"},
+		{PurchasesEdit, "Edit Purchases", "Purchases", "Change a pending purchase (an approved one also needs Approve Purchases)"},
 		{InventoryExpensesView, "View Inventory Expenses", "Inventory Expenses", "See inventory expenses of your branches"},
 		{InventoryExpensesCreate, "Create Inventory Expenses", "Inventory Expenses", "Record inventory expenses (shipping, packaging, storage…)"},
 		{InventoryExpensesVoid, "Void Inventory Expenses", "Inventory Expenses", "Void an inventory expense"},
+
+		{PlatformsView, "View Platforms", "Platforms", "See platforms and the HQs (branches) they are assigned to"},
+		{PlatformsManage, "Manage Platforms", "Platforms", "Add and edit platforms with their default rate and currency"},
+		{PlatformAssignmentsManage, "Manage HQ Platform Assignments", "Platforms", "Assign platforms to HQs with a commission rate; change, end or move assignments"},
+		{WinLoseView, "View Win/Lose", "Win/Lose", "See the weekly win/lose entered for your HQs"},
+		{WinLoseCreate, "Enter Win/Lose", "Win/Lose", "Enter a week's win/lose and commission for your HQs (once a week)"},
+		{WinLoseEdit, "Correct Win/Lose", "Win/Lose", "Change a week already saved, with a reason (kept in the audit log)"},
+		{WinLoseReportsView, "View Win/Lose Reports", "Win/Lose Reports", "The weekly report and the HQ summary for your HQs, one HQ at a time"},
+		{WinLoseReportsConsolidated, "View Consolidated Win/Lose", "Win/Lose Reports", "Combined totals across all your HQs (Main HQ view)"},
+		{WinLoseSettlementsFinalize, "Finalize Weekly Settlements", "Win/Lose Reports", "Finalize or reopen an HQ's week; a finalized week can't be changed"},
 	}
 }
 
@@ -168,9 +193,12 @@ func DefaultRoles() map[string]struct {
 				RolesView, RolesManage, PermissionsView,
 				CategoriesManage, AuditLogsView, SettingsManage,
 				InventoryView, InventoryManage, InventoryAdjust, InventoryTransfer,
-				SalesView, SalesCreate, SalesVoid,
-				PurchasesView, PurchasesCreate, PurchasesApprove, PurchasesVoid,
+				SalesView, SalesCreate, SalesVoid, SalesEdit,
+				PurchasesView, PurchasesCreate, PurchasesApprove, PurchasesVoid, PurchasesEdit,
 				InventoryExpensesView, InventoryExpensesCreate, InventoryExpensesVoid,
+				PlatformsView, PlatformsManage, PlatformAssignmentsManage,
+				WinLoseView, WinLoseCreate, WinLoseEdit,
+				WinLoseReportsView, WinLoseReportsConsolidated, WinLoseSettlementsFinalize,
 			},
 		},
 		"manager": {
@@ -186,9 +214,10 @@ func DefaultRoles() map[string]struct {
 				UsersView,
 				CategoriesManage,
 				InventoryView, InventoryAdjust,
-				SalesView, SalesCreate, SalesVoid,
-				PurchasesView, PurchasesCreate, PurchasesApprove,
+				SalesView, SalesCreate, SalesVoid, SalesEdit,
+				PurchasesView, PurchasesCreate, PurchasesApprove, PurchasesEdit,
 				InventoryExpensesView, InventoryExpensesCreate,
+				PlatformsView, WinLoseView, WinLoseCreate, WinLoseEdit, WinLoseReportsView,
 			},
 		},
 		"accountant": {
@@ -201,8 +230,9 @@ func DefaultRoles() map[string]struct {
 				TransactionsView,
 				ReportsView, ReportsExport,
 				BranchesView,
-				InventoryView, SalesView, PurchasesView, PurchasesCreate,
+				InventoryView, SalesView, PurchasesView, PurchasesCreate, PurchasesEdit,
 				InventoryExpensesView, InventoryExpensesCreate,
+				PlatformsView, WinLoseView, WinLoseCreate, WinLoseReportsView,
 			},
 		},
 		"cashier": {
@@ -227,6 +257,7 @@ func DefaultRoles() map[string]struct {
 				ReportsView,
 				BranchesView,
 				InventoryView, SalesView, PurchasesView, InventoryExpensesView,
+				PlatformsView, WinLoseView, WinLoseReportsView,
 			},
 		},
 	}

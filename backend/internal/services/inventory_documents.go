@@ -24,9 +24,10 @@ import (
 type DocItemInput struct {
 	ProductID string `json:"product_id" binding:"required,uuid"`
 	Quantity  string `json:"quantity" binding:"required"`
-	UnitPrice string `json:"unit_price"` // sales
-	UnitCost  string `json:"unit_cost"`  // purchases
-	Discount  string `json:"discount"`   // off this line, an amount (sales and purchases)
+	UnitPrice string `json:"unit_price"`             // sales
+	UnitCost  string `json:"unit_cost"`              // purchases
+	Discount  string `json:"discount"`               // off this line, an amount (sales and purchases)
+	Note      string `json:"note" binding:"max=255"` // sales: a note on the line
 }
 
 // DocLineView is a document line with the product's name.
@@ -40,7 +41,8 @@ type DocLineView struct {
 	UnitCost   decimal.Decimal `json:"unit_cost"`
 	Discount   decimal.Decimal `json:"discount"`
 	LineTotal  decimal.Decimal `json:"line_total"`
-	LandedCost decimal.Decimal `json:"landed_cost"` // purchases: unit cost with shipping and discounts
+	LandedCost decimal.Decimal `json:"landed_cost"`    // purchases: unit cost with shipping and discounts
+	Note       string          `json:"note,omitempty"` // sales
 }
 
 type DocFilter struct {
@@ -59,10 +61,12 @@ type parsedLine struct {
 	amount    decimal.Decimal // unit price (sale) or unit cost (purchase)
 	discount  decimal.Decimal // off the line
 	lineTotal decimal.Decimal // qty × amount − discount
+	note      string
 }
 
 // parseLines checks the lines: active products, quantities above zero, and prices or costs (in
-// the document's currency) of zero or more.
+// the document's currency) of zero or more. Services are only sold: purchases and transfers
+// (amountField unit_cost) can't have them.
 func (s *InventoryService) parseLines(ctx context.Context, items []DocItemInput, amountField string) ([]parsedLine, error) {
 	if len(items) == 0 {
 		return nil, fieldError("items", "add at least one product")
@@ -92,6 +96,9 @@ func (s *InventoryService) parseLines(ctx context.Context, items []DocItemInput,
 		if !ok || !p.IsActive {
 			return nil, fieldError("items", fmt.Sprintf("line %d: this product was not found or is inactive", i+1))
 		}
+		if amountField != "unit_price" && p.Type == models.ProductService {
+			return nil, fieldError("items", fmt.Sprintf("line %d (%s): a service has no stock, so it can't be bought or moved", i+1, p.Name))
+		}
 		qty, err := parseQuantity("items", it.Quantity)
 		if err != nil {
 			return nil, fieldError("items", fmt.Sprintf("line %d (%s): quantity must be above 0 (at most 4 decimals)", i+1, p.Name))
@@ -112,7 +119,7 @@ func (s *InventoryService) parseLines(ctx context.Context, items []DocItemInput,
 		if discount.GreaterThan(gross) {
 			return nil, fieldError("items", fmt.Sprintf("line %d (%s): the discount is more than the line", i+1, p.Name))
 		}
-		out = append(out, parsedLine{product: p, qty: qty, amount: amount, discount: discount, lineTotal: gross.Sub(discount)})
+		out = append(out, parsedLine{product: p, qty: qty, amount: amount, discount: discount, lineTotal: gross.Sub(discount), note: strings.TrimSpace(it.Note)})
 	}
 	return out, nil
 }
@@ -502,6 +509,7 @@ type SaleInput struct {
 	BranchID        string         `json:"branch_id" binding:"required,uuid"`
 	Customer        string         `json:"customer" binding:"max=191"`
 	SaleDate        string         `json:"sale_date"`
+	DueDate         string         `json:"due_date"` // optional, not before the sale date
 	Currency        string         `json:"currency" binding:"required,len=3"`
 	PaymentMethodID string         `json:"payment_method_id"` // empty: Cash
 	Discount        string         `json:"discount"`          // off the whole sale, an amount
@@ -521,12 +529,31 @@ type SaleView struct {
 	Lines         []DocLineView   `json:"lines"`
 }
 
+// parseDueDate reads a sale's optional due date, which can't be before the sale date.
+func (s *InventoryService) parseDueDate(raw string, saleDate time.Time) (*time.Time, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	due, err := s.parseDocDate("due_date", raw)
+	if err != nil {
+		return nil, err
+	}
+	if due.In(s.loc).Format("2006-01-02") < saleDate.In(s.loc).Format("2006-01-02") {
+		return nil, fieldError("due_date", "the due date can't be before the sale date")
+	}
+	return &due, nil
+}
+
 func (s *InventoryService) CreateSale(ctx context.Context, in SaleInput, scope BranchScope, actor uuid.UUID) (*SaleView, error) {
 	branchID := uuid.MustParse(in.BranchID)
 	if !scope.Has(branchID) {
 		return nil, ErrBranchAccessDenied
 	}
 	date, err := s.parseDocDate("sale_date", in.SaleDate)
+	if err != nil {
+		return nil, err
+	}
+	due, err := s.parseDueDate(in.DueDate, date)
 	if err != nil {
 		return nil, err
 	}
@@ -552,7 +579,7 @@ func (s *InventoryService) CreateSale(ctx context.Context, in SaleInput, scope B
 	}
 	sale := models.Sale{
 		Base: models.Base{ID: uuid.New()}, Number: number, BranchID: branchID,
-		Customer: strings.TrimSpace(in.Customer), SaleDate: date, Currency: in.Currency, PaymentMethodID: paymentID,
+		Customer: strings.TrimSpace(in.Customer), SaleDate: date, DueDate: due, Currency: in.Currency, PaymentMethodID: paymentID,
 		Subtotal: subtotal, Discount: discount, Shipping: shipping, Total: total,
 		Status: models.DocCompleted, Note: note, CreatedByID: actor,
 	}
@@ -568,7 +595,7 @@ func (s *InventoryService) CreateSale(ctx context.Context, in SaleInput, scope B
 		net := l.lineTotal.Sub(discountShares[i]).Round(4)
 		sale.Items[i] = models.SaleItem{
 			ID: uuid.New(), SaleID: sale.ID, ProductID: l.product.ID, Quantity: l.qty,
-			UnitPrice: l.amount, Discount: l.discount, LineTotal: l.lineTotal, NetTotal: net, NetTotalBase: toBase(net, in.Currency, rate),
+			UnitPrice: l.amount, Discount: l.discount, LineTotal: l.lineTotal, NetTotal: net, NetTotalBase: toBase(net, in.Currency, rate), Note: l.note,
 		}
 	}
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -699,7 +726,7 @@ func (s *InventoryService) saleViews(ctx context.Context, list []models.Sale) []
 		}
 		for _, it := range sale.Items {
 			prod := book.products[it.ProductID]
-			v.Lines = append(v.Lines, DocLineView{ProductID: it.ProductID, SKU: prod.SKU, Name: prod.Name, Unit: prod.Unit, Quantity: it.Quantity, UnitPrice: it.UnitPrice, UnitCost: it.UnitCost, Discount: it.Discount, LineTotal: it.LineTotal})
+			v.Lines = append(v.Lines, DocLineView{ProductID: it.ProductID, SKU: prod.SKU, Name: prod.Name, Unit: prod.Unit, Quantity: it.Quantity, UnitPrice: it.UnitPrice, UnitCost: it.UnitCost, Discount: it.Discount, LineTotal: it.LineTotal, Note: it.Note})
 		}
 		v.Items = nil
 		out[i] = v

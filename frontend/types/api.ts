@@ -254,6 +254,9 @@ export interface ProductCategory {
 }
 
 /** A product (shared by every branch) with its stock: one branch, or the user's branches added up. */
+/** standard: stocked (bought, sold, counted, moved). service: only sold; no stock and no cost. */
+export type ProductType = 'standard' | 'service'
+
 export interface Product {
   id: string
   /** Generated when the product is added (SKU-000001). */
@@ -263,6 +266,7 @@ export interface Product {
   has_image?: boolean
   updated_at?: string
   name: string
+  type: ProductType
   category_id?: string | null
   category_name?: string
   unit: string
@@ -297,7 +301,7 @@ export interface StockRow {
   updated_at: string
 }
 
-export type StockMovementType = 'sale' | 'sale_void' | 'purchase' | 'purchase_void' | 'transfer_out' | 'transfer_in' | 'transfer_void' | 'adjustment'
+export type StockMovementType = 'sale' | 'sale_void' | 'sale_edit' | 'purchase' | 'purchase_void' | 'purchase_edit' | 'transfer_out' | 'transfer_in' | 'transfer_void' | 'adjustment'
 
 export interface StockMovement {
   id: string
@@ -331,6 +335,8 @@ export interface DocLine {
   line_total: string
   /** Purchases: unit cost into stock, with the purchase's shipping and discount spread in. */
   landed_cost?: string
+  /** Sales: a note on the line. */
+  note?: string
 }
 
 export interface Purchase {
@@ -364,6 +370,8 @@ export interface Purchase {
   created_at: string
   can_approve: boolean
   can_void: boolean
+  can_edit: boolean
+  payment_method_id?: string | null
 }
 
 export interface Sale {
@@ -374,6 +382,8 @@ export interface Sale {
   branch_name: string
   customer: string
   sale_date: string
+  /** When the customer should pay by (optional). */
+  due_date?: string | null
   currency: Currency
   payment_method: string
   subtotal: string
@@ -394,6 +404,8 @@ export interface Sale {
   lines: DocLine[]
   created_at: string
   can_void: boolean
+  can_edit: boolean
+  payment_method_id?: string | null
 }
 
 export interface StockTransfer {
@@ -472,6 +484,8 @@ export interface DocLineForm {
   /** Typed as an amount or a percent of the line; sent as an amount. */
   discount: string
   discount_mode: DiscountMode
+  /** Sales: a note on the line. */
+  note?: string
 }
 
 export type DiscountMode = 'amount' | 'percent'
@@ -500,4 +514,135 @@ export interface InventoryExpense {
   void_reason: string
   created_at: string
   can_void: boolean
+}
+
+// ===== Platforms and weekly win/lose (an HQ is a branch) =====
+// Win/lose is entered once a week (Monday to Sunday). `jame_ps` is what the app shows as "Total".
+
+/** An outside platform (LCMMJB, 12K_YMLLJB_V1…). Rates are percents: 35 = 35%. */
+export interface Platform {
+  id: string
+  code: string
+  name: string
+  default_rate: string
+  default_currency: Currency
+  is_active: boolean
+  /** How many HQs have it now. */
+  active_hqs: number
+}
+
+/** A platform given to an HQ with its own rate and currency; ended ones are kept as history. */
+export interface PlatformAssignment {
+  id: string
+  branch_id: string
+  branch_code: string
+  branch_name: string
+  platform_id: string
+  platform_code: string
+  platform_name: string
+  commission_rate: string
+  currency: Currency
+  is_active: boolean
+  starts_on: string
+  ends_on: string | null
+  end_reason: string
+  created_by: string
+  ended_by: string
+  /** Weeks entered under this assignment. */
+  weeks: number
+}
+
+export interface WinLoseFormula {
+  version: string
+  description: string
+  /** False until the business has checked the formula against real figures. */
+  confirmed: boolean
+}
+
+export interface WeekSheetRow {
+  platform_id: string
+  platform_code: string
+  platform_name: string
+  assignment_id: string
+  commission_rate: string
+  currency: Currency
+  saved: boolean
+  win_lose: string | null
+  commission: string | null
+  /** Shown as "Total". */
+  jame_ps: string | null
+  formula_version: string
+  updated_by: string
+  updated_at: string | null
+}
+
+/** An HQ's week (Monday to Sunday): every platform it had that week. */
+export interface WeekSheet {
+  week_start: string
+  week_end: string
+  branch_id: string
+  branch_code: string
+  branch_name: string
+  formula: WinLoseFormula
+  settlement: { id: string; status: 'finalized' | 'reopened'; week_start: string; week_end: string } | null
+  /** The week is finalized: nothing can change. */
+  locked: boolean
+  rows: WeekSheetRow[]
+}
+
+export interface WinLosePreview {
+  platform_id: string
+  commission_rate: string
+  currency: Currency
+  formula_version: string
+  jame_ps: string
+}
+
+/** Totals in one currency (currencies are never added together). */
+export interface WinLoseSums {
+  currency: Currency
+  win_lose: string
+  commission: string
+  /** Shown as "Total". */
+  jame_ps: string
+  /** Weekly results added up. */
+  entries: number
+}
+
+export interface WinLoseReportLine extends WinLoseSums {
+  branch_id: string
+  branch_code: string
+  branch_name: string
+  platform_id: string
+  platform_code: string
+  platform_name: string
+  rate_min: string
+  rate_max: string
+}
+
+export interface WinLoseReport {
+  date_from: string
+  date_to: string
+  /** Every HQ in the user's scope (Main HQ view); otherwise one HQ. */
+  consolidated: boolean
+  lines: WinLoseReportLine[]
+  hqs: { branch_id: string; branch_code: string; branch_name: string; totals: WinLoseSums[] }[]
+  platforms: { platform_id: string; platform_code: string; platform_name: string; totals: WinLoseSums[] }[]
+  totals: WinLoseSums[]
+}
+
+export interface WeeklySettlement {
+  id: string
+  branch_id: string
+  branch_code: string
+  branch_name: string
+  week_start: string
+  week_end: string
+  status: 'finalized' | 'reopened'
+  finalized_by: string
+  finalized_at: string
+  reopened_by: string
+  reopened_at: string | null
+  reopen_reason: string
+  totals: WinLoseSums[]
 }

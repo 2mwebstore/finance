@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/cambodia-finance/income-expense/internal/models"
+	"github.com/cambodia-finance/income-expense/internal/winlose"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -42,12 +43,17 @@ func (s *SettingsService) Set(ctx context.Context, key, value string, actorID uu
 	allowed := map[string]bool{
 		"company_name": true, "timezone": true, "default_currency": true,
 		"fiscal_year_start_month": true, "support_email": true,
+		FormulaSettingKey: true,
 	}
 	if !allowed[key] {
 		return ErrInvalidSettingKey
 	}
 	if key == "default_currency" && value != "USD" && value != "KHR" {
 		return errors.New("currency must be USD or KHR")
+	}
+	// The win/lose formula for new days: one of the versions in internal/winlose.
+	if _, ok := winlose.Lookup(value); key == FormulaSettingKey && !ok {
+		return errors.New("unknown win/lose formula version")
 	}
 	row := models.AppSetting{
 		Key: key, Value: value, UpdatedBy: &actorID, UpdatedAt: time.Now(),

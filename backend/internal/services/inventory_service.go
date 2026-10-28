@@ -93,6 +93,17 @@ func parseMoney(field, raw string) (decimal.Decimal, error) {
 	return d, nil
 }
 
+// requiredPrice: a product price that must be filled in and above 0 (raw is what was typed).
+func requiredPrice(field, label, raw string, value decimal.Decimal) error {
+	if strings.TrimSpace(raw) == "" {
+		return fieldError(field, label+" is required")
+	}
+	if !value.IsPositive() {
+		return fieldError(field, label+" must be greater than 0")
+	}
+	return nil
+}
+
 // parseDocDate reads YYYY-MM-DD (or RFC3339) in the business time zone; empty is now.
 func (s *InventoryService) parseDocDate(field, raw string) (time.Time, error) {
 	raw = strings.TrimSpace(raw)
@@ -233,12 +244,13 @@ func (s *InventoryService) SaveCategory(ctx context.Context, id *uuid.UUID, in P
 // ProductInput: the SKU is generated when a product is added and never changes.
 type ProductInput struct {
 	Name         string `json:"name" binding:"required,min=2,max=191"`
+	Type         string `json:"type" binding:"omitempty,oneof=standard service"` // empty: standard (new) or unchanged
 	CategoryID   string `json:"category_id"`
 	Unit         string `json:"unit" binding:"max=32"`
 	Barcode      string `json:"barcode" binding:"max=64"`
-	SalePrice    string `json:"sale_price"` // prices and costs are in USD
-	CostPrice    string `json:"cost_price"`
-	ReorderLevel string `json:"reorder_level"`
+	SalePrice    string `json:"sale_price"`    // prices and costs are in USD
+	CostPrice    string `json:"cost_price"`    // services: ignored (0)
+	ReorderLevel string `json:"reorder_level"` // services: ignored (0)
 	Description  string `json:"description" binding:"max=512"`
 	// ImageURL: a picture on the web (https://…). Empty keeps an uploaded picture.
 	ImageURL string `json:"image_url" binding:"max=1024"`
@@ -260,6 +272,7 @@ type ProductFilter struct {
 	CategoryID *uuid.UUID
 	Active     *bool
 	BranchID   *uuid.UUID // stock of this branch (else the scope's total)
+	Type       string     // standard or service (empty: both)
 	Page       int
 	PageSize   int
 }
@@ -275,6 +288,9 @@ func (s *InventoryService) ListProducts(ctx context.Context, f ProductFilter, sc
 	}
 	if f.Active != nil {
 		q = q.Where("products.is_active = ?", *f.Active)
+	}
+	if f.Type != "" {
+		q = q.Where("products.type = ?", f.Type)
 	}
 	var total int64
 	if err := q.Count(&total).Error; err != nil {
@@ -344,7 +360,7 @@ func (s *InventoryService) SaveProduct(ctx context.Context, id *uuid.UUID, in Pr
 			return nil, notFound(err)
 		}
 	} else {
-		p = models.Product{Base: models.Base{ID: uuid.New()}, IsActive: true}
+		p = models.Product{Base: models.Base{ID: uuid.New()}, Type: models.ProductStandard, IsActive: true}
 		sku, err := s.newSKU(ctx)
 		if err != nil {
 			return nil, err
@@ -358,18 +374,30 @@ func (s *InventoryService) SaveProduct(ctx context.Context, id *uuid.UUID, in Pr
 			return nil, fieldError("image_url", "enter a picture address starting with https://")
 		}
 	}
-	var categoryID *uuid.UUID
-	if strings.TrimSpace(in.CategoryID) != "" {
-		cid, err := uuid.Parse(in.CategoryID)
-		if err != nil {
-			return nil, fieldError("category_id", "choose a valid category")
+	if in.Type != "" && in.Type != p.Type {
+		if id != nil {
+			used, err := s.productUsed(ctx, p.ID)
+			if err != nil {
+				return nil, err
+			}
+			if used {
+				return nil, fieldError("type", "this product has already been bought, sold or stocked, so its type can't change; add a new product instead")
+			}
 		}
-		var cat models.ProductCategory
-		if err := s.db.WithContext(ctx).First(&cat, "id = ?", cid).Error; err != nil {
-			return nil, fieldError("category_id", "this category was not found")
-		}
-		categoryID = &cid
+		p.Type = in.Type
 	}
+	if strings.TrimSpace(in.CategoryID) == "" {
+		return nil, fieldError("category_id", "choose a category")
+	}
+	cid, err := uuid.Parse(in.CategoryID)
+	if err != nil {
+		return nil, fieldError("category_id", "choose a valid category")
+	}
+	var cat models.ProductCategory
+	if err := s.db.WithContext(ctx).First(&cat, "id = ?", cid).Error; err != nil {
+		return nil, fieldError("category_id", "this category was not found")
+	}
+	categoryID := &cid
 	sale, err := parseMoney("sale_price", in.SalePrice)
 	if err != nil {
 		return nil, err
@@ -384,6 +412,16 @@ func (s *InventoryService) SaveProduct(ctx context.Context, id *uuid.UUID, in Pr
 		if err != nil || reorder.IsNegative() || reorder.Exponent() < -4 || reorder.GreaterThan(maxQuantity) {
 			return nil, fieldError("reorder_level", "low-stock level must be 0 or more")
 		}
+	}
+	// Every product needs a sale price; a standard (stocked) product also needs its usual cost.
+	// A service has no stock, so no cost and no low-stock alert.
+	if err := requiredPrice("sale_price", "sale price", in.SalePrice, sale); err != nil {
+		return nil, err
+	}
+	if p.Type == models.ProductService {
+		cost, reorder = decimal.Zero, decimal.Zero
+	} else if err := requiredPrice("cost_price", "usual cost", in.CostPrice, cost); err != nil {
+		return nil, err
 	}
 	unit := strings.TrimSpace(in.Unit)
 	if unit == "" {
@@ -406,6 +444,20 @@ func (s *InventoryService) SaveProduct(ctx context.Context, id *uuid.UUID, in Pr
 	}
 	s.removeStored(ctx, oldKey)
 	return &p, nil
+}
+
+// productUsed: the product is on a sale, purchase or transfer, or its stock has moved.
+func (s *InventoryService) productUsed(ctx context.Context, id uuid.UUID) (bool, error) {
+	for _, table := range []interface{}{&models.StockMovement{}, &models.SaleItem{}, &models.PurchaseItem{}, &models.StockTransferItem{}} {
+		var n int64
+		if err := s.db.WithContext(ctx).Model(table).Where("product_id = ?", id).Limit(1).Count(&n).Error; err != nil {
+			return false, err
+		}
+		if n > 0 {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // newSKU is the next free SKU-000001 style code.
@@ -646,8 +698,15 @@ type move struct {
 
 // applyMove changes the stock inside tx (the stock row is locked) and records the movement. It
 // returns the average cost before the change, the cost of stock going out. Stock never goes
-// below zero.
+// below zero. A service has no stock: nothing moves and it costs nothing.
 func (s *InventoryService) applyMove(tx *gorm.DB, m move) (decimal.Decimal, error) {
+	var kind string
+	if err := tx.Unscoped().Model(&models.Product{}).Select("type").Where("id = ?", m.productID).Scan(&kind).Error; err != nil {
+		return decimal.Zero, err
+	}
+	if kind == models.ProductService {
+		return decimal.Zero, nil
+	}
 	now := time.Now()
 	seed := models.StockLevel{ID: uuid.New(), BranchID: m.branchID, ProductID: m.productID, UpdatedAt: now}
 	if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&seed).Error; err != nil {
@@ -739,6 +798,9 @@ func (s *InventoryService) Adjust(ctx context.Context, in AdjustInput, scope Bra
 	var product models.Product
 	if err := s.db.WithContext(ctx).First(&product, "id = ?", productID).Error; err != nil {
 		return nil, fieldError("product_id", "this product was not found")
+	}
+	if product.Type == models.ProductService {
+		return nil, fieldError("product_id", "a service has no stock to adjust")
 	}
 	var qty decimal.Decimal
 	var err error

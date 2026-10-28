@@ -3,6 +3,7 @@ package services
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
@@ -131,6 +132,38 @@ func TestCleanNote(t *testing.T) {
 	}
 	if _, err := cleanNote(strings.Repeat("a", 1001)); err == nil {
 		t.Error("a note over 1000 characters is refused")
+	}
+}
+
+func TestRequiredPrice(t *testing.T) {
+	if err := requiredPrice("sale_price", "sale price", "", decimal.Zero); err == nil || !strings.Contains(err.Error(), "required") {
+		t.Errorf("an empty price is refused as required, got %v", err)
+	}
+	if err := requiredPrice("sale_price", "sale price", "0", decimal.Zero); err == nil || !strings.Contains(err.Error(), "greater than 0") {
+		t.Errorf("a price of 0 is refused, got %v", err)
+	}
+	if err := requiredPrice("cost_price", "usual cost", "1.25", d("1.25")); err != nil {
+		t.Errorf("a price above 0 is accepted, got %v", err)
+	}
+}
+
+func TestParseDueDate(t *testing.T) {
+	s := &InventoryService{loc: time.FixedZone("ICT", 7*3600)}
+	sold, _ := s.parseDocDate("sale_date", "2026-10-28")
+	if due, err := s.parseDueDate("", sold); err != nil || due != nil {
+		t.Errorf("no due date: got %v, %v", due, err)
+	}
+	if due, err := s.parseDueDate("2026-10-28", sold); err != nil || due == nil {
+		t.Errorf("due the day of the sale should be accepted, got %v", err)
+	}
+	if due, err := s.parseDueDate("2026-11-27", sold); err != nil || due.Format("2006-01-02") != "2026-11-27" {
+		t.Errorf("due in 30 days: got %v, %v", due, err)
+	}
+	if _, err := s.parseDueDate("2026-10-27", sold); err == nil {
+		t.Error("a due date before the sale date is refused")
+	}
+	if _, err := s.parseDueDate("27/10/2026", sold); err == nil {
+		t.Error("a date that isn't YYYY-MM-DD is refused")
 	}
 }
 

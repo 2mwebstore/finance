@@ -32,11 +32,22 @@
           </div>
         </div>
         <p v-if="role.description" class="mt-2 text-xs text-muted">{{ role.description }}</p>
-        <div v-if="role.permissions?.length" class="mt-3 flex flex-wrap gap-1.5">
-          <span v-for="permission in shownPermissions(role)" :key="permission.id || permission.code" class="rounded-md border border-border bg-canvas px-2 py-1 font-mono text-[9px] text-navy">{{ permission.code || permission.name }}</span>
-          <button v-if="role.permissions.length > PERMISSION_PREVIEW" type="button" class="rounded-md bg-blue-50 px-2 py-1 text-[10px] font-semibold text-primary" :aria-expanded="!!expandedRoles[role.id]" @click="expandedRoles[role.id] = !expandedRoles[role.id]">
-            {{ expandedRoles[role.id] ? 'Show less' : `+${role.permissions.length - PERMISSION_PREVIEW} more` }}
-          </button>
+        <!-- What the role can open, laid out like the sidebar: a row per section, a chip per page. -->
+        <div v-if="role.permissions?.length" class="mt-3 space-y-2 border-t border-border pt-3">
+          <div v-for="section in roleMenu(role)" :key="section.caption || 'main'" class="flex flex-col gap-1 sm:flex-row sm:items-start sm:gap-3">
+            <p class="shrink-0 pt-1 text-[9px] font-bold tracking-[0.13em] text-slate-400 sm:w-32">{{ section.caption }}</p>
+            <div class="flex flex-wrap gap-1.5">
+              <span
+                v-for="page in section.pages"
+                :key="page.key"
+                class="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-semibold"
+                :class="page.full ? 'border-blue-200 bg-blue-50 text-primary' : 'border-border bg-canvas text-navy'"
+                :title="page.items.map(item => item.name).join(', ')"
+              >
+                <component :is="page.icon" :size="12" class="shrink-0" />{{ page.label }}<span v-if="!page.full" class="font-medium text-muted">{{ page.items.length }}/{{ page.codes.length }}</span>
+              </span>
+            </div>
+          </div>
         </div>
         <p v-else class="mt-3 text-xs text-muted">No permissions assigned.</p>
       </article>
@@ -67,7 +78,7 @@
           </p>
           <div>
             <h3 class="mb-1 text-sm font-semibold text-navy">Permissions</h3>
-            <p class="mb-3 text-xs text-muted">Tick what this role can do. Use a module's top checkbox to give or remove the whole module.<template v-if="!hasFullAccess"> You can give only permissions you have yourself.</template></p>
+            <p class="mb-3 text-xs text-muted">Grouped like the sidebar. Tick what this role can do; a page's checkbox gives or removes all of that page, and a section's the whole section.<template v-if="!hasFullAccess"> You can give only permissions you have yourself.</template></p>
             <PermissionPanel v-model="form.permission_codes" :permissions="grantablePermissions" :disabled="saving" />
           </div>
           <AppAlert v-if="formError || formCheck.messages.length" :title="formError ? 'Couldn’t save this role' : 'Check the highlighted fields'" :message="formError" :items="formCheck.messages" dismissible @dismiss="formError = ''; formCheck.reset()" />
@@ -95,7 +106,7 @@ import { Building2, Pencil, Plus, Trash2, X } from 'lucide-vue-next'
 import type { Permission, Role } from '~/types/api'
 import { useToast } from '~/composables/useToast'
 import { rule } from '~/utils/validation'
-import { PERMISSION_CATALOG, permissionModuleRank } from '~/utils/permissions'
+import { groupByMenu } from '~/utils/permissionMenu'
 import { useFormErrors } from '~/composables/useFormErrors'
 import { useBranchOptions } from '~/composables/useBranchOptions'
 
@@ -156,17 +167,12 @@ function scopeHint(role: Role) {
 function scopeTone(role: Role) {
   return seesAll(role) ? 'bg-emerald-50 text-emerald-700' : 'bg-blue-50 text-primary'
 }
-// Long permission lists are cut to a preview so a role card stays short on phones.
-const PERMISSION_PREVIEW = 8
-const expandedRoles = reactive<Record<string, boolean>>({})
-
-// Same order as the permission picker: sidebar modules, then view/create/edit… within each.
-const catalogOrder = new Map(PERMISSION_CATALOG.map((permission, index) => [permission.code, index]))
-function shownPermissions(role: Role) {
-  const list = [...(role.permissions || [])].sort((a, b) =>
-    permissionModuleRank(a.module || '') - permissionModuleRank(b.module || '')
-    || (catalogOrder.get(a.code) ?? Number.MAX_SAFE_INTEGER) - (catalogOrder.get(b.code) ?? Number.MAX_SAFE_INTEGER))
-  return expandedRoles[role.id] ? list : list.slice(0, PERMISSION_PREVIEW)
+// A role's permissions grouped like the sidebar; a page shows n/m when only some of it is given.
+function roleMenu(role: Role) {
+  return groupByMenu(role.permissions || []).map(section => ({
+    ...section,
+    pages: section.pages.map(page => ({ ...page, full: page.items.length >= page.codes.length })),
+  }))
 }
 
 const search = ref('')

@@ -2,7 +2,7 @@
 
 Server-side authorization is enforced on every protected API. The UI uses the same codes for visibility only.
 
-**Total: 30 permissions** across 10 modules.
+**Total: 57 permissions** across 18 modules.
 
 ## Full table
 
@@ -45,14 +45,25 @@ Server-side authorization is enforced on every protected API. The UI uses the sa
 | `inventory.transfer` | Transfer Stock | Inventory | Move stock between branches |
 | `sales.view` | View Sales | Sales | See sales of your branches |
 | `sales.create` | Create Sales | Sales | Record sales; their stock goes out right away |
+| `sales.edit` | Edit Sales | Sales | Change a sale; its goods are put back and the new lines taken out of stock |
 | `sales.void` | Void Sales | Sales | Void a sale and put its stock back |
 | `purchases.view` | View Purchases | Purchases | See purchases of your branches |
 | `purchases.create` | Create Purchases | Purchases | Record purchases from suppliers; stock goes in once approved |
 | `purchases.approve` | Approve Purchases | Purchases | Approve or reject purchases; approved purchases add stock |
+| `purchases.edit` | Edit Purchases | Purchases | Change a pending purchase (an approved one also needs Approve Purchases) |
 | `purchases.void` | Void Purchases | Purchases | Void a purchase and take its stock back out |
 | `inventory-expenses.view` | View Inventory Expenses | Inventory Expenses | See inventory expenses of your branches |
 | `inventory-expenses.create` | Create Inventory Expenses | Inventory Expenses | Record inventory expenses (shipping, packaging, storage…) |
 | `inventory-expenses.void` | Void Inventory Expenses | Inventory Expenses | Void an inventory expense |
+| `platforms.view` | View Platforms | Platforms | See platforms and the HQs (branches) they are assigned to |
+| `platforms.manage` | Manage Platforms | Platforms | Add and edit platforms with their default rate and currency |
+| `platform-assignments.manage` | Manage HQ Platform Assignments | Platforms | Assign platforms to HQs with a commission rate; change, end or move assignments |
+| `winlose.view` | View Win/Lose | Win/Lose | See the weekly win/lose entered for your HQs |
+| `winlose.create` | Enter Win/Lose | Win/Lose | Enter a week's win/lose and commission for your HQs (once a week) |
+| `winlose.edit` | Correct Win/Lose | Win/Lose | Change a week already saved, with a reason (kept in the audit log) |
+| `winlose-reports.view` | View Win/Lose Reports | Win/Lose Reports | The weekly report and the HQ summary for your HQs, one HQ at a time |
+| `winlose-reports.consolidated` | View Consolidated Win/Lose | Win/Lose Reports | Combined totals across all your HQs (Main HQ view) |
+| `winlose-settlements.finalize` | Finalize Weekly Settlements | Win/Lose Reports | Finalize or reopen an HQ's week; a finalized week can't be changed |
 
 ## By module
 
@@ -134,16 +145,35 @@ Inventory is separate from income/expense. Products are shared by every branch; 
 | `inventory.transfer` | Move stock between branches |
 | `sales.view` | See sales of your branches |
 | `sales.create` | Record sales; their stock goes out right away |
+| `sales.edit` | Change a sale; its goods are put back and the new lines taken out of stock |
 | `sales.void` | Void a sale and put its stock back |
 | `purchases.view` | See purchases of your branches |
 | `purchases.create` | Record purchases from suppliers; stock goes in once approved |
 | `purchases.approve` | Approve or reject purchases; approved purchases add stock |
+| `purchases.edit` | Change a pending purchase (an approved one also needs Approve Purchases) |
 | `purchases.void` | Void a purchase and take its stock back out |
 | `inventory-expenses.view` | See inventory expenses of your branches |
 | `inventory-expenses.create` | Record inventory expenses (shipping, packaging, storage…) |
 | `inventory-expenses.void` | Void an inventory expense |
 
 Inventory expenses use their own categories (type `inv_expense`, managed with `inventory.manage` on Inventory → Expense categories) and come off the sales profit as net profit. Inventory reports (stock value, sales and profit, purchases, expenses, low stock) need both `reports.view` and `inventory.view`. Nobody approves a purchase they created; people with `purchases.approve` record their own purchases as approved unless they send them for approval.
+
+### Platforms & weekly win/lose
+An HQ is a branch: people enter and see win/lose only for their own branches (owner/admin see every branch). A platform can be assigned to many HQs and an HQ can have many platforms, each assignment with its own commission rate (percent) and currency.
+
+| Code | Description |
+|------|-------------|
+| `platforms.view` | See platforms and the HQs (branches) they are assigned to |
+| `platforms.manage` | Add and edit platforms with their default rate and currency |
+| `platform-assignments.manage` | Assign platforms to HQs with a commission rate; change, end or move assignments |
+| `winlose.view` | See the weekly win/lose entered for your HQs |
+| `winlose.create` | Enter a week's win/lose and commission for your HQs (once a week) |
+| `winlose.edit` | Change a week already saved, with a reason (kept in the audit log) |
+| `winlose-reports.view` | The weekly report and the HQ summary for your HQs, one HQ at a time |
+| `winlose-reports.consolidated` | Combined totals across all your HQs (Main HQ view) |
+| `winlose-settlements.finalize` | Finalize or reopen an HQ's week; a finalized week can't be changed |
+
+Win/lose is entered once a week (Monday to Sunday) per HQ and platform. A saved week keeps the rate, currency and formula version it was worked out with; changing it needs `winlose.edit` and a reason (audit log). A finalized week can't be changed until someone with `winlose-settlements.finalize` reopens it. Reports without one HQ chosen (all your HQs together) need `winlose-reports.consolidated`. Owner/admin (Manage Branches) get these permissions automatically when they first ship.
 
 ## Default system roles (summary)
 
@@ -160,7 +190,7 @@ Exact role → permission mappings are seeded in `backend/internal/permissions` 
 
 ## Machine-readable catalog
 
-Project root: [`permissions.catalog.json`](../permissions.catalog.json) (46 entries, versioned).
+Project root: [`permissions.catalog.json`](../permissions.catalog.json) (48 entries, versioned).
 
 ## Source of truth
 

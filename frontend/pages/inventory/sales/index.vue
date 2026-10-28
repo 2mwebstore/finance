@@ -6,7 +6,10 @@
         <h1 class="text-xl font-bold text-navy">Sales</h1>
         <p class="mt-1 text-xs text-muted">Goods sold by your branches. Stock goes out as soon as a sale is saved.</p>
       </div>
-      <button v-if="canCreate" type="button" class="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white hover:bg-primary-hover" @click="openCreate"><Plus :size="16" /> New sale</button>
+      <div v-if="canCreate" class="flex gap-2">
+        <NuxtLink to="/inventory/pos" class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-white px-3 py-2 text-sm font-medium text-navy hover:bg-canvas"><Store :size="16" /> Open POS</NuxtLink>
+        <button type="button" class="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white hover:bg-primary-hover" @click="openCreate"><Plus :size="16" /> New sale</button>
+      </div>
     </header>
 
     <div class="flex flex-col gap-2 lg:flex-row lg:items-center">
@@ -27,7 +30,7 @@
             <span class="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-emerald-50 text-income"><ShoppingCart :size="18" /></span>
             <div class="min-w-0">
               <div class="flex flex-wrap items-center gap-2"><strong class="font-mono text-sm text-navy">{{ sale.number }}</strong><InventoryStatusBadge :status="sale.status" /></div>
-              <p class="mt-0.5 truncate text-xs text-muted">{{ formatDocDate(sale.sale_date) }} · {{ sale.branch_code }}<template v-if="sale.customer"> · {{ sale.customer }}</template> · {{ sale.lines.length }} {{ sale.lines.length === 1 ? 'item' : 'items' }}</p>
+              <p class="mt-0.5 truncate text-xs text-muted">{{ formatDocDate(sale.sale_date) }} · {{ sale.branch_code }}<template v-if="sale.customer"> · {{ sale.customer }}</template><template v-if="sale.due_date"> · due {{ formatDocDate(sale.due_date) }}</template> · {{ sale.lines.length }} {{ sale.lines.length === 1 ? 'item' : 'items' }}</p>
               <p class="mt-0.5 text-[11px] text-slate-400">by {{ sale.created_by }}</p>
             </div>
           </div>
@@ -49,6 +52,7 @@
           <InventoryStatusBadge :status="detail.status" />
           <span v-if="detail.customer">Customer: <strong class="text-navy">{{ detail.customer }}</strong></span>
           <span v-if="detail.payment_method">· Paid by {{ detail.payment_method }}</span>
+          <span v-if="detail.due_date">· Due <strong class="text-navy">{{ formatDocDate(detail.due_date) }}</strong></span>
           <span>· by {{ detail.created_by }}</span>
         </div>
         <InventoryDocLines class="mt-3" :lines="detail.lines" :currency="detail.currency" price-field="unit_price" />
@@ -63,6 +67,7 @@
       </template>
       <template #footer>
         <button type="button" class="border border-border bg-white text-muted" @click="detail = null">Close</button>
+        <button v-if="detail?.can_edit" type="button" class="border border-border bg-white text-navy" @click="navigateTo(`/inventory/sales/${detail.id}/edit`)">Edit</button>
         <button v-if="detail?.can_void" type="button" class="bg-expense text-white" @click="voidOpen = true">Void sale</button>
       </template>
     </AppModal>
@@ -72,7 +77,7 @@
 </template>
 
 <script setup lang="ts">
-import { Plus, ShoppingCart } from 'lucide-vue-next'
+import { Plus, ShoppingCart, Store } from 'lucide-vue-next'
 import type { Paged, Sale } from '~/types/api'
 import { useToast } from '~/composables/useToast'
 import { useBranchOptions } from '~/composables/useBranchOptions'

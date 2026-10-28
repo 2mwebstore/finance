@@ -65,6 +65,7 @@
       </template>
       <template #footer>
         <button type="button" class="border border-border bg-white text-muted" @click="detail = null">Close</button>
+        <button v-if="detail?.can_edit" type="button" class="border border-border bg-white text-navy" @click="navigateTo(`/inventory/purchases/${detail.id}/edit`)">Edit</button>
         <button v-if="detail?.can_void" type="button" class="border border-rose-200 bg-white text-expense" @click="openAction('void')">Void</button>
         <button v-if="detail?.can_approve" type="button" class="border border-rose-200 bg-white text-expense" @click="openAction('reject')">Reject</button>
         <button v-if="detail?.can_approve" type="button" class="bg-emerald-600 text-white" @click="openAction('approve')">Approve</button>

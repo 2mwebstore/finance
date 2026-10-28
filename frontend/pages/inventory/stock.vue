@@ -178,7 +178,7 @@ const adjustCheck = reactive(useFormErrors(
 async function loadBranchProducts() {
   if (!adjust.branch_id) { branchProducts.value = []; return }
   try {
-    branchProducts.value = (await api<Paged<Product>>('/inventory/products', { query: { branch_id: adjust.branch_id, active: 'true', page_size: 500 } })).items || []
+    branchProducts.value = (await api<Paged<Product>>('/inventory/products', { query: { branch_id: adjust.branch_id, active: 'true', type: 'standard', page_size: 500 } })).items || []
   } catch {
     branchProducts.value = []
   }

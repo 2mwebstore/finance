@@ -14,15 +14,15 @@ import { Package } from 'lucide-vue-next'
  */
 const props = withDefaults(defineProps<{
   product: { id: string; name: string; has_image?: boolean; image_url?: string; updated_at?: string }
-  size?: 'sm' | 'md' | 'lg' | 'xl'
+  size?: 'sm' | 'md' | 'lg' | 'xl' | 'card'
 }>(), { size: 'md' })
 
 const { apiBase } = useApi()
 const { getToken, tryRefresh } = useAuth()
 const blobUrl = ref('')
 const failed = ref(false)
-const sizeClass = computed(() => ({ sm: 'h-9 w-9', md: 'h-11 w-11', lg: 'h-24 w-24', xl: 'min-h-[220px] w-full !bg-canvas' }[props.size]))
-const iconSize = computed(() => ({ sm: 16, md: 18, lg: 30, xl: 48 }[props.size]))
+const sizeClass = computed(() => ({ sm: 'h-9 w-9', md: 'h-11 w-11', lg: 'h-24 w-24', xl: 'min-h-[220px] w-full !bg-canvas', card: 'aspect-square w-full !rounded-none' }[props.size]))
+const iconSize = computed(() => ({ sm: 16, md: 18, lg: 30, xl: 48, card: 34 }[props.size]))
 const src = computed(() => failed.value ? '' : props.product.image_url || blobUrl.value)
 
 // One fetch per picture version for the whole page session.

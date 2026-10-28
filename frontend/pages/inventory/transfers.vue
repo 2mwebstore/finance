@@ -151,7 +151,7 @@ const formCheck = reactive(useFormErrors(
 async function loadBranchProducts() {
   if (!form.from_branch_id) { branchProducts.value = []; return }
   try {
-    branchProducts.value = (await api<Paged<Product>>('/inventory/products', { query: { branch_id: form.from_branch_id, active: 'true', page_size: 500 } })).items || []
+    branchProducts.value = (await api<Paged<Product>>('/inventory/products', { query: { branch_id: form.from_branch_id, active: 'true', type: 'standard', page_size: 500 } })).items || []
   } catch {
     branchProducts.value = []
   }

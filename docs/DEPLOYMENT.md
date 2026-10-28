@@ -111,6 +111,10 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod exec -T mysql \
 
 (Apply in order; skip already-applied files.)
 
+`000013_platforms` (platforms and weekly win/lose) only adds tables, keys and two platforms and is safe
+to run more than once; the API also creates those tables on start if they are missing. See
+[WINLOSE.md](WINLOSE.md) for its deployment steps.
+
 ## 7. Backups
 
 Script: `deploy/scripts/backup-mysql.sh`
