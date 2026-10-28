@@ -531,7 +531,28 @@ export interface Platform {
   active_hqs: number
 }
 
-/** A platform given to an HQ with its own rate and currency; ended ones are kept as history. */
+/** Someone with a share of branch-platform assignments; their default % is used when they're given one. */
+export interface Partner {
+  id: string
+  name: string
+  phone: string
+  note: string
+  default_rate: string
+  is_active: boolean
+  /** Branch-platform assignments the partner is on now. */
+  active_assignments: number
+}
+
+/** One of an assignment's partners with their %. */
+export interface AssignmentPartner {
+  partner_id: string
+  partner_name: string
+  commission_rate: string
+  /** False when the partner was turned off since. */
+  partner_active: boolean
+}
+
+/** A platform given to a branch with its partners (each at their own %) and currency; ended ones are kept as history. */
 export interface PlatformAssignment {
   id: string
   branch_id: string
@@ -540,6 +561,9 @@ export interface PlatformAssignment {
   platform_id: string
   platform_code: string
   platform_name: string
+  /** By name; none: the Total is at the assignment's own %. */
+  partners: AssignmentPartner[]
+  /** The assignment's own "Partner %", used when it has no partners. */
   commission_rate: string
   currency: Currency
   is_active: boolean
@@ -559,11 +583,23 @@ export interface WinLoseFormula {
   confirmed: boolean
 }
 
+/** One partner's part of a platform's week: the Total at their %. */
+export interface PartnerShare {
+  partner_id: string
+  partner_name: string
+  commission_rate: string
+  /** Null until the week is entered. */
+  jame_ps: string | null
+}
+
 export interface WeekSheetRow {
   platform_id: string
   platform_code: string
   platform_name: string
   assignment_id: string
+  /** Partners share the Total, each at their own %; none: the Total is at commission_rate. */
+  partners: PartnerShare[]
+  /** "Partner %": with partners, their % added up. */
   commission_rate: string
   currency: Currency
   saved: boolean
@@ -594,6 +630,7 @@ export interface WinLosePreview {
   platform_id: string
   commission_rate: string
   currency: Currency
+  partners: PartnerShare[]
   formula_version: string
   jame_ps: string
 }
@@ -610,6 +647,8 @@ export interface WinLoseSums {
 }
 
 export interface WinLoseReportLine extends WinLoseSums {
+  /** Only with by_week (the partner statement). */
+  week_start?: string
   branch_id: string
   branch_code: string
   branch_name: string
@@ -618,6 +657,8 @@ export interface WinLoseReportLine extends WinLoseSums {
   platform_name: string
   rate_min: string
   rate_max: string
+  /** Who shared the Total, by name (partner_id null: weeks with no partner); empty when no week had partners. */
+  partners: { partner_id: string | null; partner_name: string; rate_min: string; rate_max: string; jame_ps: string; entries: number }[]
 }
 
 export interface WinLoseReport {
@@ -628,6 +669,8 @@ export interface WinLoseReport {
   lines: WinLoseReportLine[]
   hqs: { branch_id: string; branch_code: string; branch_name: string; totals: WinLoseSums[] }[]
   platforms: { platform_id: string; platform_code: string; platform_name: string; totals: WinLoseSums[] }[]
+  /** Per partner, with the Total being their share (partner_id null: weeks with no partner). A week shared by two partners counts for each. */
+  partners: { partner_id: string | null; partner_name: string; totals: WinLoseSums[] }[]
   totals: WinLoseSums[]
 }
 

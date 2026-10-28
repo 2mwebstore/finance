@@ -4,7 +4,7 @@
       <div>
         <p class="text-[10px] font-bold tracking-[0.14em] text-slate-400">PLATFORMS · REPORTS</p>
         <h1 class="text-xl font-bold text-navy">Weekly report</h1>
-        <p class="mt-1 text-xs text-muted">The weekly win/lose added up by HQ and platform. Weeks run Monday to Sunday; a range counts every week that starts in it.</p>
+        <p class="mt-1 text-xs text-muted">The weekly win/lose added up by branch and platform. Weeks run Monday to Sunday; a range counts every week that starts in it.</p>
       </div>
       <button type="button" class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-white px-3 py-2 text-sm font-medium text-navy disabled:opacity-50" :disabled="!report?.lines.length" @click="exportCsv"><Download :size="16" /> Export CSV</button>
     </header>
@@ -13,17 +13,19 @@
       <div class="flex gap-1.5">
         <button v-for="w in quickWeeks" :key="w.label" type="button" class="rounded-lg border px-3 py-2 text-xs font-semibold" :class="range.from === w.from && range.to === w.to ? 'border-primary bg-blue-50 text-primary' : 'border-border bg-white text-muted hover:text-navy'" @click="range = { from: w.from, to: w.to }">{{ w.label }}</button>
       </div>
-      <div class="grid min-w-0 flex-1 grid-cols-1 gap-2 sm:grid-cols-2">
+      <div class="grid min-w-0 flex-1 grid-cols-1 gap-2 sm:grid-cols-3">
         <DateRangePicker v-model="range" />
-        <SearchSelect v-model="branchId" :options="hqOptions" placeholder="Choose an HQ" aria-label="HQ" />
+        <SearchSelect v-model="branchId" :options="hqOptions" placeholder="Choose a branch" aria-label="Branch" />
+        <SearchSelect v-model="partnerId" :options="[{ value: '', label: 'All partners' }, ...partnerOptions]" aria-label="Partner" />
       </div>
     </div>
 
     <div v-if="loading && !report" class="text-sm text-muted">Loading…</div>
     <AppAlert v-else-if="error" title="Couldn’t load the report" :message="error" />
     <template v-else-if="report">
-      <WinloseTotals v-if="report.totals.length" :totals="report.totals" :title="report.consolidated ? 'All HQs' : 'This HQ'" />
+      <WinloseTotals v-if="report.totals.length" :totals="report.totals" :title="report.consolidated ? 'All branches' : 'This branch'" />
       <WinloseReportTable :report="report" show-weeks />
+      <WinlosePartnerTotals v-if="!partnerId" :partners="report.partners" :from="report.date_from" :to="range.to" :branch-id="branchId" />
     </template>
 
     <!-- Settlement: only for a whole Monday-to-Sunday week -->
@@ -45,20 +47,23 @@ const quickWeeks = [
   { label: 'Last week', from: plusDays(thisMonday, -7), to: plusDays(thisMonday, -1) },
 ]
 const range = ref({ from: String(route.query.from || quickWeeks[0]!.from), to: String(route.query.to || quickWeeks[0]!.to) })
-const { report, loading, error, load, branchId, branches, hqOptions } = useWinLoseReport(() => range.value)
+const { report, loading, error, load, branchId, branches, hqOptions, partnerId, partnerOptions } = useWinLoseReport(() => range.value)
 
 const isWholeWeek = computed(() => !!range.value.from && mondayOf(range.value.from) === range.value.from && plusDays(range.value.from, 6) === range.value.to)
-// The chosen HQ, or every HQ the user works in.
+// The chosen branch, or every branch the user works in.
 const settlementHQs = computed(() => branches.value
   .filter(b => !branchId.value || b.id === branchId.value)
   .map(b => ({ id: b.id, code: b.code, name: b.name })))
 
+const rateText = (min: string, max: string) => min === max ? String(Number(min)) : `${Number(min)}-${Number(max)}`
+
 function exportCsv() {
   if (!report.value) return
   downloadCsv(`winlose-weekly-${range.value.from}-to-${range.value.to}.csv`,
-    ['From', 'To', 'HQ code', 'HQ', 'Platform', 'Currency', 'Rate %', 'Win/Lose', 'Commission', 'Total', 'Weeks'],
-    report.value.lines.map(l => [report.value!.date_from, range.value.to, l.branch_code, l.branch_name, l.platform_code, l.currency,
-      l.rate_min === l.rate_max ? Number(l.rate_min) : `${Number(l.rate_min)}-${Number(l.rate_max)}`,
+    ['From', 'To', 'Branch code', 'Branch', 'Platform', 'Partners (% = share)', 'Currency', 'Partner %', 'Win/Lose', 'Commission', 'Total', 'Weeks'],
+    report.value.lines.map(l => [report.value!.date_from, range.value.to, l.branch_code, l.branch_name, l.platform_code,
+      l.partners.map(p => `${p.partner_name || 'No partner'} ${rateText(p.rate_min, p.rate_max)}% = ${Number(p.jame_ps)}`).join('; '), l.currency,
+      rateText(l.rate_min, l.rate_max),
       Number(l.win_lose), Number(l.commission), Number(l.jame_ps), l.entries]))
 }
 </script>

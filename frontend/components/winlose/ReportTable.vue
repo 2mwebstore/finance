@@ -4,7 +4,7 @@
       <thead class="bg-canvas text-[10px] uppercase tracking-wide text-slate-500">
         <tr>
           <th class="px-3 py-2 font-bold">Platform</th>
-          <th class="px-3 py-2 font-bold">Rate</th>
+          <th class="px-3 py-2 font-bold">Partner %</th>
           <th class="px-3 py-2 text-right font-bold">Win/Lose</th>
           <th class="px-3 py-2 text-right font-bold">Commission</th>
           <th class="px-3 py-2 text-right font-bold">Total</th>
@@ -13,15 +13,28 @@
       </thead>
       <tbody v-for="hq in report.hqs" :key="hq.branch_id" class="divide-y divide-border border-t border-border first:border-t-0">
         <tr class="bg-slate-50/70"><td :colspan="showWeeks ? 6 : 5" class="px-3 py-2 text-xs font-bold text-navy">{{ hq.branch_code }} — {{ hq.branch_name }}</td></tr>
-        <tr v-for="line in linesOf(hq.branch_id)" :key="`${line.platform_id}-${line.currency}`" class="text-navy">
-          <td class="px-3 py-2"><span class="font-mono font-semibold">{{ line.platform_code }}</span> <span class="text-muted">· {{ line.currency }}</span></td>
-          <td class="px-3 py-2 text-muted">{{ rateRange(line.rate_min, line.rate_max) }}</td>
-          <td class="px-3 py-2 text-right tabular-nums" :class="tone(line.win_lose)">{{ formatAmount(line.win_lose, line.currency) }}</td>
-          <td class="px-3 py-2 text-right tabular-nums">{{ formatAmount(line.commission, line.currency) }}</td>
-          <td class="px-3 py-2 text-right font-bold tabular-nums" :class="tone(line.jame_ps)">{{ formatAmount(line.jame_ps, line.currency) }}</td>
-          <td v-if="showWeeks" class="px-3 py-2 text-right tabular-nums text-muted">{{ line.entries }}</td>
-        </tr>
-        <!-- The HQ's subtotal in each currency -->
+        <template v-for="line in linesOf(hq.branch_id)" :key="`${line.platform_id}-${line.currency}`">
+          <tr class="text-navy">
+            <td class="px-3 py-2">
+              <span class="font-mono font-semibold">{{ line.platform_code }}</span> <span class="text-muted">· {{ line.currency }}</span>
+              <span class="block text-[11px]" :class="line.partners.length ? 'text-muted' : 'text-slate-400'">{{ partnersLabel(line) }}</span>
+            </td>
+            <td class="px-3 py-2 text-muted">{{ rateRange(line.rate_min, line.rate_max) }}</td>
+            <td class="px-3 py-2 text-right tabular-nums" :class="tone(line.win_lose)">{{ formatAmount(line.win_lose, line.currency) }}</td>
+            <td class="px-3 py-2 text-right tabular-nums">{{ formatAmount(line.commission, line.currency) }}</td>
+            <td class="px-3 py-2 text-right font-bold tabular-nums" :class="tone(line.jame_ps)">{{ formatAmount(line.jame_ps, line.currency) }}</td>
+            <td v-if="showWeeks" class="px-3 py-2 text-right tabular-nums text-muted">{{ line.entries }}</td>
+          </tr>
+          <!-- Each partner's share of the line's Total, when it was shared -->
+          <tr v-for="p in line.partners.length > 1 ? line.partners : []" :key="`${line.platform_id}-${line.currency}-${p.partner_id || 'none'}`" class="!border-t-0 text-[11px] text-muted">
+            <td class="py-1 pl-6 pr-3"><span class="inline-flex items-center gap-1" :class="p.partner_id ? '' : 'italic'"><Handshake :size="11" />{{ p.partner_name || 'No partner' }}</span></td>
+            <td class="px-3 py-1">{{ rateRange(p.rate_min, p.rate_max) }}</td>
+            <td class="px-3 py-1" colspan="2"></td>
+            <td class="px-3 py-1 text-right tabular-nums" :class="tone(p.jame_ps)">{{ formatAmount(p.jame_ps, line.currency) }}</td>
+            <td v-if="showWeeks" class="px-3 py-1 text-right tabular-nums">{{ p.entries }}</td>
+          </tr>
+        </template>
+        <!-- The branch's subtotal in each currency -->
         <tr v-for="t in hq.totals" :key="`total-${t.currency}`" class="bg-canvas/60 font-semibold text-navy">
           <td class="px-3 py-2" colspan="2">{{ hq.branch_code }} total · {{ t.currency }}</td>
           <td class="px-3 py-2 text-right tabular-nums" :class="tone(t.win_lose)">{{ formatAmount(t.win_lose, t.currency) }}</td>
@@ -36,14 +49,21 @@
 </template>
 
 <script setup lang="ts">
-import type { WinLoseReport } from '~/types/api'
+import { Handshake } from 'lucide-vue-next'
+import type { WinLoseReport, WinLoseReportLine } from '~/types/api'
 import { formatAmount, rateRange } from '~/utils/winlose'
 
-/** A win/lose report's lines grouped by HQ, each HQ with its subtotal per currency (`jame_ps` is the Total). */
+/** A win/lose report's lines grouped by branch, with each partner's share and the branch's subtotal per currency (`jame_ps` is the Total). */
 const props = withDefaults(defineProps<{ report: WinLoseReport; showWeeks?: boolean }>(), { showWeeks: false })
 
 function linesOf(branchId: string) {
   return props.report.lines.filter(line => line.branch_id === branchId)
+}
+
+// Who shared a line's Total: the partner's name, "n partners" (listed below the line) or none.
+function partnersLabel(line: WinLoseReportLine) {
+  if (line.partners.length > 1) return `${line.partners.filter(p => p.partner_id).length} partners`
+  return line.partners[0]?.partner_name || 'No partner'
 }
 
 function tone(value: string) {

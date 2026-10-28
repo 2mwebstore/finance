@@ -22,13 +22,26 @@ type Platform struct {
 	IsActive        bool            `gorm:"not null" json:"is_active"`
 }
 
+// Partner is someone with a share of branch-platform assignments. Partners are managed in the app
+// (Platforms → Partners); DefaultRate fills in their % when they're given an assignment.
+type Partner struct {
+	Base
+	Name        string          `gorm:"size:128;not null" json:"name"`
+	Phone       string          `gorm:"size:32;not null" json:"phone"`
+	Note        string          `gorm:"size:255;not null" json:"note"`
+	DefaultRate decimal.Decimal `gorm:"type:decimal(7,4);not null" json:"default_rate"`
+	IsActive    bool            `gorm:"not null" json:"is_active"`
+}
+
 // HQPlatformAssignment gives an HQ a platform with its own rate and currency. Ending or moving it
 // keeps the row (EndsOn set) so the history stays; ActiveKey is 1 while active and NULL after, and
 // a unique key on (branch, platform, active_key) allows one active assignment per pair.
 type HQPlatformAssignment struct {
 	Base
-	BranchID       uuid.UUID       `gorm:"type:char(36);not null" json:"branch_id"`
-	PlatformID     uuid.UUID       `gorm:"type:char(36);not null" json:"platform_id"`
+	BranchID   uuid.UUID `gorm:"type:char(36);not null" json:"branch_id"`
+	PlatformID uuid.UUID `gorm:"type:char(36);not null" json:"platform_id"`
+	// CommissionRate (shown as "Partner %") is used when the assignment has no partners; with
+	// partners, each has their own % (AssignmentPartner).
 	CommissionRate decimal.Decimal `gorm:"type:decimal(7,4);not null" json:"commission_rate"`
 	Currency       string          `gorm:"size:3;not null" json:"currency"`
 	IsActive       bool            `gorm:"not null" json:"is_active"`
@@ -43,11 +56,34 @@ type HQPlatformAssignment struct {
 
 func (HQPlatformAssignment) TableName() string { return "hq_platform_assignments" }
 
+// AssignmentPartner is one of an assignment's partners with their %.
+type AssignmentPartner struct {
+	ID             uuid.UUID       `gorm:"type:char(36);primaryKey" json:"-"`
+	AssignmentID   uuid.UUID       `gorm:"type:char(36);not null" json:"assignment_id"`
+	PartnerID      uuid.UUID       `gorm:"type:char(36);not null" json:"partner_id"`
+	CommissionRate decimal.Decimal `gorm:"type:decimal(7,4);not null" json:"commission_rate"`
+	CreatedAt      time.Time       `json:"-"`
+	UpdatedAt      time.Time       `json:"-"`
+}
+
 func (WeeklyPlatformResult) TableName() string { return "weekly_platform_results" }
 
-// WeeklyPlatformResult is one HQ's week (Monday to Sunday) on one platform, entered once a week.
-// The rate, currency and formula version used are kept with it, so a later change to the
-// assignment or the formula leaves it as it was. JamePS is what the app shows as "Total".
+// WeeklyPartnerResult is one partner's share of a saved week: Total at their % (kept as it was
+// when the week was entered). The week's own JamePS is the sum of its partners' shares.
+type WeeklyPartnerResult struct {
+	ID             uuid.UUID       `gorm:"type:char(36);primaryKey" json:"-"`
+	ResultID       uuid.UUID       `gorm:"type:char(36);not null" json:"result_id"`
+	PartnerID      uuid.UUID       `gorm:"type:char(36);not null" json:"partner_id"`
+	CommissionRate decimal.Decimal `gorm:"type:decimal(7,4);not null" json:"commission_rate"`
+	JamePS         decimal.Decimal `gorm:"column:jame_ps;type:decimal(19,4);not null" json:"jame_ps"`
+	CreatedAt      time.Time       `json:"-"`
+	UpdatedAt      time.Time       `json:"-"`
+}
+
+// WeeklyPlatformResult is one branch's week (Monday to Sunday) on one platform, entered once a
+// week. The rate, currency and formula version used are kept with it, so a later change to the
+// assignment or the formula leaves it as it was. JamePS is what the app shows as "Total": with
+// partners it is the sum of their shares (WeeklyPartnerResult), and CommissionRate their % added up.
 type WeeklyPlatformResult struct {
 	Base
 	WeekStart      time.Time       `gorm:"type:date;not null" json:"week_start"`

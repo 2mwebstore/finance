@@ -29,14 +29,23 @@ const props = defineProps<{
   modelValue: string
   currency: SupportedCurrency
   ariaLabel?: string
+  /** Allows a minus in front (e.g. a loss). */
+  signed?: boolean
 }>()
 const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
 
 const input = ref<HTMLInputElement | null>(null)
 const focused = ref(false)
-const displayValue = ref(formatEntry(props.modelValue, props.currency, false))
+// Shown finished (e.g. 1,500.00), as when the value changes while the input isn't focused.
+const displayValue = ref(formatEntry(props.modelValue, props.currency, true))
 
+// A minus is kept only in front, and only when the input is signed.
 function normalize(value: string, currency: SupportedCurrency) {
+  const amount = normalizeAmount(value, currency)
+  return props.signed && value.trim().startsWith('-') ? `-${amount}` : amount
+}
+
+function normalizeAmount(value: string, currency: SupportedCurrency) {
   const cleaned = value.replace(/,/g, '').replace(/[^\d.]/g, '')
   const limit = wholeLimit(currency)
   const places = decimalsOf(currency)
@@ -59,18 +68,23 @@ function groupDigits(value: string) {
 
 function formatEntry(value: string, currency: SupportedCurrency, complete = false) {
   const raw = normalize(value, currency)
-  if (!raw) return ''
-  if (!decimalsOf(currency)) return groupDigits(raw)
+  const amount = raw.replace(/^-/, '')
+  // A lone minus stays while typing; a finished zero has none.
+  let sign = raw.startsWith('-') ? '-' : ''
+  if (!amount) return complete ? '' : sign
+  if (complete && !Number(amount)) sign = ''
+  if (!decimalsOf(currency)) return sign + groupDigits(amount)
 
-  const hasDot = raw.includes('.')
-  let [whole, fraction = ''] = raw.split('.')
+  const hasDot = amount.includes('.')
+  let [whole, fraction = ''] = amount.split('.')
   if (!whole) whole = '0'
   if (complete) fraction = fraction.padEnd(decimalsOf(currency), '0').slice(0, decimalsOf(currency))
-  return `${groupDigits(whole)}${hasDot || complete ? `.${fraction}` : ''}`
+  return `${sign}${groupDigits(whole)}${hasDot || complete ? `.${fraction}` : ''}`
 }
 
+// Characters before the caret that are kept (letters and other refused characters don't count).
 function rawCaretLength(value: string) {
-  return value.replace(/,/g, '').length
+  return value.replace(/[^\d.-]/g, '').length
 }
 
 function caretForRawLength(value: string, target: number) {
@@ -89,7 +103,9 @@ function onInput(event: Event) {
   const raw = normalize(element.value, props.currency)
   const formatted = formatEntry(raw, props.currency)
   displayValue.value = formatted
-  emit('update:modelValue', raw)
+  // A refused character leaves the value as it was, so put the box back by hand.
+  if (element.value !== formatted) element.value = formatted
+  emit('update:modelValue', raw === '-' ? '' : raw)
   nextTick(() => {
     const caret = caretForRawLength(formatted, rawCaret)
     element.setSelectionRange(caret, caret)
@@ -100,6 +116,7 @@ function onBlur() {
   focused.value = false
   const formatted = formatEntry(props.modelValue, props.currency, true)
   displayValue.value = formatted
+  if (input.value && input.value.value !== formatted) input.value.value = formatted
   if (formatted) emit('update:modelValue', normalize(formatted, props.currency))
 }
 

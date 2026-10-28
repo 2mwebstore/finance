@@ -4,10 +4,10 @@
       <div>
         <p class="text-[10px] font-bold tracking-[0.14em] text-slate-400">PLATFORMS</p>
         <h1 class="text-xl font-bold text-navy">Platforms</h1>
-        <p class="mt-1 text-xs text-muted">The platforms HQs report weekly win/lose for. The default rate and currency fill in new HQ assignments.</p>
+        <p class="mt-1 text-xs text-muted">The platforms branches report weekly win/lose for. The default partner % and currency fill in new branch assignments.</p>
       </div>
       <div class="flex gap-2">
-        <NuxtLink v-if="can('platforms.view', 'platform-assignments.manage')" to="/admin/platform-assignments" class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-white px-3 py-2 text-sm font-medium text-navy hover:bg-canvas"><Network :size="16" /> HQ assignments</NuxtLink>
+        <NuxtLink v-if="can('platforms.view', 'platform-assignments.manage')" to="/admin/platform-assignments" class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-white px-3 py-2 text-sm font-medium text-navy hover:bg-canvas"><Network :size="16" /> Branch assignments</NuxtLink>
         <button v-if="canManage" type="button" class="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white hover:bg-primary-hover" @click="openCreate"><Plus :size="16" /> Add platform</button>
       </div>
     </header>
@@ -32,8 +32,8 @@
           </div>
         </div>
         <div class="flex items-center gap-4 text-xs sm:justify-end">
-          <div class="text-right"><p class="text-[10px] uppercase tracking-wide text-slate-400">Default rate</p><p class="font-semibold text-navy">{{ formatRate(platform.default_rate) }} · {{ platform.default_currency }}</p></div>
-          <div class="text-right"><p class="text-[10px] uppercase tracking-wide text-slate-400">HQs</p><p class="font-semibold text-navy">{{ platform.active_hqs }}</p></div>
+          <div class="text-right"><p class="text-[10px] uppercase tracking-wide text-slate-400">Default partner %</p><p class="font-semibold text-navy">{{ formatRate(platform.default_rate) }} · {{ platform.default_currency }}</p></div>
+          <div class="text-right"><p class="text-[10px] uppercase tracking-wide text-slate-400">Branches</p><p class="font-semibold text-navy">{{ platform.active_hqs }}</p></div>
           <div v-if="canManage" class="flex shrink-0 gap-1.5">
             <button type="button" class="action-chip action-edit" @click="openEdit(platform)"><Pencil :size="13" /> Edit</button>
             <button type="button" class="action-chip" :class="platform.is_active ? 'action-danger' : 'action-success'" :disabled="busyId === platform.id" @click="toggle(platform)">{{ platform.is_active ? 'Turn off' : 'Turn on' }}</button>
@@ -43,15 +43,15 @@
       <li v-if="!shown.length" class="p-6 text-center text-sm text-muted">{{ search ? `No platform matches “${search}”.` : 'No platforms yet.' }}</li>
     </ul>
 
-    <AppModal :model-value="formOpen" form :title="editing ? `Edit ${editing.code}` : 'Add platform'" eyebrow="PLATFORM" subtitle="Rates are percents: 35 means 35%." :busy="saving" width="480px" @update:model-value="(open) => { if (!open && !saving) formOpen = false }" @submit="save">
+    <AppModal :model-value="formOpen" form :title="editing ? `Edit ${editing.code}` : 'Add platform'" eyebrow="PLATFORM" subtitle="Partner % is a percent: 35 means 35%." :busy="saving" width="480px" @update:model-value="(open) => { if (!open && !saving) formOpen = false }" @submit="save">
       <template #icon><Layers :size="20" /></template>
       <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label class="block space-y-1 text-xs font-medium text-muted">Code<input v-model.trim="form.code" maxlength="64" :aria-invalid="formCheck.invalid('code')" class="w-full rounded-lg border border-border px-3 py-2 font-mono text-sm text-navy" placeholder="e.g. 12K_YMLLJB_V2" /></label>
         <label class="block space-y-1 text-xs font-medium text-muted">Name<input v-model.trim="form.name" maxlength="128" :aria-invalid="formCheck.invalid('name')" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" /></label>
-        <label class="block space-y-1 text-xs font-medium text-muted">Default rate (%)<input v-model.trim="form.default_rate" type="text" inputmode="decimal" :aria-invalid="formCheck.invalid('default_rate')" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" placeholder="e.g. 35" /></label>
+        <label class="block space-y-1 text-xs font-medium text-muted">Default partner %<input v-model.trim="form.default_rate" type="text" inputmode="decimal" :aria-invalid="formCheck.invalid('default_rate')" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" placeholder="e.g. 35" /></label>
         <div class="space-y-1 text-xs font-medium text-muted">Default currency<SearchSelect v-model="form.default_currency" :options="currencyOptions" :searchable="false" aria-label="Default currency" :aria-invalid="formCheck.invalid('default_currency')" /></div>
       </div>
-      <p v-if="editing" class="mt-3 rounded-lg bg-canvas px-3 py-2 text-[11px] text-muted">Changing the default only affects HQs assigned from now on. Each HQ’s rate is set on its assignment, and saved weeks keep the rate they were worked out with.</p>
+      <p v-if="editing" class="mt-3 rounded-lg bg-canvas px-3 py-2 text-[11px] text-muted">Changing the default only affects branches assigned from now on. Each branch’s partner % is set on its assignment, and saved weeks keep the partner % they were worked out with.</p>
       <AppAlert v-if="formError || formCheck.messages.length" class="mt-3" :title="formError ? 'Couldn’t save' : 'Check the highlighted fields'" :message="formError" :items="formCheck.messages" dismissible @dismiss="formError = ''; formCheck.reset()" />
       <template #footer>
         <button type="button" class="border border-border bg-white text-muted" :disabled="saving" @click="formOpen = false">Cancel</button>
@@ -112,7 +112,7 @@ const formCheck = reactive(useFormErrors(
   () => ({
     code: [rule.required('code'), (value: unknown) => /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(String(value || '')) ? '' : 'use letters, digits, _ . or - in the code'],
     name: [rule.required('name'), rule.maxLength('name', 128)],
-    default_rate: [rule.required('default rate'), (value: unknown) => /^\d+(\.\d{1,4})?$/.test(String(value)) && Number(value) <= 100 ? '' : 'enter a rate from 0 to 100'],
+    default_rate: [rule.required('default partner %'), (value: unknown) => /^\d+(\.\d{1,4})?$/.test(String(value)) && Number(value) <= 100 ? '' : 'enter a partner % from 0 to 100'],
     default_currency: [rule.required('currency')],
   }),
 ))

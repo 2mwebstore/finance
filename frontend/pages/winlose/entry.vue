@@ -4,7 +4,7 @@
       <div>
         <p class="text-[10px] font-bold tracking-[0.14em] text-slate-400">PLATFORMS</p>
         <h1 class="text-xl font-bold text-navy">Win/lose entry</h1>
-        <p class="mt-1 text-xs text-muted">Enter each platform’s win/lose and commission once a week (Monday to Sunday). The Total is worked out by the server as you type.</p>
+        <p class="mt-1 text-xs text-muted">Enter each platform’s win/lose and commission once a week (Monday to Sunday).</p>
       </div>
       <NuxtLink v-if="can('winlose-reports.view')" :to="{ path: '/winlose/reports/weekly', query: { from: weekStart, to: weekEnd, branch: branchId } }" class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-white px-3 py-2 text-sm font-medium text-navy hover:bg-canvas"><FileSpreadsheet :size="16" /> Weekly report</NuxtLink>
     </header>
@@ -16,54 +16,43 @@
         <div class="min-w-0 flex-1"><DatePicker :model-value="weekStart" aria-label="Week" @update:model-value="(day) => (weekStart = mondayOf(day))" /></div>
         <button type="button" class="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-border bg-white text-navy hover:bg-canvas disabled:opacity-40" aria-label="Next week" :disabled="weekStart >= thisMonday" @click="shiftWeek(7)"><ChevronRight :size="17" /></button>
       </div>
-      <SearchSelect v-model="branchId" :options="hqOptions" placeholder="Choose an HQ" aria-label="HQ" />
+      <SearchSelect v-model="branchId" :options="hqOptions" placeholder="Choose a branch" aria-label="Branch" />
     </div>
     <p class="-mt-2 text-xs font-semibold text-navy">Week of {{ formatDocDate(weekStart) }} – {{ formatDocDate(weekEnd) }}<span v-if="weekStart === thisMonday" class="ml-1.5 rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-bold text-primary">This week</span></p>
 
-    <p v-if="!hqOptions.length" class="rounded-xl border border-border bg-white p-6 text-center text-sm text-muted">You don’t work in any HQ yet.</p>
+    <p v-if="!hqOptions.length" class="rounded-xl border border-border bg-white p-6 text-center text-sm text-muted">You don’t work in any branch yet.</p>
     <div v-else-if="loading" class="text-sm text-muted">Loading the week…</div>
     <AppAlert v-else-if="error" title="Couldn’t load the week" :message="error"><template #action><button type="button" @click="load">Try again</button></template></AppAlert>
     <template v-else-if="sheet">
       <AppAlert v-if="sheet.locked" type="warning" title="This week is finalized" :message="`The week of ${formatDocDate(sheet.week_start)} – ${formatDocDate(sheet.week_end)} is settled for ${sheet.branch_code}. Reopen it on the weekly report to change it.`" />
-      <p class="flex flex-wrap items-center gap-2 text-[11px] text-muted">
-        <Calculator :size="13" /> {{ sheet.formula.description }} <span class="font-mono">({{ sheet.formula.version }})</span>
-        <span v-if="!sheet.formula.confirmed" class="rounded-full bg-amber-50 px-2 py-0.5 font-semibold text-amber-700">formula still to be confirmed</span>
-      </p>
-
       <div class="overflow-hidden rounded-xl border border-border bg-white">
         <table class="wl-table w-full text-left text-sm">
           <thead class="bg-canvas text-[10px] uppercase tracking-wide text-slate-500">
             <tr>
               <th class="px-3 py-2 font-bold">Platform</th>
-              <th class="px-3 py-2 font-bold">Rate</th>
-              <th class="w-44 px-2 py-2 font-bold">Win/Lose</th>
-              <th class="w-44 px-2 py-2 font-bold">Commission</th>
-              <th class="px-3 py-2 text-right font-bold">Total</th>
+              <th class="w-56 px-2 py-2 font-bold">Win/Lose</th>
+              <th class="w-56 px-2 py-2 font-bold">Commission</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-border">
             <tr v-for="row in sheet.rows" :key="row.platform_id" :class="changed(row) ? 'bg-amber-50/40' : ''">
               <td class="px-3 py-2.5">
-                <p class="font-mono text-sm font-semibold text-navy">{{ row.platform_code }}</p>
+                <!-- The currency the amounts are entered in -->
+                <p class="font-mono text-sm font-semibold text-navy">{{ row.platform_code }} <span class="font-sans text-xs font-normal text-muted">· {{ row.currency }}</span></p>
                 <p class="text-[11px]" :class="changed(row) ? 'font-semibold text-amber-700' : 'text-muted'">{{ statusOf(row) }}</p>
               </td>
-              <td class="px-3 py-2.5 text-xs text-navy" data-label="Rate">{{ formatRate(row.commission_rate) }} · {{ row.currency }}</td>
               <td class="px-2 py-2" data-label="Win/Lose">
-                <input v-model.trim="edits[row.platform_id]!.win_lose" type="text" inputmode="decimal" autocomplete="off" placeholder="0" class="w-full rounded-lg border border-border px-2.5 py-1.5 text-right text-sm text-navy disabled:bg-canvas disabled:text-muted" :aria-invalid="invalid(edits[row.platform_id]!.win_lose) ? 'true' : undefined" :disabled="!editable(row)" :aria-label="`Win/lose for ${row.platform_code}`" />
+                <MoneyInput v-model="edits[row.platform_id]!.win_lose" :currency="row.currency" signed class="w-full rounded-lg border border-border px-2.5 py-1.5 text-right text-sm tabular-nums disabled:bg-canvas disabled:text-muted" :class="Number(edits[row.platform_id]!.win_lose) < 0 ? 'text-expense' : 'text-navy'" :aria-invalid="invalid(edits[row.platform_id]!.win_lose) ? 'true' : undefined" :disabled="!editable(row)" :aria-label="`Win/lose for ${row.platform_code}`" />
               </td>
               <td class="px-2 py-2" data-label="Commission">
-                <input v-model.trim="edits[row.platform_id]!.commission" type="text" inputmode="decimal" autocomplete="off" placeholder="0" class="w-full rounded-lg border border-border px-2.5 py-1.5 text-right text-sm text-navy disabled:bg-canvas disabled:text-muted" :aria-invalid="invalid(edits[row.platform_id]!.commission) ? 'true' : undefined" :disabled="!editable(row)" :aria-label="`Commission for ${row.platform_code}`" />
+                <MoneyInput v-model="edits[row.platform_id]!.commission" :currency="row.currency" signed class="w-full rounded-lg border border-border px-2.5 py-1.5 text-right text-sm tabular-nums disabled:bg-canvas disabled:text-muted" :class="Number(edits[row.platform_id]!.commission) < 0 ? 'text-expense' : 'text-navy'" :aria-invalid="invalid(edits[row.platform_id]!.commission) ? 'true' : undefined" :disabled="!editable(row)" :aria-label="`Commission for ${row.platform_code}`" />
               </td>
-              <td class="px-3 py-2.5 text-right font-bold tabular-nums" data-label="Total" :class="Number(totalOf(row)) < 0 ? 'text-expense' : 'text-navy'">{{ shownTotal(row) }}</td>
             </tr>
-            <tr v-if="!sheet.rows.length" class="empty-row"><td colspan="5" class="px-3 py-8 text-center text-sm text-muted">No platforms are assigned to {{ sheet.branch_code }} in this week.<NuxtLink v-if="can('platform-assignments.manage')" :to="{ path: '/admin/platform-assignments', query: { branch: branchId } }" class="ml-1 font-semibold text-primary">Assign platforms</NuxtLink></td></tr>
+            <tr v-if="!sheet.rows.length" class="empty-row"><td colspan="3" class="px-3 py-8 text-center text-sm text-muted">No platforms are assigned to {{ sheet.branch_code }} in this week.<NuxtLink v-if="can('platform-assignments.manage')" :to="{ path: '/admin/platform-assignments', query: { branch: branchId } }" class="ml-1 font-semibold text-primary">Assign platforms</NuxtLink></td></tr>
           </tbody>
         </table>
       </div>
-      <p v-if="previewError" class="text-xs font-medium text-expense" role="alert">{{ previewError }}</p>
-
-      <!-- Totals per currency (never added together) -->
-      <WinloseTotals v-if="totals.length" :totals="totals" title="Week" />
+      <p v-if="hasInvalid" class="text-xs font-medium text-expense" role="alert">Enter amounts as numbers, e.g. -1500 or 250.75.</p>
 
       <AppAlert v-if="saveError" title="Couldn’t save the week" :message="saveError" dismissible @dismiss="saveError = ''" />
       <div v-if="sheet.rows.length && !sheet.locked && (canCreate || canEdit)" class="flex flex-wrap items-center justify-end gap-2">
@@ -78,12 +67,12 @@
 </template>
 
 <script setup lang="ts">
-import { Calculator, ChevronLeft, ChevronRight, FileSpreadsheet } from 'lucide-vue-next'
-import type { WeekSheet, WeekSheetRow, WinLosePreview } from '~/types/api'
+import { ChevronLeft, ChevronRight, FileSpreadsheet } from 'lucide-vue-next'
+import type { WeekSheet, WeekSheetRow } from '~/types/api'
 import { useToast } from '~/composables/useToast'
 import { useBranchOptions } from '~/composables/useBranchOptions'
 import { formatDocDate, todayISO } from '~/utils/inventory'
-import { formatAmount, formatRate, mondayOf, plusDays } from '~/utils/winlose'
+import { mondayOf, plusDays } from '~/utils/winlose'
 
 const { api } = useApi()
 const { can } = usePermissions()
@@ -110,16 +99,18 @@ const loading = ref(false)
 const error = ref('')
 const edits = reactive<Record<string, { win_lose: string; commission: string }>>({})
 
-const AMOUNT = /^-?\d+(\.\d{1,4})?$/
+// The inputs only let numbers through (with the currency's decimals); "1500." while typing is fine.
+const AMOUNT = /^-?\d+(\.\d{0,4})?$/
 function invalid(value: string) {
   return !!value && !AMOUNT.test(value)
 }
 const asText = (value: string | null) => value === null ? '' : String(Number(value))
+// Amounts compare as numbers: 1500 and 1500.00 are the same, and an empty box is 0.
+const same = (typed: string, saved: string | null) => Number(typed || 0) === Number(saved || 0)
 
 function resetEdits() {
   for (const key of Object.keys(edits)) delete edits[key]
   for (const row of sheet.value?.rows || []) edits[row.platform_id] = { win_lose: asText(row.win_lose), commission: asText(row.commission) }
-  preview.value = {}
 }
 
 let loadRequest = 0
@@ -140,7 +131,7 @@ async function load() {
   }
 }
 
-// Changing the week or HQ with unsaved figures asks first.
+// Changing the week or branch with unsaved figures asks first.
 let reverting = false
 watch([weekStart, branchId], ([w, b], [oldW, oldB]) => {
   if (reverting) { reverting = false; return }
@@ -158,7 +149,7 @@ onBeforeRouteLeave(() => !dirty.value || window.confirm('Leave without saving yo
 function changed(row: WeekSheetRow) {
   const e = edits[row.platform_id]
   if (!e) return false
-  return row.saved ? (e.win_lose !== asText(row.win_lose) || e.commission !== asText(row.commission)) : !!(e.win_lose || e.commission)
+  return row.saved ? !same(e.win_lose, row.win_lose) || !same(e.commission, row.commission) : !!(e.win_lose || e.commission)
 }
 const dirty = computed(() => (sheet.value?.rows || []).some(changed))
 const hasInvalid = computed(() => Object.values(edits).some(e => invalid(e.win_lose) || invalid(e.commission)))
@@ -175,62 +166,12 @@ function statusOf(row: WeekSheetRow) {
   return 'Not entered'
 }
 
-// --- the Total as people type: worked out by the server (the formula lives only there) ---
-const preview = ref<Record<string, WinLosePreview>>({})
-const previewError = ref('')
-let previewTimer: ReturnType<typeof setTimeout> | undefined
-let previewRequest = 0
-watch(edits, () => {
-  if (previewTimer) clearTimeout(previewTimer)
-  previewTimer = setTimeout(runPreview, 350)
-}, { deep: true })
-
 function filledRows() {
+  const clean = (value: string) => value.replace(/\.$/, '')
   return (sheet.value?.rows || [])
-    .map(row => ({ platform_id: row.platform_id, ...edits[row.platform_id]! }))
+    .map(row => ({ platform_id: row.platform_id, win_lose: clean(edits[row.platform_id]!.win_lose), commission: clean(edits[row.platform_id]!.commission) }))
     .filter(row => row.win_lose || row.commission)
 }
-
-async function runPreview() {
-  if (!sheet.value || !dirty.value) { preview.value = {}; previewError.value = ''; return }
-  if (hasInvalid.value) { previewError.value = 'Enter amounts as numbers, e.g. -1500 or 250.75.'; return }
-  const request = ++previewRequest
-  try {
-    const result = await api<{ items: WinLosePreview[] }>('/winlose/entry/preview', { method: 'POST', body: { week_start: weekStart.value, branch_id: branchId.value, rows: filledRows() } })
-    if (request !== previewRequest) return
-    preview.value = Object.fromEntries((result.items || []).map(p => [p.platform_id, p]))
-    previewError.value = ''
-  } catch (e: any) {
-    if (request === previewRequest) previewError.value = e?.data?.error || 'Could not work out the Total.'
-  }
-}
-
-// The Total as shown: the preview while editing, else what is saved.
-function totalOf(row: WeekSheetRow) {
-  if (changed(row)) return preview.value[row.platform_id]?.jame_ps ?? null
-  return row.jame_ps
-}
-function shownTotal(row: WeekSheetRow) {
-  const value = totalOf(row)
-  if (value === null || value === undefined) return changed(row) ? '…' : '—'
-  return formatAmount(value, row.currency)
-}
-
-const totals = computed(() => {
-  const byCurrency = new Map<string, { currency: string; win_lose: number; commission: number; jame_ps: number; entries: number }>()
-  for (const row of sheet.value?.rows || []) {
-    const e = edits[row.platform_id]
-    const total = totalOf(row)
-    if (!e || (!e.win_lose && !e.commission) || total === null || total === undefined) continue
-    const t = byCurrency.get(row.currency) || { currency: row.currency, win_lose: 0, commission: 0, jame_ps: 0, entries: 0 }
-    t.win_lose += Number(e.win_lose) || 0
-    t.commission += Number(e.commission) || 0
-    t.jame_ps += Number(total) || 0
-    t.entries++
-    byCurrency.set(row.currency, t)
-  }
-  return [...byCurrency.values()].sort((a, b) => a.currency.localeCompare(b.currency))
-})
 
 // --- saving ---
 const saving = ref(false)
@@ -266,13 +207,13 @@ async function save(reason: string) {
 </script>
 
 <style scoped>
-/* Phones: each platform becomes a card: rate on its own line, the two amounts side by side. */
+/* Phones: each platform becomes a card: its name, then the two amounts side by side. */
 @media (max-width: 639px) {
   .wl-table thead { display: none; }
   .wl-table, .wl-table tbody, .wl-table tr, .wl-table td { display: block; width: 100%; }
   .wl-table tbody tr:not(.empty-row) { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; padding: 12px; }
   .wl-table tbody tr:not(.empty-row) td { padding: 0; text-align: left; }
-  .wl-table tbody tr:not(.empty-row) td:first-child, .wl-table td[data-label='Rate'], .wl-table td[data-label='Total'] { grid-column: 1 / -1; }
+  .wl-table tbody tr:not(.empty-row) td:first-child { grid-column: 1 / -1; }
   .wl-table td[data-label]::before { content: attr(data-label); display: block; margin-bottom: 3px; color: #64748b; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
 }
 </style>

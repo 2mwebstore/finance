@@ -245,6 +245,11 @@ func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config, store storage.Store, 
 				api.POST("/platforms", need(permissions.PlatformsManage), platformCtrl.SavePlatform)
 				api.PATCH("/platforms/:id", need(permissions.PlatformsManage), platformCtrl.SavePlatform)
 
+				// Partners are managed with the platforms; reports and the weekly entry read their names.
+				api.GET("/partners", need(permissions.PlatformsView, permissions.PlatformsManage, permissions.PlatformAssignmentsManage, permissions.WinLoseReportsView), platformCtrl.ListPartners)
+				api.POST("/partners", need(permissions.PlatformsManage), platformCtrl.SavePartner)
+				api.PATCH("/partners/:id", need(permissions.PlatformsManage), platformCtrl.SavePartner)
+
 				api.GET("/platform-assignments", need(permissions.PlatformsView, permissions.PlatformAssignmentsManage), platformCtrl.ListAssignments)
 				api.POST("/platform-assignments", need(permissions.PlatformAssignmentsManage), platformCtrl.Assign)
 				api.PATCH("/platform-assignments/:id", need(permissions.PlatformAssignmentsManage), platformCtrl.UpdateAssignment)

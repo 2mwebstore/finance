@@ -36,11 +36,13 @@
 
     <section v-if="can('winlose.view', 'winlose.create', 'winlose.edit', 'winlose-reports.view', 'platforms.view', 'platforms.manage', 'platform-assignments.manage')" class="link-card">
       <div class="section-label">PLATFORMS</div>
-      <Can :any="['winlose.view', 'winlose.create', 'winlose.edit']"><NuxtLink to="/winlose/entry"><span>Win/lose entry</span><small>Each platform’s week for an HQ</small><ChevronRight :size="17" /></NuxtLink></Can>
-      <Can perm="winlose-reports.view"><NuxtLink to="/winlose/reports/weekly"><span>Weekly report</span><small>Weeks by HQ and platform, and settlements</small><ChevronRight :size="17" /></NuxtLink></Can>
-      <Can perm="winlose-reports.view"><NuxtLink to="/winlose/reports/hq-summary"><span>HQ summary</span><small>Totals per HQ, USD and KHR apart</small><ChevronRight :size="17" /></NuxtLink></Can>
-      <Can :any="['platforms.view', 'platforms.manage']"><NuxtLink to="/admin/platforms"><span>Platforms</span><small>Platforms, default rates and currencies</small><ChevronRight :size="17" /></NuxtLink></Can>
-      <Can :any="['platforms.view', 'platform-assignments.manage']"><NuxtLink to="/admin/platform-assignments"><span>HQ platform assignments</span><small>Which platforms each HQ reports</small><ChevronRight :size="17" /></NuxtLink></Can>
+      <Can :any="['winlose.view', 'winlose.create', 'winlose.edit']"><NuxtLink to="/winlose/entry"><span>Win/lose entry</span><small>Each platform’s week for a branch</small><ChevronRight :size="17" /></NuxtLink></Can>
+      <Can perm="winlose-reports.view"><NuxtLink to="/winlose/reports/weekly"><span>Weekly report</span><small>Weeks by branch and platform, and settlements</small><ChevronRight :size="17" /></NuxtLink></Can>
+      <Can perm="winlose-reports.view"><NuxtLink to="/winlose/reports/branch-summary"><span>Branch summary</span><small>Totals per branch, USD and KHR apart</small><ChevronRight :size="17" /></NuxtLink></Can>
+      <Can perm="winlose-reports.view"><NuxtLink to="/winlose/reports/partner-statement"><span>Partner statement</span><small>One partner’s weeks across branches</small><ChevronRight :size="17" /></NuxtLink></Can>
+      <Can :any="['platforms.view', 'platforms.manage']"><NuxtLink to="/admin/platforms"><span>Platforms</span><small>Platforms, default partner % and currencies</small><ChevronRight :size="17" /></NuxtLink></Can>
+      <Can :any="['platforms.view', 'platforms.manage']"><NuxtLink to="/admin/partners"><span>Partners</span><small>Who each Partner % is for</small><ChevronRight :size="17" /></NuxtLink></Can>
+      <Can :any="['platforms.view', 'platform-assignments.manage']"><NuxtLink to="/admin/platform-assignments"><span>Branch platform assignments</span><small>Which platforms each branch reports</small><ChevronRight :size="17" /></NuxtLink></Can>
     </section>
 
     <section v-if="showAdmin" class="link-card">

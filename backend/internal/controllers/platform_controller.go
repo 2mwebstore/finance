@@ -37,10 +37,10 @@ func (pc *PlatformController) scope(c *gin.Context) (*accessScope, services.Bran
 
 func writePlatformError(c *gin.Context, err error) {
 	switch {
-	case errors.Is(err, services.ErrPlatformNotFound), errors.Is(err, services.ErrAssignmentNotFound), errors.Is(err, services.ErrSettlementNotFound):
+	case errors.Is(err, services.ErrPlatformNotFound), errors.Is(err, services.ErrPartnerNotFound), errors.Is(err, services.ErrAssignmentNotFound), errors.Is(err, services.ErrSettlementNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 	case errors.Is(err, services.ErrBranchAccessDenied):
-		c.JSON(http.StatusForbidden, gin.H{"error": "you can only work in your own HQs"})
+		c.JSON(http.StatusForbidden, gin.H{"error": "you can only work in your own branches"})
 	default:
 		writeServiceError(c, err)
 	}
@@ -100,6 +100,50 @@ func (pc *PlatformController) SavePlatform(c *gin.Context) {
 	c.JSON(status, p)
 }
 
+// ===== Partners =====
+
+func (pc *PlatformController) ListPartners(c *gin.Context) {
+	rows, err := pc.svc.ListPartners(c.Request.Context(), c.Query("include_inactive") == "true")
+	if err != nil {
+		writePlatformError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": orEmpty(rows)})
+}
+
+func (pc *PlatformController) SavePartner(c *gin.Context) {
+	var id *uuid.UUID
+	if c.Param("id") != "" {
+		parsed, ok := paramID(c)
+		if !ok {
+			return
+		}
+		id = &parsed
+	}
+	var in services.PartnerInput
+	if !bindJSON(c, &in) {
+		return
+	}
+	actor, ok := getActorID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	p, err := pc.svc.SavePartner(c.Request.Context(), id, in)
+	if err != nil {
+		writePlatformError(c, err)
+		return
+	}
+	pc.record(c, actor, "partner.save", "partner", p.ID.String(), nil, map[string]interface{}{
+		"name": p.Name, "phone": p.Phone, "default_rate": p.DefaultRate.String(), "is_active": p.IsActive,
+	})
+	status := http.StatusOK
+	if id == nil {
+		status = http.StatusCreated
+	}
+	c.JSON(status, p)
+}
+
 // ===== Assignments =====
 
 func (pc *PlatformController) ListAssignments(c *gin.Context) {
@@ -123,9 +167,18 @@ func (pc *PlatformController) ListAssignments(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"items": orEmpty(rows)})
 }
 
-func assignmentDetails(a *models.HQPlatformAssignment) map[string]interface{} {
+// partnerDetails lists an assignment's partners for the audit log as "partner id: %".
+func partnerDetails(list []models.AssignmentPartner) []string {
+	out := make([]string, len(list))
+	for i, p := range list {
+		out[i] = p.PartnerID.String() + ": " + p.CommissionRate.String()
+	}
+	return out
+}
+
+func assignmentDetails(a *services.Assignment) map[string]interface{} {
 	return map[string]interface{}{
-		"branch_id": a.BranchID.String(), "platform_id": a.PlatformID.String(),
+		"branch_id": a.BranchID.String(), "platform_id": a.PlatformID.String(), "partners": partnerDetails(a.Partners),
 		"commission_rate": a.CommissionRate.String(), "currency": a.Currency, "starts_on": a.StartsOn.Format("2006-01-02"),
 	}
 }
@@ -172,8 +225,8 @@ func (pc *PlatformController) UpdateAssignment(c *gin.Context) {
 		return
 	}
 	pc.record(c, actor, "platform.assignment.update", "hq_platform_assignment", id.String(), &after.BranchID, map[string]interface{}{
-		"before": map[string]string{"commission_rate": before.CommissionRate.String(), "currency": before.Currency},
-		"after":  map[string]string{"commission_rate": after.CommissionRate.String(), "currency": after.Currency},
+		"before": map[string]interface{}{"partners": partnerDetails(before.Partners), "commission_rate": before.CommissionRate.String(), "currency": before.Currency},
+		"after":  map[string]interface{}{"partners": partnerDetails(after.Partners), "commission_rate": after.CommissionRate.String(), "currency": after.Currency},
 	})
 	c.JSON(http.StatusOK, after)
 }
@@ -249,7 +302,7 @@ func (pc *PlatformController) WeekSheet(c *gin.Context) {
 		return
 	}
 	if branchID == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "choose an HQ", "fields": gin.H{"branch_id": "choose an HQ"}})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "choose a branch", "fields": gin.H{"branch_id": "choose a branch"}})
 		return
 	}
 	sheet, err := pc.svc.WeekSheet(c.Request.Context(), c.Query("week_start"), *branchID, scope)
@@ -379,7 +432,12 @@ func (pc *PlatformController) Report(c *gin.Context) {
 	if !ok {
 		return
 	}
-	report, err := pc.svc.Report(c.Request.Context(), services.ReportFilter{DateFrom: c.Query("date_from"), DateTo: c.Query("date_to"), BranchID: branchID},
+	partnerID, ok := queryID(c, "partner_id")
+	if !ok {
+		return
+	}
+	report, err := pc.svc.Report(c.Request.Context(), services.ReportFilter{DateFrom: c.Query("date_from"), DateTo: c.Query("date_to"), BranchID: branchID,
+		PartnerID: partnerID, ByWeek: c.Query("by_week") == "true"},
 		scope, access.Can(permissions.WinLoseReportsConsolidated))
 	if err != nil {
 		writePlatformError(c, err)

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -74,11 +75,11 @@ func weekStart(t time.Time) time.Time {
 func parseRate(field, raw string) (decimal.Decimal, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return decimal.Zero, fieldError(field, "rate is required")
+		return decimal.Zero, fieldError(field, "partner % is required")
 	}
 	r, err := decimal.NewFromString(raw)
 	if err != nil || r.IsNegative() || r.GreaterThan(hundred) || r.Exponent() < -4 {
-		return decimal.Zero, fieldError(field, "enter a rate from 0 to 100 (at most 4 decimals)")
+		return decimal.Zero, fieldError(field, "enter a partner % from 0 to 100 (at most 4 decimals)")
 	}
 	return r, nil
 }
@@ -216,7 +217,7 @@ func (s *PlatformService) SavePlatform(ctx context.Context, id *uuid.UUID, in Pl
 			return nil, err
 		}
 		if active > 0 {
-			return nil, fieldError("is_active", fmt.Sprintf("%d HQs still have this platform; end those assignments first", active))
+			return nil, fieldError("is_active", fmt.Sprintf("%d branches still have this platform; end those assignments first", active))
 		}
 	}
 	p.Code, p.Name, p.DefaultRate, p.DefaultCurrency = code, name, rate, currency
@@ -234,19 +235,30 @@ func (s *PlatformService) SavePlatform(ctx context.Context, id *uuid.UUID, in Pl
 
 // ===== HQ-platform assignments =====
 
-// AssignmentInput gives one or more platforms to one or more HQs (every platform to every HQ).
+// AssignmentInput gives one or more platforms to one or more branches (every platform to every
+// branch), with the same partners on each.
 type AssignmentInput struct {
 	PlatformIDs []string `json:"platform_ids" binding:"required,min=1,max=100,dive,uuid"`
 	BranchIDs   []string `json:"branch_ids" binding:"required,min=1,max=200,dive,uuid"`
-	// Empty: each platform's default rate (percent) and currency.
-	CommissionRate string `json:"commission_rate"`
-	Currency       string `json:"currency"`
+	// The partners of every assignment made (optional), each at their default %.
+	PartnerIDs []string `json:"partner_ids" binding:"max=50,dive,uuid"`
+	// Empty takes each platform's default currency.
+	Currency string `json:"currency"`
 	// The first day it applies (results are entered per week); empty is today.
 	StartsOn string `json:"starts_on"`
 }
 
+// AssignmentPartnerInput is one of an assignment's partners with their %.
+type AssignmentPartnerInput struct {
+	PartnerID      string `json:"partner_id" binding:"required,uuid"`
+	CommissionRate string `json:"commission_rate"`
+}
+
 type AssignmentUpdateInput struct {
-	CommissionRate string `json:"commission_rate" binding:"required"`
+	// The partners and their % (replaces the ones it had; empty: no partners).
+	Partners []AssignmentPartnerInput `json:"partners" binding:"max=50,dive"`
+	// The assignment's own Partner %, used when it has no partners; empty keeps it.
+	CommissionRate string `json:"commission_rate"`
 	Currency       string `json:"currency" binding:"required,len=3"`
 }
 
@@ -268,14 +280,30 @@ type AssignmentFilter struct {
 	Status     string // active (default) | ended | all
 }
 
+// Assignment is an assignment with its partners.
+type Assignment struct {
+	models.HQPlatformAssignment
+	Partners []models.AssignmentPartner `json:"partners"`
+}
+
+// AssignmentPartnerRow is one of an assignment's partners as the app shows it.
+type AssignmentPartnerRow struct {
+	PartnerID      uuid.UUID       `json:"partner_id"`
+	PartnerName    string          `json:"partner_name"`
+	CommissionRate decimal.Decimal `json:"commission_rate"`
+	// PartnerActive is false when the partner was turned off since.
+	PartnerActive bool `json:"partner_active"`
+}
+
 type AssignmentRow struct {
 	models.HQPlatformAssignment
-	BranchCode   string `json:"branch_code"`
-	BranchName   string `json:"branch_name"`
-	PlatformCode string `json:"platform_code"`
-	PlatformName string `json:"platform_name"`
-	CreatedBy    string `json:"created_by"`
-	EndedBy      string `json:"ended_by"`
+	BranchCode   string                 `json:"branch_code"`
+	BranchName   string                 `json:"branch_name"`
+	PlatformCode string                 `json:"platform_code"`
+	PlatformName string                 `json:"platform_name"`
+	Partners     []AssignmentPartnerRow `json:"partners"`
+	CreatedBy    string                 `json:"created_by"`
+	EndedBy      string                 `json:"ended_by"`
 	// Weeks is how many weekly results were entered under this assignment.
 	Weeks int64 `json:"weeks"`
 }
@@ -305,8 +333,24 @@ func (s *PlatformService) ListAssignments(ctx context.Context, f AssignmentFilte
 	return s.assignmentRows(ctx, list)
 }
 
+// assignmentPartners loads the partners of assignments, by assignment.
+func assignmentPartners(tx *gorm.DB, ids []uuid.UUID) (map[uuid.UUID][]models.AssignmentPartner, error) {
+	out := map[uuid.UUID][]models.AssignmentPartner{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	var rows []models.AssignmentPartner
+	if err := tx.Where("assignment_id IN ?", ids).Order("created_at, partner_id").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, p := range rows {
+		out[p.AssignmentID] = append(out[p.AssignmentID], p)
+	}
+	return out, nil
+}
+
 func (s *PlatformService) assignmentRows(ctx context.Context, list []models.HQPlatformAssignment) ([]AssignmentRow, error) {
-	var branchIDs, platformIDs, userIDs, ids []uuid.UUID
+	var branchIDs, platformIDs, partnerIDs, userIDs, ids []uuid.UUID
 	for _, a := range list {
 		branchIDs, platformIDs, ids = append(branchIDs, a.BranchID), append(platformIDs, a.PlatformID), append(ids, a.ID)
 		userIDs = append(userIDs, a.CreatedByID)
@@ -314,11 +358,24 @@ func (s *PlatformService) assignmentRows(ctx context.Context, list []models.HQPl
 			userIDs = append(userIDs, *a.EndedByID)
 		}
 	}
+	links, err := assignmentPartners(s.db.WithContext(ctx), ids)
+	if err != nil {
+		return nil, err
+	}
+	for _, ps := range links {
+		for _, p := range ps {
+			partnerIDs = append(partnerIDs, p.PartnerID)
+		}
+	}
 	branches, err := s.branchesIn(ctx, branchIDs)
 	if err != nil {
 		return nil, err
 	}
 	platforms, err := s.platformsIn(ctx, platformIDs)
+	if err != nil {
+		return nil, err
+	}
+	partners, err := s.partnersIn(ctx, partnerIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -340,10 +397,17 @@ func (s *PlatformService) assignmentRows(ctx context.Context, list []models.HQPl
 	out := make([]AssignmentRow, len(list))
 	for i, a := range list {
 		row := AssignmentRow{HQPlatformAssignment: a, BranchCode: branches[a.BranchID].Code, BranchName: branches[a.BranchID].Name,
-			PlatformCode: platforms[a.PlatformID].Code, PlatformName: platforms[a.PlatformID].Name, CreatedBy: users[a.CreatedByID], Weeks: weeks[a.ID]}
+			PlatformCode: platforms[a.PlatformID].Code, PlatformName: platforms[a.PlatformID].Name, Partners: []AssignmentPartnerRow{},
+			CreatedBy: users[a.CreatedByID], Weeks: weeks[a.ID]}
 		if a.EndedByID != nil {
 			row.EndedBy = users[*a.EndedByID]
 		}
+		for _, p := range links[a.ID] {
+			partner := partners[p.PartnerID]
+			row.Partners = append(row.Partners, AssignmentPartnerRow{PartnerID: p.PartnerID, PartnerName: partner.Name, CommissionRate: p.CommissionRate,
+				PartnerActive: partner.IsActive && !partner.DeletedAt.Valid})
+		}
+		sort.Slice(row.Partners, func(i, j int) bool { return row.Partners[i].PartnerName < row.Partners[j].PartnerName })
 		out[i] = row
 	}
 	return out, nil
@@ -364,16 +428,49 @@ func overlapping(tx *gorm.DB, branchID, platformID uuid.UUID, day time.Time, exc
 	return &a, err
 }
 
-// Assign gives each platform to each HQ (all or nothing). A rate or currency typed in applies to
-// every platform; left empty, each platform's own default is used.
-func (s *PlatformService) Assign(ctx context.Context, in AssignmentInput, scope BranchScope, actor uuid.UUID) ([]models.HQPlatformAssignment, error) {
-	var rate *decimal.Decimal
-	if strings.TrimSpace(in.CommissionRate) != "" {
-		r, err := parseRate("commission_rate", in.CommissionRate)
+// checkShares refuses partners whose % add up to more than 100.
+func checkShares(field string, list []models.AssignmentPartner) error {
+	sum := decimal.Zero
+	for _, p := range list {
+		sum = sum.Add(p.CommissionRate)
+	}
+	if sum.GreaterThan(hundred) {
+		return fieldError(field, "the partners’ % add up to "+sum.String()+"; they can share at most 100%")
+	}
+	return nil
+}
+
+// createPartners saves an assignment's partners (new link rows).
+func createPartners(tx *gorm.DB, assignmentID uuid.UUID, list []models.AssignmentPartner) ([]models.AssignmentPartner, error) {
+	out := make([]models.AssignmentPartner, len(list))
+	for i, p := range list {
+		p.ID, p.AssignmentID = uuid.New(), assignmentID
+		if err := tx.Create(&p).Error; err != nil {
+			return nil, err
+		}
+		out[i] = p
+	}
+	return out, nil
+}
+
+// Assign gives each platform to each branch (all or nothing), with the chosen partners, each at
+// their default %. The assignment's own % (used when it has no partners) is the platform's
+// default; the currency is the one chosen, else each platform's own.
+func (s *PlatformService) Assign(ctx context.Context, in AssignmentInput, scope BranchScope, actor uuid.UUID) ([]Assignment, error) {
+	partnerIDs, err := uniqueIDs(in.PartnerIDs, nil)
+	if err != nil {
+		return nil, err
+	}
+	shares := make([]models.AssignmentPartner, 0, len(partnerIDs))
+	for _, id := range partnerIDs {
+		partner, err := s.activePartner(ctx, "partner_ids", id)
 		if err != nil {
 			return nil, err
 		}
-		rate = &r
+		shares = append(shares, models.AssignmentPartner{PartnerID: partner.ID, CommissionRate: partner.DefaultRate})
+	}
+	if err := checkShares("partner_ids", shares); err != nil {
+		return nil, err
 	}
 	currency := strings.ToUpper(strings.TrimSpace(in.Currency))
 	if currency != "" {
@@ -413,12 +510,12 @@ func (s *PlatformService) Assign(ctx context.Context, in AssignmentInput, scope 
 		return nil, err
 	}
 	one := int8(1)
-	out := make([]models.HQPlatformAssignment, 0, len(platformIDs)*len(branchIDs))
+	out := make([]Assignment, 0, len(platformIDs)*len(branchIDs))
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		for _, branchID := range branchIDs {
 			b, ok := branches[branchID]
 			if !ok || !b.IsActive {
-				return fieldError("branch_ids", "an HQ was not found or is turned off")
+				return fieldError("branch_ids", "a branch was not found or is turned off")
 			}
 			for _, platformID := range platformIDs {
 				platform := platforms[platformID]
@@ -436,9 +533,6 @@ func (s *PlatformService) Assign(ctx context.Context, in AssignmentInput, scope 
 					Base: models.Base{ID: uuid.New()}, BranchID: branchID, PlatformID: platformID, CommissionRate: platform.DefaultRate, Currency: platform.DefaultCurrency,
 					IsActive: true, ActiveKey: &one, StartsOn: starts, CreatedByID: actor,
 				}
-				if rate != nil {
-					a.CommissionRate = *rate
-				}
 				if currency != "" {
 					a.Currency = currency
 				}
@@ -448,7 +542,11 @@ func (s *PlatformService) Assign(ctx context.Context, in AssignmentInput, scope 
 					}
 					return err
 				}
-				out = append(out, a)
+				links, err := createPartners(tx, a.ID, shares)
+				if err != nil {
+					return err
+				}
+				out = append(out, Assignment{HQPlatformAssignment: a, Partners: links})
 			}
 		}
 		return nil
@@ -494,27 +592,91 @@ func (s *PlatformService) activeAssignment(tx *gorm.DB, id uuid.UUID, scope Bran
 	return &a, nil
 }
 
-// UpdateAssignment changes the rate and currency of an active assignment. Days already saved keep
-// the rate and currency they were worked out with.
-func (s *PlatformService) UpdateAssignment(ctx context.Context, id uuid.UUID, in AssignmentUpdateInput, scope BranchScope) (before, after *models.HQPlatformAssignment, err error) {
-	rate, err := parseRate("commission_rate", in.CommissionRate)
+// withPartners loads an assignment and its partners.
+func withPartners(tx *gorm.DB, id uuid.UUID) (*Assignment, error) {
+	var a models.HQPlatformAssignment
+	if err := tx.First(&a, "id = ?", id).Error; err != nil {
+		return nil, err
+	}
+	links, err := assignmentPartners(tx, []uuid.UUID{id})
 	if err != nil {
-		return nil, nil, err
+		return nil, err
+	}
+	out := &Assignment{HQPlatformAssignment: a, Partners: links[id]}
+	if out.Partners == nil {
+		out.Partners = []models.AssignmentPartner{}
+	}
+	return out, nil
+}
+
+// UpdateAssignment changes the partners (and each one's %), the assignment's own % and the
+// currency of an active assignment. Weeks already saved keep the partners, % and currency they
+// were worked out with.
+func (s *PlatformService) UpdateAssignment(ctx context.Context, id uuid.UUID, in AssignmentUpdateInput, scope BranchScope) (before, after *Assignment, err error) {
+	var ownRate *decimal.Decimal
+	if strings.TrimSpace(in.CommissionRate) != "" {
+		r, err := parseRate("commission_rate", in.CommissionRate)
+		if err != nil {
+			return nil, nil, err
+		}
+		ownRate = &r
 	}
 	currency := strings.ToUpper(strings.TrimSpace(in.Currency))
 	if err := validateCurrency(ctx, s.db, currency); err != nil {
 		return nil, nil, fieldError("currency", err.Error())
+	}
+	shares := make([]models.AssignmentPartner, 0, len(in.Partners))
+	seen := map[uuid.UUID]bool{}
+	for _, p := range in.Partners {
+		partnerID := uuid.MustParse(p.PartnerID)
+		if seen[partnerID] {
+			return nil, nil, fieldError("partners", "a partner is listed twice")
+		}
+		seen[partnerID] = true
+		rate, err := parseRate("partners", p.CommissionRate)
+		if err != nil {
+			return nil, nil, err
+		}
+		shares = append(shares, models.AssignmentPartner{PartnerID: partnerID, CommissionRate: rate})
+	}
+	if err := checkShares("partners", shares); err != nil {
+		return nil, nil, err
 	}
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		a, err := s.activeAssignment(tx, id, scope)
 		if err != nil {
 			return err
 		}
-		old := *a
-		before = &old
-		a.CommissionRate, a.Currency = rate, currency
-		after = a
-		return tx.Model(a).Updates(map[string]interface{}{"commission_rate": rate, "currency": currency, "updated_at": time.Now()}).Error
+		if before, err = withPartners(tx, a.ID); err != nil {
+			return err
+		}
+		// A new partner must be active; keeping one that was turned off since is fine.
+		had := map[uuid.UUID]bool{}
+		for _, p := range before.Partners {
+			had[p.PartnerID] = true
+		}
+		for _, p := range shares {
+			if !had[p.PartnerID] {
+				if _, err := s.activePartner(ctx, "partners", p.PartnerID); err != nil {
+					return err
+				}
+			}
+		}
+		rate := a.CommissionRate
+		if ownRate != nil {
+			rate = *ownRate
+		}
+		if err := tx.Model(a).Updates(map[string]interface{}{"commission_rate": rate, "currency": currency, "updated_at": time.Now()}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("assignment_id = ?", a.ID).Delete(&models.AssignmentPartner{}).Error; err != nil {
+			return err
+		}
+		if _, err := createPartners(tx, a.ID, shares); err != nil {
+			return err
+		}
+		after, err = withPartners(tx, a.ID)
+		return err
 	})
 	return before, after, err
 }
@@ -540,7 +702,7 @@ func endOn(tx *gorm.DB, a *models.HQPlatformAssignment, last time.Time, reason s
 }
 
 // EndAssignment takes the platform off the HQ from the day after EndsOn (today at the latest).
-func (s *PlatformService) EndAssignment(ctx context.Context, id uuid.UUID, in AssignmentEndInput, scope BranchScope, actor uuid.UUID) (*models.HQPlatformAssignment, error) {
+func (s *PlatformService) EndAssignment(ctx context.Context, id uuid.UUID, in AssignmentEndInput, scope BranchScope, actor uuid.UUID) (*Assignment, error) {
 	last, err := s.parseDay("ends_on", in.EndsOn)
 	if err != nil {
 		return nil, err
@@ -548,7 +710,7 @@ func (s *PlatformService) EndAssignment(ctx context.Context, id uuid.UUID, in As
 	if last.After(s.today()) {
 		return nil, fieldError("ends_on", "the last day can't be in the future")
 	}
-	var out models.HQPlatformAssignment
+	var out *Assignment
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		a, err := s.activeAssignment(tx, id, scope)
 		if err != nil {
@@ -557,17 +719,18 @@ func (s *PlatformService) EndAssignment(ctx context.Context, id uuid.UUID, in As
 		if err := endOn(tx, a, last, in.Reason, actor); err != nil {
 			return err
 		}
-		return tx.First(&out, "id = ?", id).Error
+		out, err = withPartners(tx, id)
+		return err
 	})
 	if err != nil {
 		return nil, err
 	}
-	return &out, nil
+	return out, nil
 }
 
-// MoveAssignment ends the platform at one HQ and gives it to another from the given day, with the
-// same rate and currency (one transaction; the old assignment stays as history).
-func (s *PlatformService) MoveAssignment(ctx context.Context, id uuid.UUID, in AssignmentMoveInput, scope BranchScope, actor uuid.UUID) (ended, created *models.HQPlatformAssignment, err error) {
+// MoveAssignment ends the platform at one branch and gives it to another from the given day, with
+// the same partners, % and currency (one transaction; the old assignment stays as history).
+func (s *PlatformService) MoveAssignment(ctx context.Context, id uuid.UUID, in AssignmentMoveInput, scope BranchScope, actor uuid.UUID) (ended, created *Assignment, err error) {
 	on, err := s.parseDay("on", in.On)
 	if err != nil {
 		return nil, nil, err
@@ -585,7 +748,7 @@ func (s *PlatformService) MoveAssignment(ctx context.Context, id uuid.UUID, in A
 	}
 	b, ok := branches[target]
 	if !ok || !b.IsActive {
-		return nil, nil, fieldError("branch_id", "this HQ was not found or is turned off")
+		return nil, nil, fieldError("branch_id", "this branch was not found or is turned off")
 	}
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		a, err := s.activeAssignment(tx, id, scope)
@@ -593,7 +756,7 @@ func (s *PlatformService) MoveAssignment(ctx context.Context, id uuid.UUID, in A
 			return err
 		}
 		if a.BranchID == target {
-			return fieldError("branch_id", "choose another HQ")
+			return fieldError("branch_id", "choose another branch")
 		}
 		reason := strings.TrimSpace(in.Reason)
 		if reason == "" {
@@ -623,12 +786,14 @@ func (s *PlatformService) MoveAssignment(ctx context.Context, id uuid.UUID, in A
 			}
 			return err
 		}
-		var old models.HQPlatformAssignment
-		if err := tx.First(&old, "id = ?", a.ID).Error; err != nil {
+		if ended, err = withPartners(tx, a.ID); err != nil {
 			return err
 		}
-		ended, created = &old, &next
-		return nil
+		if _, err := createPartners(tx, next.ID, ended.Partners); err != nil {
+			return err
+		}
+		created, err = withPartners(tx, next.ID)
+		return err
 	})
 	return ended, created, err
 }

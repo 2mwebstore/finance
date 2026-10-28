@@ -51,7 +51,7 @@ var hundred = decimal.NewFromInt(100)
 var formulas = map[string]Formula{
 	V1: {
 		Version:     V1,
-		Description: "Total = ROUND((Win/Lose + Commission) × Rate, 0)",
+		Description: "Total = ROUND((Win/Lose + Commission) × Partner %, 0)",
 		calc: func(in Input) (decimal.Decimal, decimal.Decimal) {
 			adjusted := in.WinLose.Add(in.Commission)
 			return adjusted, adjusted.Mul(in.RatePct).Div(hundred).Round(0)

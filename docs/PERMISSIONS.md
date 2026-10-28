@@ -55,15 +55,15 @@ Server-side authorization is enforced on every protected API. The UI uses the sa
 | `inventory-expenses.view` | View Inventory Expenses | Inventory Expenses | See inventory expenses of your branches |
 | `inventory-expenses.create` | Create Inventory Expenses | Inventory Expenses | Record inventory expenses (shipping, packaging, storage…) |
 | `inventory-expenses.void` | Void Inventory Expenses | Inventory Expenses | Void an inventory expense |
-| `platforms.view` | View Platforms | Platforms | See platforms and the HQs (branches) they are assigned to |
-| `platforms.manage` | Manage Platforms | Platforms | Add and edit platforms with their default rate and currency |
-| `platform-assignments.manage` | Manage HQ Platform Assignments | Platforms | Assign platforms to HQs with a commission rate; change, end or move assignments |
-| `winlose.view` | View Win/Lose | Win/Lose | See the weekly win/lose entered for your HQs |
-| `winlose.create` | Enter Win/Lose | Win/Lose | Enter a week's win/lose and commission for your HQs (once a week) |
+| `platforms.view` | View Platforms | Platforms | See platforms, partners and the branches they are assigned to |
+| `platforms.manage` | Manage Platforms | Platforms | Add and edit platforms and partners, with their default partner % and currency |
+| `platform-assignments.manage` | Manage Branch Platform Assignments | Platforms | Assign platforms to branches with their partners; change partners and their %, end or move assignments |
+| `winlose.view` | View Win/Lose | Win/Lose | See the weekly win/lose entered for your branches |
+| `winlose.create` | Enter Win/Lose | Win/Lose | Enter a week's win/lose and commission for your branches (once a week) |
 | `winlose.edit` | Correct Win/Lose | Win/Lose | Change a week already saved, with a reason (kept in the audit log) |
-| `winlose-reports.view` | View Win/Lose Reports | Win/Lose Reports | The weekly report and the HQ summary for your HQs, one HQ at a time |
-| `winlose-reports.consolidated` | View Consolidated Win/Lose | Win/Lose Reports | Combined totals across all your HQs (Main HQ view) |
-| `winlose-settlements.finalize` | Finalize Weekly Settlements | Win/Lose Reports | Finalize or reopen an HQ's week; a finalized week can't be changed |
+| `winlose-reports.view` | View Win/Lose Reports | Win/Lose Reports | The weekly report and the branch summary for your branches, one branch at a time |
+| `winlose-reports.consolidated` | View Consolidated Win/Lose | Win/Lose Reports | Combined totals across all your branches |
+| `winlose-settlements.finalize` | Finalize Weekly Settlements | Win/Lose Reports | Finalize or reopen a branch's week; a finalized week can't be changed |
 
 ## By module
 
@@ -159,21 +159,21 @@ Inventory is separate from income/expense. Products are shared by every branch; 
 Inventory expenses use their own categories (type `inv_expense`, managed with `inventory.manage` on Inventory → Expense categories) and come off the sales profit as net profit. Inventory reports (stock value, sales and profit, purchases, expenses, low stock) need both `reports.view` and `inventory.view`. Nobody approves a purchase they created; people with `purchases.approve` record their own purchases as approved unless they send them for approval.
 
 ### Platforms & weekly win/lose
-An HQ is a branch: people enter and see win/lose only for their own branches (owner/admin see every branch). A platform can be assigned to many HQs and an HQ can have many platforms, each assignment with its own commission rate (percent) and currency.
+Win/lose is entered per branch: people enter and see it only for their own branches (owner/admin see every branch). A platform can be assigned to many branches and a branch can have many platforms, each assignment with its own partners (each at their own %) and currency.
 
 | Code | Description |
 |------|-------------|
-| `platforms.view` | See platforms and the HQs (branches) they are assigned to |
-| `platforms.manage` | Add and edit platforms with their default rate and currency |
-| `platform-assignments.manage` | Assign platforms to HQs with a commission rate; change, end or move assignments |
-| `winlose.view` | See the weekly win/lose entered for your HQs |
-| `winlose.create` | Enter a week's win/lose and commission for your HQs (once a week) |
+| `platforms.view` | See platforms, partners and the branches they are assigned to |
+| `platforms.manage` | Add and edit platforms and partners, with their default partner % and currency |
+| `platform-assignments.manage` | Assign platforms to branches with their partners; change partners and their %, end or move assignments |
+| `winlose.view` | See the weekly win/lose entered for your branches |
+| `winlose.create` | Enter a week's win/lose and commission for your branches (once a week) |
 | `winlose.edit` | Change a week already saved, with a reason (kept in the audit log) |
-| `winlose-reports.view` | The weekly report and the HQ summary for your HQs, one HQ at a time |
-| `winlose-reports.consolidated` | Combined totals across all your HQs (Main HQ view) |
-| `winlose-settlements.finalize` | Finalize or reopen an HQ's week; a finalized week can't be changed |
+| `winlose-reports.view` | The weekly report and the branch summary for your branches, one branch at a time |
+| `winlose-reports.consolidated` | Combined totals across all your branches |
+| `winlose-settlements.finalize` | Finalize or reopen a branch's week; a finalized week can't be changed |
 
-Win/lose is entered once a week (Monday to Sunday) per HQ and platform. A saved week keeps the rate, currency and formula version it was worked out with; changing it needs `winlose.edit` and a reason (audit log). A finalized week can't be changed until someone with `winlose-settlements.finalize` reopens it. Reports without one HQ chosen (all your HQs together) need `winlose-reports.consolidated`. Owner/admin (Manage Branches) get these permissions automatically when they first ship.
+Win/lose is entered once a week (Monday to Sunday) per branch and platform. A saved week keeps the partners, partner %, currency and formula version it was worked out with; changing it needs `winlose.edit` and a reason (audit log). A finalized week can't be changed until someone with `winlose-settlements.finalize` reopens it. Reports without one branch chosen (all your branches together) need `winlose-reports.consolidated`. Owner/admin (Manage Branches) get these permissions automatically when they first ship.
 
 ## Default system roles (summary)
 

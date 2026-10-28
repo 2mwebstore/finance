@@ -44,6 +44,7 @@
             <span class="module-name">{{ page.label }}</span>
             <span class="module-count">{{ page.selected }}/{{ page.items.length }}</span>
           </label>
+          <p v-if="page.note" class="module-note">{{ page.note }}</p>
           <label v-for="permission in page.items" :key="permission.code" class="permission-row" :class="{ 'is-checked': selected.has(permission.code) }">
             <input
               type="checkbox"
@@ -55,6 +56,7 @@
             <span class="permission-copy">
               <strong>{{ permission.name }}</strong>
               <small>{{ permission.description || permission.code }}</small>
+              <small v-if="alsoOn(permission.code, page.label)" class="permission-also">Also on {{ alsoOn(permission.code, page.label) }}</small>
             </span>
           </label>
         </section>
@@ -66,7 +68,7 @@
 <script setup lang="ts">
 import { Search } from 'lucide-vue-next'
 import type { Permission } from '~/types/api'
-import { groupByMenu } from '~/utils/permissionMenu'
+import { groupByMenu, pagesOf } from '~/utils/permissionMenu'
 
 const props = withDefaults(defineProps<{
   modelValue: string[]
@@ -92,12 +94,18 @@ const sections = computed(() => {
         }))
         .filter(page => page.items.length)
         .map(page => ({ ...page, selected: page.items.filter(item => selected.value.has(item.code)).length }))
-      const codes = pages.flatMap(page => page.items.map(item => item.code))
+      // A permission on several pages counts once.
+      const codes = [...new Set(pages.flatMap(page => page.items.map(item => item.code)))]
       return { caption: section.caption, pages, codes, total: codes.length, selected: codes.filter(code => selected.value.has(code)).length }
     })
     .filter(section => section.pages.length)
 })
-const visibleCodes = computed(() => sections.value.flatMap(section => section.codes))
+const visibleCodes = computed(() => [...new Set(sections.value.flatMap(section => section.codes))])
+
+// The other sidebar pages a permission also opens (ticking it here ticks it there too).
+function alsoOn(code: string, page: string) {
+  return pagesOf(code).filter(label => label !== page).join(', ')
+}
 const allVisibleSelected = computed(() => visibleCodes.value.length > 0 && visibleCodes.value.every(code => selected.value.has(code)))
 const anyVisibleSelected = computed(() => visibleCodes.value.some(code => selected.value.has(code)))
 
@@ -134,6 +142,8 @@ function setMany(codes: string[], checked: boolean) {
 .module-header { display: flex; align-items: center; gap: 10px; border-bottom: 1px solid #edf1f7; padding: 10px 12px; background: #f8fafd; cursor: pointer; }
 .module-icon { display: grid; flex: 0 0 auto; width: 26px; height: 26px; place-items: center; border-radius: 7px; color: #fff; background: linear-gradient(180deg, #163a6e, #0d2852); }
 .module-card.is-full .module-icon { background: linear-gradient(100deg, #287ef2, #1263df); }
+.module-note { margin: 0; border-bottom: 1px solid #f1f4f9; padding: 6px 12px; color: #8a6d1f; background: #fffbeb; font-size: 11px; }
+.permission-also { color: #2563eb !important; font-weight: 600; }
 .module-name { flex: 1; color: #1b3156; font-size: 13px; font-weight: 750; }
 .module-count { border-radius: 999px; padding: 2px 8px; color: #5f7391; background: #eef2f8; font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .module-card.is-full .module-count { color: #1769e8; background: #e7f0ff; }

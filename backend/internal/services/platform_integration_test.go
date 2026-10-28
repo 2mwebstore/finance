@@ -55,7 +55,7 @@ func newWLFixture(t *testing.T) *wlFixture {
 		t.Fatal(err)
 	}
 	f := &wlFixture{db: db, svc: NewPlatformService(db, "Asia/Phnom_Penh"), ctx: context.Background()}
-	for _, table := range []string{"weekly_settlement_totals", "weekly_settlements", "weekly_platform_results", "hq_platform_assignments"} {
+	for _, table := range []string{"weekly_settlement_totals", "weekly_settlements", "weekly_partner_results", "weekly_platform_results", "assignment_partners", "hq_platform_assignments"} {
 		db.Exec("DELETE FROM " + table)
 	}
 	db.Exec("DELETE FROM platforms WHERE code LIKE 'TWL%'")
@@ -108,7 +108,7 @@ func (f *wlFixture) ids(hqs ...int) []string {
 }
 
 // assign gives platforms to HQs from three weeks before the test week.
-func (f *wlFixture) assign(t *testing.T, platforms []models.Platform, hqs ...int) []models.HQPlatformAssignment {
+func (f *wlFixture) assign(t *testing.T, platforms []models.Platform, hqs ...int) []Assignment {
 	t.Helper()
 	var pids []string
 	for _, p := range platforms {
@@ -173,10 +173,11 @@ func TestPlatformAssignmentsManyToMany(t *testing.T) {
 	if err := f.db.Create(&dup).Error; !isDuplicate(err) {
 		t.Errorf("the unique key must stop a second active assignment, got %v", err)
 	}
-	// A rate typed in applies to every platform assigned with it.
-	list, err := f.svc.Assign(f.ctx, AssignmentInput{PlatformIDs: []string{f.p1.ID.String(), f.p2.ID.String()}, BranchIDs: f.ids(3), CommissionRate: "20"}, all, f.actor)
-	if err != nil || len(list) != 2 || !list[0].CommissionRate.Equal(decimal.NewFromInt(20)) || !list[1].CommissionRate.Equal(decimal.NewFromInt(20)) {
-		t.Errorf("one rate for both platforms: %v", err)
+	// A currency chosen applies to every platform assigned with it; each keeps its own default %.
+	list, err := f.svc.Assign(f.ctx, AssignmentInput{PlatformIDs: []string{f.p1.ID.String(), f.p2.ID.String()}, BranchIDs: f.ids(3), Currency: "USD"}, all, f.actor)
+	if err != nil || len(list) != 2 || list[0].Currency != "USD" || list[1].Currency != "USD" ||
+		!list[0].CommissionRate.Equal(decimal.NewFromInt(35)) || !list[1].CommissionRate.Equal(decimal.NewFromInt(10)) || len(list[0].Partners) != 0 {
+		t.Errorf("one currency for both platforms, each at its own %%: %v", err)
 	}
 }
 
@@ -404,6 +405,156 @@ func TestWeeklySettlementLocksTheWeek(t *testing.T) {
 	for _, total := range again.Totals {
 		if total.Currency == "USD" && !total.JamePS.Equal(decimal.NewFromInt(455)) { // (1100 + 200) × 35%
 			t.Errorf("finalizing again works the totals out afresh: USD %s, want 455", total.JamePS)
+		}
+	}
+}
+
+func TestPartners(t *testing.T) {
+	f := newWLFixture(t)
+	f.db.Exec("DELETE FROM partners WHERE name LIKE 'TWL%'")
+	save := func(name, rate string) models.Partner {
+		p, err := f.svc.SavePartner(f.ctx, nil, PartnerInput{Name: name, DefaultRate: rate})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return *p
+	}
+	a, b, c := save("TWL Sok Dara", "40"), save("TWL Chan Lina", "10"), save("TWL Dara Vy", "70")
+	if _, err := f.svc.SavePartner(f.ctx, nil, PartnerInput{Name: "TWL Sok Dara", DefaultRate: "5"}); err == nil {
+		t.Error("a second partner with the same name must be refused")
+	}
+	n := func(v int64) decimal.Decimal { return decimal.NewFromInt(v) }
+
+	// Several partners per assignment, each at their default %.
+	start := dayString(f.week.AddDate(0, 0, -21))
+	la, err := f.svc.Assign(f.ctx, AssignmentInput{PlatformIDs: []string{f.p1.ID.String()}, BranchIDs: f.ids(0), PartnerIDs: []string{a.ID.String(), b.ID.String()}, StartsOn: start}, all, f.actor)
+	if err != nil || len(la[0].Partners) != 2 || !la[0].CommissionRate.Equal(n(35)) {
+		t.Fatalf("two partners on the assignment: %v", err)
+	}
+	rates := map[uuid.UUID]string{}
+	for _, p := range la[0].Partners {
+		rates[p.PartnerID] = p.CommissionRate.String()
+	}
+	if rates[a.ID] != "40" || rates[b.ID] != "10" {
+		t.Errorf("each partner at their default %%, got %v", rates)
+	}
+	lb, err := f.svc.Assign(f.ctx, AssignmentInput{PlatformIDs: []string{f.p2.ID.String()}, BranchIDs: f.ids(0, 1), PartnerIDs: []string{b.ID.String()}, StartsOn: start}, all, f.actor)
+	if err != nil || len(lb) != 2 || len(lb[1].Partners) != 1 {
+		t.Fatalf("one partner on two branches: %v", err)
+	}
+	if _, err := f.svc.Assign(f.ctx, AssignmentInput{PlatformIDs: []string{f.p1.ID.String()}, BranchIDs: f.ids(3), PartnerIDs: []string{a.ID.String(), c.ID.String()}}, all, f.actor); err == nil {
+		t.Error("partners sharing more than 100% must be refused")
+	}
+
+	// Each partner's Total is at their %, and the platform's Total is the sum.
+	sheet, _, err := f.save(f.week, 0, canAll, "", row(f.p1, "1000", "0"), row(f.p2, "100000", "0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r1 := sheetRow(t, sheet, f.p1)
+	if len(r1.Partners) != 2 || !r1.JamePS.Equal(n(500)) || !r1.CommissionRate.Equal(n(50)) {
+		t.Fatalf("total 500 at 50%% (40 + 10), got %s at %s with %d partners", r1.JamePS, r1.CommissionRate, len(r1.Partners))
+	}
+	if p := r1.Partners[0]; p.PartnerName != b.Name || !p.JamePS.Equal(n(100)) { // by name: Chan Lina first
+		t.Errorf("Chan Lina's share: %s %v", p.PartnerName, p.JamePS)
+	}
+	if p := r1.Partners[1]; p.PartnerName != a.Name || !p.JamePS.Equal(n(400)) {
+		t.Errorf("Sok Dara's share: %s %v", p.PartnerName, p.JamePS)
+	}
+
+	// New partners on the assignment apply to new weeks; the saved week keeps its partners.
+	if _, _, err := f.svc.UpdateAssignment(f.ctx, la[0].ID, AssignmentUpdateInput{Partners: []AssignmentPartnerInput{{PartnerID: b.ID.String(), CommissionRate: "25"}}, Currency: "USD"}, all); err != nil {
+		t.Fatal(err)
+	}
+	next, _, err := f.save(f.week.AddDate(0, 0, 7), 0, canAll, "", row(f.p1, "500", "0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := sheetRow(t, next, f.p1); len(r.Partners) != 1 || !r.JamePS.Equal(n(125)) {
+		t.Errorf("the next week has Chan Lina alone at 25%%: total %s", r.JamePS)
+	}
+	// Correcting the saved week works each partner's share out again at their saved %.
+	fixed, _, err := f.save(f.week, 0, canAll, "typo", row(f.p1, "1100", "0"), row(f.p2, "100000", "0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := sheetRow(t, fixed, f.p1); len(r.Partners) != 2 || !r.JamePS.Equal(n(550)) || !r.Partners[1].JamePS.Equal(n(440)) {
+		t.Errorf("corrected: total %s, want 550 = 110 + 440", r.JamePS)
+	}
+
+	// Each line shows its partners' shares; totals per partner; the statement is the partner's share.
+	r, err := f.svc.Report(f.ctx, ReportFilter{DateFrom: dayString(f.week), DateTo: dayString(f.week.AddDate(0, 0, 13))}, all, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range r.Lines {
+		if l.BranchID == f.hq[0].ID && l.PlatformID == f.p1.ID {
+			if !l.JamePS.Equal(n(675)) || !l.WinLose.Equal(n(1600)) || len(l.Partners) != 2 || !l.Partners[0].JamePS.Equal(n(235)) || !l.Partners[1].JamePS.Equal(n(440)) {
+				t.Errorf("line: total %s, win/lose %s, shares %+v", l.JamePS, l.WinLose, l.Partners)
+			}
+		}
+	}
+	totals := map[string]string{}
+	for _, p := range r.Partners {
+		for _, s := range p.Totals {
+			totals[p.PartnerName+" "+s.Currency] = s.JamePS.String()
+		}
+	}
+	if totals[a.Name+" USD"] != "440" || totals[b.Name+" USD"] != "235" || totals[b.Name+" KHR"] != "10000" || totals[" USD"] != "" {
+		t.Errorf("totals per partner: %v", totals)
+	}
+	st, err := f.svc.Report(f.ctx, ReportFilter{DateFrom: dayString(f.week), DateTo: dayString(f.week.AddDate(0, 0, 13)), PartnerID: &b.ID, ByWeek: true}, all, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	weeks := map[string]string{}
+	for _, l := range st.Lines {
+		if l.PlatformID == f.p1.ID {
+			weeks[l.WeekStart] = l.JamePS.String()
+		}
+	}
+	if weeks[dayString(f.week)] != "110" || weeks[dayString(f.week.AddDate(0, 0, 7))] != "125" {
+		t.Errorf("the statement has Chan Lina's share each week, got %v", weeks)
+	}
+	if len(st.Totals) != 2 || st.Totals[1].Currency != "USD" || !st.Totals[1].JamePS.Equal(n(235)) {
+		t.Errorf("statement totals: %+v", st.Totals)
+	}
+
+	// A partner in use can't be turned off; one no longer used can, and can't be given again.
+	off := false
+	if _, err := f.svc.SavePartner(f.ctx, &b.ID, PartnerInput{Name: b.Name, DefaultRate: "10", IsActive: &off}); err == nil {
+		t.Error("turning off a partner with active assignments must be refused")
+	}
+	if _, err := f.svc.SavePartner(f.ctx, &a.ID, PartnerInput{Name: a.Name, DefaultRate: "40", IsActive: &off}); err != nil {
+		t.Errorf("a partner no longer used can be turned off: %v", err)
+	}
+	if _, err := f.svc.Assign(f.ctx, AssignmentInput{PlatformIDs: []string{f.p1.ID.String()}, BranchIDs: f.ids(3), PartnerIDs: []string{a.ID.String()}}, all, f.actor); err == nil {
+		t.Error("a turned-off partner can't be given to an assignment")
+	}
+	if _, _, err := f.svc.UpdateAssignment(f.ctx, lb[0].ID, AssignmentUpdateInput{Partners: []AssignmentPartnerInput{{PartnerID: b.ID.String(), CommissionRate: "10"}, {PartnerID: a.ID.String(), CommissionRate: "5"}}, Currency: "KHR"}, all); err == nil {
+		t.Error("a turned-off partner can't be added to an assignment")
+	}
+	// Moving keeps the partners and their %.
+	_, moved, err := f.svc.MoveAssignment(f.ctx, lb[1].ID, AssignmentMoveInput{BranchID: f.hq[2].ID.String(), On: dayString(f.week.AddDate(0, 0, 14))}, all, f.actor)
+	if err != nil || len(moved.Partners) != 1 || moved.Partners[0].PartnerID != b.ID || !moved.Partners[0].CommissionRate.Equal(n(10)) {
+		t.Errorf("moving keeps the partners: %v", err)
+	}
+	list, err := f.svc.ListPartners(f.ctx, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range list {
+		if p.ID == b.ID && p.ActiveAssignments != 3 { // hq0 p1, hq0 p2 and the moved one
+			t.Errorf("Chan Lina is on 3 active assignments, got %d", p.ActiveAssignments)
+		}
+	}
+	rows, err := f.svc.ListAssignments(f.ctx, AssignmentFilter{BranchID: &f.hq[0].ID}, all)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range rows {
+		if row.PlatformID == f.p1.ID && (len(row.Partners) != 1 || row.Partners[0].PartnerName != b.Name || row.Partners[0].CommissionRate.String() != "25") {
+			t.Errorf("the assignment lists its partner: %+v", row.Partners)
 		}
 	}
 }

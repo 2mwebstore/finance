@@ -1,10 +1,29 @@
--- Platforms and weekly win/lose (HQ = branch): platforms, HQ-platform assignments, weekly results
--- and weekly settlements. Same SQL as internal/database/platforms.go. Only adds: safe to run again.
--- The tables take the collation of branches.id, so their foreign keys can be created whichever
--- collation the database uses.
+-- Platforms and weekly win/lose (HQ = branch): platforms, partners, branch-platform assignments
+-- and their partners, weekly results with each partner's share, and weekly settlements. Same SQL
+-- as internal/database/platforms.go. Only adds: safe to run again. The tables take the collation of
+-- branches.id, so their foreign keys can be created whichever collation the database uses.
 
 SET @coll = COALESCE((SELECT collation_name FROM information_schema.columns
     WHERE table_schema = DATABASE() AND table_name = 'branches' AND column_name = 'id'), 'utf8mb4_unicode_ci');
+
+-- partners
+SET @ddl = CONCAT('CREATE TABLE IF NOT EXISTS partners (
+    id CHAR(36) NOT NULL,
+    name VARCHAR(128) NOT NULL,
+    phone VARCHAR(32) NOT NULL DEFAULT '''',
+    note VARCHAR(255) NOT NULL DEFAULT '''',
+    default_rate DECIMAL(7,4) NOT NULL DEFAULT 0,
+    is_active TINYINT(1) NOT NULL DEFAULT 1,
+    created_at DATETIME(3) NULL,
+    updated_at DATETIME(3) NULL,
+    deleted_at DATETIME(3) NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_partners_name (name),
+    KEY idx_partners_deleted_at (deleted_at)
+)', ' ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=', @coll);
+PREPARE create_table FROM @ddl;
+EXECUTE create_table;
+DEALLOCATE PREPARE create_table;
 
 -- platforms
 SET @ddl = CONCAT('CREATE TABLE IF NOT EXISTS platforms (
@@ -51,6 +70,22 @@ PREPARE create_table FROM @ddl;
 EXECUTE create_table;
 DEALLOCATE PREPARE create_table;
 
+-- assignment_partners
+SET @ddl = CONCAT('CREATE TABLE IF NOT EXISTS assignment_partners (
+    id CHAR(36) NOT NULL,
+    assignment_id CHAR(36) NOT NULL,
+    partner_id CHAR(36) NOT NULL,
+    commission_rate DECIMAL(7,4) NOT NULL,
+    created_at DATETIME(3) NULL,
+    updated_at DATETIME(3) NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_assignment_partner (assignment_id, partner_id),
+    KEY idx_assignment_partners_partner (partner_id)
+)', ' ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=', @coll);
+PREPARE create_table FROM @ddl;
+EXECUTE create_table;
+DEALLOCATE PREPARE create_table;
+
 -- weekly_platform_results
 SET @ddl = CONCAT('CREATE TABLE IF NOT EXISTS weekly_platform_results (
     id CHAR(36) NOT NULL,
@@ -77,6 +112,23 @@ SET @ddl = CONCAT('CREATE TABLE IF NOT EXISTS weekly_platform_results (
     KEY idx_weekly_platform_results_platform (platform_id),
     KEY idx_weekly_platform_results_assignment (assignment_id),
     KEY idx_weekly_platform_results_deleted_at (deleted_at)
+)', ' ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=', @coll);
+PREPARE create_table FROM @ddl;
+EXECUTE create_table;
+DEALLOCATE PREPARE create_table;
+
+-- weekly_partner_results
+SET @ddl = CONCAT('CREATE TABLE IF NOT EXISTS weekly_partner_results (
+    id CHAR(36) NOT NULL,
+    result_id CHAR(36) NOT NULL,
+    partner_id CHAR(36) NOT NULL,
+    commission_rate DECIMAL(7,4) NOT NULL,
+    jame_ps DECIMAL(19,4) NOT NULL,
+    created_at DATETIME(3) NULL,
+    updated_at DATETIME(3) NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_weekly_partner_result (result_id, partner_id),
+    KEY idx_weekly_partner_results_partner (partner_id)
 )', ' ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=', @coll);
 PREPARE create_table FROM @ddl;
 EXECUTE create_table;
@@ -153,6 +205,24 @@ DEALLOCATE PREPARE add_fk;
 
 SET @fk = IF(
     (SELECT COUNT(*) FROM information_schema.table_constraints
+      WHERE table_schema = DATABASE() AND table_name = 'assignment_partners' AND constraint_name = 'fk_assignment_partners_assignment' AND constraint_type = 'FOREIGN KEY') = 0,
+    'ALTER TABLE assignment_partners ADD CONSTRAINT fk_assignment_partners_assignment FOREIGN KEY (assignment_id) REFERENCES hq_platform_assignments(id) ON DELETE CASCADE',
+    'SELECT 1');
+PREPARE add_fk FROM @fk;
+EXECUTE add_fk;
+DEALLOCATE PREPARE add_fk;
+
+SET @fk = IF(
+    (SELECT COUNT(*) FROM information_schema.table_constraints
+      WHERE table_schema = DATABASE() AND table_name = 'assignment_partners' AND constraint_name = 'fk_assignment_partners_partner' AND constraint_type = 'FOREIGN KEY') = 0,
+    'ALTER TABLE assignment_partners ADD CONSTRAINT fk_assignment_partners_partner FOREIGN KEY (partner_id) REFERENCES partners(id)',
+    'SELECT 1');
+PREPARE add_fk FROM @fk;
+EXECUTE add_fk;
+DEALLOCATE PREPARE add_fk;
+
+SET @fk = IF(
+    (SELECT COUNT(*) FROM information_schema.table_constraints
       WHERE table_schema = DATABASE() AND table_name = 'weekly_platform_results' AND constraint_name = 'fk_weekly_platform_results_branch' AND constraint_type = 'FOREIGN KEY') = 0,
     'ALTER TABLE weekly_platform_results ADD CONSTRAINT fk_weekly_platform_results_branch FOREIGN KEY (branch_id) REFERENCES branches(id)',
     'SELECT 1');
@@ -182,6 +252,24 @@ SET @fk = IF(
     (SELECT COUNT(*) FROM information_schema.table_constraints
       WHERE table_schema = DATABASE() AND table_name = 'weekly_platform_results' AND constraint_name = 'fk_weekly_platform_results_created_by' AND constraint_type = 'FOREIGN KEY') = 0,
     'ALTER TABLE weekly_platform_results ADD CONSTRAINT fk_weekly_platform_results_created_by FOREIGN KEY (created_by_id) REFERENCES users(id)',
+    'SELECT 1');
+PREPARE add_fk FROM @fk;
+EXECUTE add_fk;
+DEALLOCATE PREPARE add_fk;
+
+SET @fk = IF(
+    (SELECT COUNT(*) FROM information_schema.table_constraints
+      WHERE table_schema = DATABASE() AND table_name = 'weekly_partner_results' AND constraint_name = 'fk_weekly_partner_results_result' AND constraint_type = 'FOREIGN KEY') = 0,
+    'ALTER TABLE weekly_partner_results ADD CONSTRAINT fk_weekly_partner_results_result FOREIGN KEY (result_id) REFERENCES weekly_platform_results(id) ON DELETE CASCADE',
+    'SELECT 1');
+PREPARE add_fk FROM @fk;
+EXECUTE add_fk;
+DEALLOCATE PREPARE add_fk;
+
+SET @fk = IF(
+    (SELECT COUNT(*) FROM information_schema.table_constraints
+      WHERE table_schema = DATABASE() AND table_name = 'weekly_partner_results' AND constraint_name = 'fk_weekly_partner_results_partner' AND constraint_type = 'FOREIGN KEY') = 0,
+    'ALTER TABLE weekly_partner_results ADD CONSTRAINT fk_weekly_partner_results_partner FOREIGN KEY (partner_id) REFERENCES partners(id)',
     'SELECT 1');
 PREPARE add_fk FROM @fk;
 EXECUTE add_fk;

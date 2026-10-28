@@ -7,8 +7,8 @@ import (
 	"gorm.io/gorm"
 )
 
-// Platform tables (HQ = branch): platforms, their HQ assignments, weekly win/lose results and
-// weekly settlements. Same SQL as migrations/000013_platforms.up.sql (a test keeps them in step).
+// Platform tables (HQ = branch): platforms, partners, branch assignments and their partners,
+// weekly win/lose results with each partner's share, and weekly settlements. Same SQL as migrations/000013_platforms.up.sql (a test keeps them in step).
 // Only ever adds: tables that are missing, then foreign keys that are missing.
 //
 // The tables take the collation of branches.id: foreign keys need the same collation on both
@@ -33,6 +33,20 @@ func tableOptions(collation string) string {
 }
 
 var platformTables = []string{
+	`CREATE TABLE IF NOT EXISTS partners (
+	id CHAR(36) NOT NULL,
+	name VARCHAR(128) NOT NULL,
+	phone VARCHAR(32) NOT NULL DEFAULT '',
+	note VARCHAR(255) NOT NULL DEFAULT '',
+	default_rate DECIMAL(7,4) NOT NULL DEFAULT 0,
+	is_active TINYINT(1) NOT NULL DEFAULT 1,
+	created_at DATETIME(3) NULL,
+	updated_at DATETIME(3) NULL,
+	deleted_at DATETIME(3) NULL,
+	PRIMARY KEY (id),
+	UNIQUE KEY uq_partners_name (name),
+	KEY idx_partners_deleted_at (deleted_at)
+)`,
 	`CREATE TABLE IF NOT EXISTS platforms (
 	id CHAR(36) NOT NULL,
 	code VARCHAR(64) NOT NULL,
@@ -68,6 +82,17 @@ var platformTables = []string{
 	KEY idx_hq_platform_assignments_platform (platform_id),
 	KEY idx_hq_platform_assignments_deleted_at (deleted_at)
 )`,
+	`CREATE TABLE IF NOT EXISTS assignment_partners (
+	id CHAR(36) NOT NULL,
+	assignment_id CHAR(36) NOT NULL,
+	partner_id CHAR(36) NOT NULL,
+	commission_rate DECIMAL(7,4) NOT NULL,
+	created_at DATETIME(3) NULL,
+	updated_at DATETIME(3) NULL,
+	PRIMARY KEY (id),
+	UNIQUE KEY uq_assignment_partner (assignment_id, partner_id),
+	KEY idx_assignment_partners_partner (partner_id)
+)`,
 	`CREATE TABLE IF NOT EXISTS weekly_platform_results (
 	id CHAR(36) NOT NULL,
 	week_start DATE NOT NULL,
@@ -93,6 +118,18 @@ var platformTables = []string{
 	KEY idx_weekly_platform_results_platform (platform_id),
 	KEY idx_weekly_platform_results_assignment (assignment_id),
 	KEY idx_weekly_platform_results_deleted_at (deleted_at)
+)`,
+	`CREATE TABLE IF NOT EXISTS weekly_partner_results (
+	id CHAR(36) NOT NULL,
+	result_id CHAR(36) NOT NULL,
+	partner_id CHAR(36) NOT NULL,
+	commission_rate DECIMAL(7,4) NOT NULL,
+	jame_ps DECIMAL(19,4) NOT NULL,
+	created_at DATETIME(3) NULL,
+	updated_at DATETIME(3) NULL,
+	PRIMARY KEY (id),
+	UNIQUE KEY uq_weekly_partner_result (result_id, partner_id),
+	KEY idx_weekly_partner_results_partner (partner_id)
 )`,
 	`CREATE TABLE IF NOT EXISTS weekly_settlements (
 	id CHAR(36) NOT NULL,
@@ -132,10 +169,14 @@ var platformForeignKeys = []foreignKey{
 	{"hq_platform_assignments", "fk_hq_platform_assignments_branch", "branch_id", "branches(id)"},
 	{"hq_platform_assignments", "fk_hq_platform_assignments_platform", "platform_id", "platforms(id)"},
 	{"hq_platform_assignments", "fk_hq_platform_assignments_created_by", "created_by_id", "users(id)"},
+	{"assignment_partners", "fk_assignment_partners_assignment", "assignment_id", "hq_platform_assignments(id) ON DELETE CASCADE"},
+	{"assignment_partners", "fk_assignment_partners_partner", "partner_id", "partners(id)"},
 	{"weekly_platform_results", "fk_weekly_platform_results_branch", "branch_id", "branches(id)"},
 	{"weekly_platform_results", "fk_weekly_platform_results_platform", "platform_id", "platforms(id)"},
 	{"weekly_platform_results", "fk_weekly_platform_results_assignment", "assignment_id", "hq_platform_assignments(id)"},
 	{"weekly_platform_results", "fk_weekly_platform_results_created_by", "created_by_id", "users(id)"},
+	{"weekly_partner_results", "fk_weekly_partner_results_result", "result_id", "weekly_platform_results(id) ON DELETE CASCADE"},
+	{"weekly_partner_results", "fk_weekly_partner_results_partner", "partner_id", "partners(id)"},
 	{"weekly_settlements", "fk_weekly_settlements_branch", "branch_id", "branches(id)"},
 	{"weekly_settlements", "fk_weekly_settlements_finalized_by", "finalized_by_id", "users(id)"},
 	{"weekly_settlement_totals", "fk_weekly_settlement_totals_settlement", "settlement_id", "weekly_settlements(id) ON DELETE CASCADE"},
@@ -159,6 +200,8 @@ func EnsurePlatformTables(db *gorm.DB) error {
 		return nil // a brand-new database: AutoMigrate or the SQL migrations come first
 	}
 	created := !db.Migrator().HasTable("platforms")
+	linksCreated := !db.Migrator().HasTable("assignment_partners")
+	sharesCreated := !db.Migrator().HasTable("weekly_partner_results")
 	options := tableOptions(branchCollation(db))
 	for _, stmt := range platformTables {
 		if err := db.Exec(stmt + options).Error; err != nil {
@@ -175,6 +218,20 @@ func EnsurePlatformTables(db *gorm.DB) error {
 			if err := db.Exec(fk.sql()).Error; err != nil {
 				log.Printf("platforms: could not add foreign key %s: %v", fk.name, err)
 			}
+		}
+	}
+	// An earlier test build kept one partner on the assignment and the result (partner_id): move
+	// those into the partner tables once, when the tables are created.
+	if linksCreated && db.Migrator().HasColumn("hq_platform_assignments", "partner_id") {
+		if err := db.Exec(`INSERT IGNORE INTO assignment_partners (id, assignment_id, partner_id, commission_rate, created_at, updated_at)
+			SELECT UUID(), id, partner_id, commission_rate, NOW(3), NOW(3) FROM hq_platform_assignments WHERE partner_id IS NOT NULL`).Error; err != nil {
+			return err
+		}
+	}
+	if sharesCreated && db.Migrator().HasColumn("weekly_platform_results", "partner_id") {
+		if err := db.Exec(`INSERT IGNORE INTO weekly_partner_results (id, result_id, partner_id, commission_rate, jame_ps, created_at, updated_at)
+			SELECT UUID(), id, partner_id, commission_rate, jame_ps, NOW(3), NOW(3) FROM weekly_platform_results WHERE partner_id IS NOT NULL`).Error; err != nil {
+			return err
 		}
 	}
 	if created {

@@ -27,7 +27,7 @@
           <button v-else type="button" class="action-chip action-success" :disabled="busy || !weekOver" @click="finalize(hq.id)">Finalize week</button>
         </div>
       </li>
-      <li v-if="!hqs.length" class="px-4 py-3 text-xs text-muted">No HQ to show.</li>
+      <li v-if="!hqs.length" class="px-4 py-3 text-xs text-muted">No branch to show.</li>
     </ul>
     <InventoryReasonDialog :model-value="!!reopening" :title="`Reopen ${reopening?.branch_code || ''}'s week?`" eyebrow="REOPEN WEEK" subtitle="Its days can be changed again; finalize it again when done." confirm-label="Reopen week" danger :busy="busy" :server-error="reopenError" @update:model-value="(open) => { if (!open) reopening = null }" @confirm="reopen" />
   </article>
@@ -40,7 +40,7 @@ import { useToast } from '~/composables/useToast'
 import { formatDocDate, formatDocDateTime, todayISO } from '~/utils/inventory'
 import { formatAmount, plusDays } from '~/utils/winlose'
 
-/** The week's settlement for each HQ: finalize (keeps its totals, locks its entry) or reopen. */
+/** The week's settlement for each branch: finalize (keeps its totals, locks its entry) or reopen. */
 const props = defineProps<{ weekStart: string; hqs: { id: string; code: string; name: string }[] }>()
 const emit = defineEmits<{ changed: [] }>()
 

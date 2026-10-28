@@ -43,13 +43,24 @@ type SettlementState struct {
 	WeekEnd   string    `json:"week_end"`
 }
 
-// WeekSheetRow is one platform of the HQ in the week: its saved result, or the assignment's rate
-// and currency for a new one.
+// PartnerShare is one partner's part of a platform's week: the Total at their %.
+type PartnerShare struct {
+	PartnerID      uuid.UUID        `json:"partner_id"`
+	PartnerName    string           `json:"partner_name"`
+	CommissionRate decimal.Decimal  `json:"commission_rate"`
+	JamePS         *decimal.Decimal `json:"jame_ps"` // nil until the week is entered
+}
+
+// WeekSheetRow is one platform of the HQ in the week: its saved result, or the assignment's
+// partners, % and currency for a new one.
 type WeekSheetRow struct {
-	PlatformID     uuid.UUID        `json:"platform_id"`
-	PlatformCode   string           `json:"platform_code"`
-	PlatformName   string           `json:"platform_name"`
-	AssignmentID   uuid.UUID        `json:"assignment_id"`
+	PlatformID   uuid.UUID `json:"platform_id"`
+	PlatformCode string    `json:"platform_code"`
+	PlatformName string    `json:"platform_name"`
+	AssignmentID uuid.UUID `json:"assignment_id"`
+	// Partners share the Total, each at their own %; none: the Total is at CommissionRate.
+	Partners []PartnerShare `json:"partners"`
+	// CommissionRate is shown as "Partner %" (with partners, their % added up).
 	CommissionRate decimal.Decimal  `json:"commission_rate"`
 	Currency       string           `json:"currency"`
 	Saved          bool             `json:"saved"`
@@ -75,12 +86,16 @@ type WeekSheet struct {
 	Rows   []WeekSheetRow `json:"rows"`
 }
 
-// sheetParts are what a week needs: the assignments it had and the results already saved.
+// sheetParts are what a week needs: the assignments it had and the results already saved, each
+// with its partners.
 type sheetParts struct {
 	branch      models.Branch
-	assignments map[uuid.UUID]models.HQPlatformAssignment // by platform
-	results     map[uuid.UUID]models.WeeklyPlatformResult // by platform
+	assignments map[uuid.UUID]models.HQPlatformAssignment  // by platform
+	results     map[uuid.UUID]models.WeeklyPlatformResult  // by platform
+	links       map[uuid.UUID][]models.AssignmentPartner   // by assignment
+	shares      map[uuid.UUID][]models.WeeklyPartnerResult // by result
 	platforms   map[uuid.UUID]models.Platform
+	partners    map[uuid.UUID]models.Partner
 	settlement  *models.WeeklySettlement
 }
 
@@ -88,17 +103,24 @@ type sheetParts struct {
 // it was ended and given again within the week, the later assignment is used.
 func (s *PlatformService) loadWeek(tx *gorm.DB, start time.Time, branchID uuid.UUID, lock bool) (*sheetParts, error) {
 	end := start.AddDate(0, 0, 6)
-	p := &sheetParts{assignments: map[uuid.UUID]models.HQPlatformAssignment{}, results: map[uuid.UUID]models.WeeklyPlatformResult{}}
+	p := &sheetParts{assignments: map[uuid.UUID]models.HQPlatformAssignment{}, results: map[uuid.UUID]models.WeeklyPlatformResult{},
+		shares: map[uuid.UUID][]models.WeeklyPartnerResult{}}
 	if err := tx.First(&p.branch, "id = ?", branchID).Error; err != nil {
-		return nil, fieldError("branch_id", "this HQ was not found")
+		return nil, fieldError("branch_id", "this branch was not found")
 	}
 	var assignments []models.HQPlatformAssignment
 	if err := tx.Where("branch_id = ? AND starts_on <= ? AND (ends_on IS NULL OR ends_on >= ?)", branchID, dayString(end), dayString(start)).
 		Order("starts_on").Find(&assignments).Error; err != nil {
 		return nil, err
 	}
+	var assignmentIDs []uuid.UUID
 	for _, a := range assignments {
 		p.assignments[a.PlatformID] = a
+		assignmentIDs = append(assignmentIDs, a.ID)
+	}
+	var err error
+	if p.links, err = assignmentPartners(tx, assignmentIDs); err != nil {
+		return nil, err
 	}
 	q := tx.Where("branch_id = ? AND week_start = ?", branchID, dayString(start))
 	if lock {
@@ -108,16 +130,33 @@ func (s *PlatformService) loadWeek(tx *gorm.DB, start time.Time, branchID uuid.U
 	if err := q.Find(&results).Error; err != nil {
 		return nil, err
 	}
-	var platformIDs []uuid.UUID
+	var platformIDs, partnerIDs, resultIDs []uuid.UUID
 	for _, r := range results {
 		p.results[r.PlatformID] = r
-		platformIDs = append(platformIDs, r.PlatformID)
+		platformIDs, resultIDs = append(platformIDs, r.PlatformID), append(resultIDs, r.ID)
+	}
+	if len(resultIDs) > 0 {
+		var shares []models.WeeklyPartnerResult
+		if err := tx.Where("result_id IN ?", resultIDs).Find(&shares).Error; err != nil {
+			return nil, err
+		}
+		for _, sh := range shares {
+			p.shares[sh.ResultID] = append(p.shares[sh.ResultID], sh)
+			partnerIDs = append(partnerIDs, sh.PartnerID)
+		}
 	}
 	for id := range p.assignments {
 		platformIDs = append(platformIDs, id)
 	}
-	var err error
+	for _, links := range p.links {
+		for _, l := range links {
+			partnerIDs = append(partnerIDs, l.PartnerID)
+		}
+	}
 	if p.platforms, err = s.platformsIn(tx.Statement.Context, platformIDs); err != nil {
+		return nil, err
+	}
+	if p.partners, err = s.partnersIn(tx.Statement.Context, partnerIDs); err != nil {
 		return nil, err
 	}
 	var st models.WeeklySettlement
@@ -132,6 +171,24 @@ func (s *PlatformService) loadWeek(tx *gorm.DB, start time.Time, branchID uuid.U
 
 func (p *sheetParts) locked() bool {
 	return p.settlement != nil && p.settlement.Status == models.SettlementFinalized
+}
+
+// sharesOf lists a row's partners by name: a saved week's own (with their Totals), else the
+// assignment's.
+func (p *sheetParts) sharesOf(result *models.WeeklyPlatformResult, assignment uuid.UUID) []PartnerShare {
+	out := []PartnerShare{}
+	if result != nil {
+		for _, sh := range p.shares[result.ID] {
+			total := sh.JamePS
+			out = append(out, PartnerShare{PartnerID: sh.PartnerID, PartnerName: p.partners[sh.PartnerID].Name, CommissionRate: sh.CommissionRate, JamePS: &total})
+		}
+	} else {
+		for _, l := range p.links[assignment] {
+			out = append(out, PartnerShare{PartnerID: l.PartnerID, PartnerName: p.partners[l.PartnerID].Name, CommissionRate: l.CommissionRate})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].PartnerName < out[j].PartnerName })
+	return out
 }
 
 // WeekSheet returns the HQ's week that contains the given day (any day of it; empty is this week).
@@ -181,13 +238,16 @@ func (s *PlatformService) sheet(ctx context.Context, start time.Time, p *sheetPa
 			wl, cm, jp, at := r.WinLose, r.Commission, r.JamePS, r.UpdatedAt
 			row.AssignmentID, row.CommissionRate, row.Currency, row.FormulaVersion = r.AssignmentID, r.CommissionRate, r.Currency, r.FormulaVersion
 			row.Saved, row.WinLose, row.Commission, row.JamePS, row.UpdatedAt = true, &wl, &cm, &jp, &at
+			row.Partners = p.sharesOf(&r, r.AssignmentID)
 			row.UpdatedBy = names[r.CreatedByID]
 			if r.UpdatedByID != nil {
 				row.UpdatedBy = names[*r.UpdatedByID]
 			}
 		} else {
 			a := p.assignments[platformID]
-			row.AssignmentID, row.CommissionRate, row.Currency, row.FormulaVersion = a.ID, a.CommissionRate, a.Currency, formula.Version
+			row.AssignmentID, row.Currency, row.FormulaVersion = a.ID, a.Currency, formula.Version
+			row.Partners = p.sharesOf(nil, a.ID)
+			row.CommissionRate = shareRate(a.CommissionRate, row.Partners)
 		}
 		out.Rows = append(out.Rows, row)
 	}
@@ -199,6 +259,18 @@ func (s *PlatformService) sheet(ctx context.Context, start time.Time, p *sheetPa
 	}
 	sort.Slice(out.Rows, func(i, j int) bool { return out.Rows[i].PlatformCode < out.Rows[j].PlatformCode })
 	return out
+}
+
+// shareRate is a row's Partner %: its partners' % added up, or its own when it has none.
+func shareRate(own decimal.Decimal, partners []PartnerShare) decimal.Decimal {
+	if len(partners) == 0 {
+		return own
+	}
+	sum := decimal.Zero
+	for _, p := range partners {
+		sum = sum.Add(p.CommissionRate)
+	}
+	return sum
 }
 
 // ===== Entering a week =====
@@ -233,11 +305,33 @@ type rowPlan struct {
 	rate            decimal.Decimal
 	currency        string
 	assignment      uuid.UUID
-	existing        *models.WeeklyPlatformResult
+	// shares: each partner's Total (their saved share, when correcting a saved week).
+	shares   []PartnerShare
+	existing *models.WeeklyPlatformResult
 }
 
-// plan works out every filled-in row: a saved week keeps its own rate, currency and formula
-// version; a new one takes the assignment's and the current formula. Blank rows are left out.
+// workOut gives a row's Total: with partners, each one's share at their % (filled into shares)
+// and the Total their sum; without, the Total at the row's own %.
+func workOut(version string, wl, cm, rate decimal.Decimal, shares []PartnerShare) (winlose.Result, error) {
+	if len(shares) == 0 {
+		return winlose.Calculate(version, winlose.Input{WinLose: wl, Commission: cm, RatePct: rate})
+	}
+	total := winlose.Result{}
+	for i := range shares {
+		r, err := winlose.Calculate(version, winlose.Input{WinLose: wl, Commission: cm, RatePct: shares[i].CommissionRate})
+		if err != nil {
+			return winlose.Result{}, err
+		}
+		jp := r.JamePS
+		shares[i].JamePS = &jp
+		total.Version, total.Adjusted, total.JamePS = r.Version, r.Adjusted, total.JamePS.Add(r.JamePS)
+	}
+	return total, nil
+}
+
+// plan works out every filled-in row: a saved week keeps its own partners, %, currency and
+// formula version; a new one takes the assignment's and the current formula. Blank rows are left
+// out.
 func (s *PlatformService) plan(p *sheetParts, rows []WeekEntryRow, formula winlose.Formula) ([]rowPlan, error) {
 	var out []rowPlan
 	seen := map[uuid.UUID]bool{}
@@ -263,17 +357,18 @@ func (s *PlatformService) plan(p *sheetParts, rows []WeekEntryRow, formula winlo
 			return nil, fieldError("rows", name+": commission must be an amount (at most 4 decimals)")
 		}
 		plan := rowPlan{platform: platformID, winLose: wl, commis: cm}
+		version := formula.Version
 		if r, ok := p.results[platformID]; ok {
 			r := r
 			plan.existing, plan.rate, plan.currency, plan.assignment = &r, r.CommissionRate, r.Currency, r.AssignmentID
-			plan.result, err = winlose.Calculate(r.FormulaVersion, winlose.Input{WinLose: wl, Commission: cm, RatePct: r.CommissionRate})
+			plan.shares, version = p.sharesOf(&r, r.AssignmentID), r.FormulaVersion
 		} else if a, ok := p.assignments[platformID]; ok {
-			plan.rate, plan.currency, plan.assignment = a.CommissionRate, a.Currency, a.ID
-			plan.result, err = winlose.Calculate(formula.Version, winlose.Input{WinLose: wl, Commission: cm, RatePct: a.CommissionRate})
+			plan.currency, plan.assignment, plan.shares = a.Currency, a.ID, p.sharesOf(nil, a.ID)
+			plan.rate = shareRate(a.CommissionRate, plan.shares)
 		} else {
 			return nil, fieldError("rows", name+" isn't assigned to "+p.branch.Code+" in this week")
 		}
-		if err != nil {
+		if plan.result, err = workOut(version, wl, cm, plan.rate, plan.shares); err != nil {
 			return nil, err
 		}
 		out = append(out, plan)
@@ -286,6 +381,7 @@ type PreviewRow struct {
 	PlatformID     uuid.UUID       `json:"platform_id"`
 	CommissionRate decimal.Decimal `json:"commission_rate"`
 	Currency       string          `json:"currency"`
+	Partners       []PartnerShare  `json:"partners"`
 	winlose.Result
 }
 
@@ -313,13 +409,14 @@ func (s *PlatformService) Preview(ctx context.Context, in WeekEntryInput, scope 
 	}
 	out := make([]PreviewRow, len(plans))
 	for i, p := range plans {
-		out[i] = PreviewRow{PlatformID: p.platform, CommissionRate: p.rate, Currency: p.currency, Result: p.result}
+		out[i] = PreviewRow{PlatformID: p.platform, CommissionRate: p.rate, Currency: p.currency, Partners: p.shares, Result: p.result}
 	}
 	return out, nil
 }
 
-// SaveWeek saves an HQ's week in one transaction. New rows need winlose.create; changing a saved
-// row needs winlose.edit and a reason. A finalized week can't be changed.
+// SaveWeek saves an HQ's week in one transaction, with each partner's share. New rows need
+// winlose.create; changing a saved row needs winlose.edit and a reason. A finalized week can't be
+// changed.
 func (s *PlatformService) SaveWeek(ctx context.Context, in WeekEntryInput, scope BranchScope, can func(string) bool, actor uuid.UUID) (*WeekSheet, []Correction, error) {
 	branchID := uuid.MustParse(in.BranchID)
 	if !scope.Has(branchID) {
@@ -369,6 +466,11 @@ func (s *PlatformService) SaveWeek(ctx context.Context, in WeekEntryInput, scope
 					}
 					return err
 				}
+				for _, sh := range p.shares {
+					if err := tx.Create(&models.WeeklyPartnerResult{ID: uuid.New(), ResultID: row.ID, PartnerID: sh.PartnerID, CommissionRate: sh.CommissionRate, JamePS: *sh.JamePS}).Error; err != nil {
+						return err
+					}
+				}
 				continue
 			}
 			old := *p.existing
@@ -386,6 +488,12 @@ func (s *PlatformService) SaveWeek(ctx context.Context, in WeekEntryInput, scope
 				"updated_by_id": actor, "updated_at": now,
 			}).Error; err != nil {
 				return err
+			}
+			for _, sh := range p.shares {
+				if err := tx.Model(&models.WeeklyPartnerResult{}).Where("result_id = ? AND partner_id = ?", old.ID, sh.PartnerID).
+					Updates(map[string]interface{}{"jame_ps": *sh.JamePS, "updated_at": now}).Error; err != nil {
+					return err
+				}
 			}
 			corrections = append(corrections, Correction{
 				ResultID: old.ID, PlatformCode: code,

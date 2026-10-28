@@ -131,7 +131,9 @@ import {
   Building2,
   CalendarRange,
   ChartColumn,
+  Handshake,
   Layers,
+  ScrollText,
   Network,
   NotebookPen,
   ChartPie,
@@ -220,16 +222,18 @@ const inventoryNav = computed<NavItem[]>(() => {
   return items
 })
 
-// Platforms and weekly win/lose (an HQ is a branch; results are entered once a week).
+// Platforms and weekly win/lose per branch (results are entered once a week).
 const platformsNav = computed<NavItem[]>(() => {
   const items: NavItem[] = []
   if (can('winlose.view', 'winlose.create', 'winlose.edit')) items.push({ label: 'Win/Lose Entry', to: '/winlose/entry', icon: NotebookPen })
   if (can('winlose-reports.view')) {
     items.push({ label: 'Weekly Report', to: '/winlose/reports/weekly', icon: CalendarRange })
-    items.push({ label: 'HQ Summary', to: '/winlose/reports/hq-summary', icon: ChartColumn })
+    items.push({ label: 'Branch Summary', to: '/winlose/reports/branch-summary', icon: ChartColumn })
+    items.push({ label: 'Partner Statement', to: '/winlose/reports/partner-statement', icon: ScrollText })
   }
   if (can('platforms.view', 'platforms.manage')) items.push({ label: 'Platforms', to: '/admin/platforms', icon: Layers })
-  if (can('platforms.view', 'platform-assignments.manage')) items.push({ label: 'HQ Platform Assignments', to: '/admin/platform-assignments', icon: Network })
+  if (can('platforms.view', 'platforms.manage')) items.push({ label: 'Partners', to: '/admin/partners', icon: Handshake })
+  if (can('platforms.view', 'platform-assignments.manage')) items.push({ label: 'Branch Platform Assignments', to: '/admin/platform-assignments', icon: Network })
   return items
 })
 
