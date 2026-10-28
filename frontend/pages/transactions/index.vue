@@ -170,6 +170,7 @@ import { richTextToPlain } from '~/utils/richText'
 import { currentMonthRange, formatDateKey } from '~/utils/dateRanges'
 import { useBranchOptions } from '~/composables/useBranchOptions'
 import { useToast } from '~/composables/useToast'
+import { useCurrency } from '~/composables/useCurrency'
 
 const { api } = useApi()
 const route = useRoute()
@@ -204,7 +205,7 @@ const filterSummary = computed(() => {
 const page = ref(1)
 const pageSize = ref(10)
 const total = ref(0)
-const totals = ref<{ income_usd: string; expense_usd: string; net_usd: string; income_khr: string; expense_khr: string; net_khr: string } | null>(null)
+const totals = ref<{ income_usd: string; expense_usd: string; net_usd: string; income_khr: string; expense_khr: string; net_khr: string; by_currency?: Record<string, { income: string; expense: string; net: string }> } | null>(null)
 const loadingMore = ref(false)
 const loadMoreSentinel = ref<HTMLElement | null>(null)
 const isMobile = useMediaQuery('(max-width: 760px)')
@@ -228,10 +229,17 @@ const firstItem = computed(() => total.value ? ((page.value - 1) * pageSize.valu
 const lastItem = computed(() => Math.min(page.value * pageSize.value, total.value))
 const summaryRows = computed(() => {
   if (!totals.value) return []
-  const rows = [
-    { currency: 'USD' as const, income: totals.value.income_usd, expense: totals.value.expense_usd, net: totals.value.net_usd },
-    { currency: 'KHR' as const, income: totals.value.income_khr, expense: totals.value.expense_khr, net: totals.value.net_khr },
-  ]
+  // Every currency with totals (USD and KHR always), in the order of Manage → Currency.
+  const by = totals.value.by_currency || {
+    USD: { income: totals.value.income_usd, expense: totals.value.expense_usd, net: totals.value.net_usd },
+    KHR: { income: totals.value.income_khr, expense: totals.value.expense_khr, net: totals.value.net_khr },
+  }
+  const order = currencyList.value.map(c => c.code)
+  const rank = (code: string) => order.indexOf(code) === -1 ? order.length : order.indexOf(code)
+  const rows = Object.entries(by)
+    .filter(([code, flow]) => code === 'USD' || code === 'KHR' || Number(flow.income) || Number(flow.expense))
+    .sort(([a], [b]) => rank(a) - rank(b))
+    .map(([code, flow]) => ({ currency: code, income: flow.income, expense: flow.expense, net: flow.net }))
   return currency.value ? rows.filter(row => row.currency === currency.value) : rows
 })
 const loading = ref(true)
@@ -247,11 +255,8 @@ const filters = [
   { value: 'income', label: 'Income' },
   { value: 'expense', label: 'Expense' },
 ]
-const currencyOptions = [
-  { value: '', label: 'All currencies' },
-  { value: 'USD', label: 'USD ($)' },
-  { value: 'KHR', label: 'KHR (៛)' },
-]
+const { currencies: currencyList, options: currencyChoices } = useCurrency()
+const currencyOptions = computed(() => [{ value: '', label: 'All currencies' }, ...currencyChoices(currency.value)])
 const pageSizeOptions = [10, 20, 50].map(value => ({ value: String(value), label: `${value} rows` }))
 
 function formatDate(value: string) {

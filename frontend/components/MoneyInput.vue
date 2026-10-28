@@ -5,7 +5,7 @@
     type="text"
     inputmode="decimal"
     autocomplete="off"
-    :placeholder="currency === 'USD' ? '0.00' : '0'"
+    :placeholder="decimalsOf(currency) ? `0.${'0'.repeat(decimalsOf(currency))}` : '0'"
     :aria-label="ariaLabel"
     @focus="focused = true"
     @input="onInput"
@@ -14,10 +14,16 @@
 </template>
 
 <script setup lang="ts">
-import type { SupportedCurrency } from '~/utils/money'
+import { currencyMeta, type SupportedCurrency } from '~/utils/money'
 
-// USD up to $999,999,999.99; KHR up to ៛999,999,999,999 (the API's maximum).
-const MAX_WHOLE_DIGITS: Record<SupportedCurrency, number> = { USD: 9, KHR: 12 }
+// Decimals come from Manage → Currency (USD 2, KHR 0…). Whole digits stop at 12 for currencies
+// without decimals and 9 otherwise (inside the API's maximum).
+function decimalsOf(currency: SupportedCurrency) {
+  return currencyMeta(currency).decimals
+}
+function wholeLimit(currency: SupportedCurrency) {
+  return decimalsOf(currency) ? 9 : 12
+}
 
 const props = defineProps<{
   modelValue: string
@@ -32,12 +38,13 @@ const displayValue = ref(formatEntry(props.modelValue, props.currency, false))
 
 function normalize(value: string, currency: SupportedCurrency) {
   const cleaned = value.replace(/,/g, '').replace(/[^\d.]/g, '')
-  const limit = MAX_WHOLE_DIGITS[currency]
-  if (currency === 'KHR') return trimWhole(cleaned.split('.')[0].replace(/\D/g, ''), limit)
+  const limit = wholeLimit(currency)
+  const places = decimalsOf(currency)
+  if (!places) return trimWhole(cleaned.split('.')[0]!.replace(/\D/g, ''), limit)
   const dot = cleaned.indexOf('.')
   if (dot < 0) return trimWhole(cleaned, limit)
   const whole = trimWhole(cleaned.slice(0, dot).replace(/\./g, ''), limit)
-  const fraction = cleaned.slice(dot + 1).replace(/\./g, '').slice(0, 2)
+  const fraction = cleaned.slice(dot + 1).replace(/\./g, '').slice(0, places)
   return `${whole}.${fraction}`
 }
 
@@ -53,12 +60,12 @@ function groupDigits(value: string) {
 function formatEntry(value: string, currency: SupportedCurrency, complete = false) {
   const raw = normalize(value, currency)
   if (!raw) return ''
-  if (currency === 'KHR') return groupDigits(raw)
+  if (!decimalsOf(currency)) return groupDigits(raw)
 
   const hasDot = raw.includes('.')
   let [whole, fraction = ''] = raw.split('.')
   if (!whole) whole = '0'
-  if (complete) fraction = fraction.padEnd(2, '0').slice(0, 2)
+  if (complete) fraction = fraction.padEnd(decimalsOf(currency), '0').slice(0, decimalsOf(currency))
   return `${groupDigits(whole)}${hasDot || complete ? `.${fraction}` : ''}`
 }
 

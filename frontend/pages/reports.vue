@@ -2,7 +2,7 @@
   <section class="reports-page">
     <header class="reports-heading">
       <div>
-        <p class="eyebrow">FINANCIAL INSIGHTS</p>
+        <p class="eyebrow">FINANCIAL ACTIVITY</p>
         <h1>Reports</h1>
         <p class="heading-copy">Summarized income and expenses for any date range.</p>
       </div>
@@ -27,26 +27,27 @@
 
     <div v-if="loading" class="state-card"><span class="mini-spinner"></span> Loading report…</div>
     <div v-else-if="err" class="state-card state-error"><p>{{ err }}</p><button @click="load">Try again</button></div>
-    <div v-else-if="data" class="reports-grid">
-      <article class="summary-card usd-card">
-        <div class="summary-top"><span class="summary-icon">USD</span><small>United States Dollar</small></div>
-        <strong>{{ formatMoney(data.net_usd, 'USD') }}</strong>
-        <span>Net balance</span>
-      </article>
-      <article class="summary-card khr-card">
-        <div class="summary-top"><span class="summary-icon">KHR</span><small>Cambodian Riel</small></div>
-        <strong>{{ formatMoney(data.net_khr, 'KHR') }}</strong>
-        <span>Net balance</span>
-      </article>
+    <div v-else-if="data" class="space-y-3">
+      <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <article v-for="row in currencyRows" :key="row.code" class="rounded-2xl border border-border bg-white p-4 shadow-sm">
+          <div class="flex items-center justify-between gap-2">
+            <span class="rounded-lg bg-blue-50 px-2 py-1 text-xs font-bold text-primary">{{ row.code }}</span>
+            <small class="text-[11px] text-muted">{{ row.name }}</small>
+          </div>
+          <p class="mt-3 text-[11px] text-muted">Net balance</p>
+          <strong class="text-xl font-bold" :class="Number(row.net) < 0 ? 'text-expense' : 'text-navy'">{{ formatMoney(row.net, row.code) }}</strong>
+          <div class="mt-3 grid grid-cols-2 gap-2 border-t border-border pt-3 text-xs">
+            <p><span class="block text-[11px] text-muted">Income</span><strong class="text-income">{{ formatMoney(row.income, row.code) }}</strong></p>
+            <p><span class="block text-[11px] text-muted">Expense</span><strong class="text-expense">{{ formatMoney(row.expense, row.code) }}</strong></p>
+          </div>
+        </article>
+      </div>
+      <p class="text-[11px] text-muted">{{ data.transaction_count }} approved transactions in this period. Each currency is shown on its own.</p>
+    </div>
 
-      <article class="breakdown-card">
-        <h2>Income and expense breakdown</h2>
-        <div class="breakdown-row"><span>Income · USD</span><strong class="income-text">{{ formatMoney(data.income_usd, 'USD') }}</strong></div>
-        <div class="breakdown-row"><span>Expense · USD</span><strong class="expense-text">{{ formatMoney(data.expense_usd, 'USD') }}</strong></div>
-        <div class="breakdown-row"><span>Income · KHR</span><strong class="income-text">{{ formatMoney(data.income_khr, 'KHR') }}</strong></div>
-        <div class="breakdown-row"><span>Expense · KHR</span><strong class="expense-text">{{ formatMoney(data.expense_khr, 'KHR') }}</strong></div>
-        <div class="breakdown-row total-row"><span>Approved transactions</span><strong>{{ data.transaction_count }}</strong></div>
-      </article>
+    <div class="mt-4 grid grid-cols-1 gap-4">
+      <ReportTransactions type="income" :date-from="dateRange.from" :date-to="dateRange.to" :branch-id="branchFilter" />
+      <ReportTransactions type="expense" :date-from="dateRange.from" :date-to="dateRange.to" :branch-id="branchFilter" />
     </div>
   </section>
 </template>
@@ -58,6 +59,7 @@ import { formatMoney } from '~/utils/money'
 import { currentMonthRange } from '~/utils/dateRanges'
 import { useBranchOptions } from '~/composables/useBranchOptions'
 import { useToast } from '~/composables/useToast'
+import { useCurrency } from '~/composables/useCurrency'
 
 const { api, apiBase } = useApi()
 const { getToken } = useAuth()
@@ -70,6 +72,21 @@ const loading = ref(true)
 const err = ref('')
 const exporting = ref(false)
 const toast = useToast()
+// A card per currency with amounts in the period (USD and KHR always), in Manage → Currency order.
+const { currencies } = useCurrency()
+const currencyRows = computed(() => {
+  const by = data.value?.by_currency || {
+    USD: { income: data.value?.income_usd || '0', expense: data.value?.expense_usd || '0', net: data.value?.net_usd || '0' },
+    KHR: { income: data.value?.income_khr || '0', expense: data.value?.expense_khr || '0', net: data.value?.net_khr || '0' },
+  }
+  const known = currencies.value.map(c => c.code)
+  const codes = [...known.filter(code => code === 'USD' || code === 'KHR' || by[code]), ...Object.keys(by).filter(code => !known.includes(code))]
+  return codes.map(code => ({
+    code,
+    name: currencies.value.find(c => c.code === code)?.name || code,
+    income: by[code]?.income || '0', expense: by[code]?.expense || '0', net: by[code]?.net || '0',
+  }))
+})
 
 async function load() {
   loading.value = true

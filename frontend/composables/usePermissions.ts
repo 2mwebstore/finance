@@ -86,6 +86,14 @@ export function usePermissions() {
   const canManageSettings = computed(() => can(P.SettingsManage))
   // The API also requires full access (owner / Super Admin) for backups.
   const canManageBackups = computed(() => hasFullAccess.value && can(P.BackupsManage))
+  // Inventory (separate from income/expense): stock and documents of the user's own branches.
+  const canViewInventory = computed(() => can(P.InventoryView))
+  const canViewSales = computed(() => can(P.SalesView))
+  const canViewPurchases = computed(() => can(P.PurchasesView))
+  const canViewTransfers = computed(() => can(P.InventoryView, P.InventoryTransfer))
+  const canViewInventoryExpenses = computed(() => can(P.InventoryExpensesView))
+  // Inventory reports show stock value and profit: the API needs both permissions.
+  const canViewInventoryReports = computed(() => canAll(P.ReportsView, P.InventoryView))
 
   return {
     P,
@@ -123,5 +131,11 @@ export function usePermissions() {
     canViewAudit,
     canManageSettings,
     canManageBackups,
+    canViewInventory,
+    canViewSales,
+    canViewPurchases,
+    canViewTransfers,
+    canViewInventoryReports,
+    canViewInventoryExpenses,
   }
 }

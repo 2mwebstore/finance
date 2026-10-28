@@ -13,7 +13,7 @@ export {
   type PermissionCode,
 } from '~/utils/permissions'
 
-/** Flat list of all 32 codes (for checks / display). */
+/** Flat list of all 46 codes (for checks / display). */
 export const PERMISSION_CODES = [
   'dashboard.view',
   'income.view',
@@ -47,6 +47,20 @@ export const PERMISSION_CODES = [
   'audit-logs.view',
   'settings.manage',
   'backups.manage',
+  'inventory.view',
+  'inventory.manage',
+  'inventory.adjust',
+  'inventory.transfer',
+  'sales.view',
+  'sales.create',
+  'sales.void',
+  'purchases.view',
+  'purchases.create',
+  'purchases.approve',
+  'purchases.void',
+  'inventory-expenses.view',
+  'inventory-expenses.create',
+  'inventory-expenses.void',
 ] as const
 
 export type PermissionCodeLiteral = (typeof PERMISSION_CODES)[number]

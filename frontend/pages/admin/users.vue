@@ -12,7 +12,7 @@
         <label class="space-y-1 text-xs font-medium text-muted">Email<input v-model.trim="createForm.email" type="email" required :aria-invalid="createCheck.invalid('email')" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" /></label>
         <label class="space-y-1 text-xs font-medium text-muted">Full name<input v-model.trim="createForm.full_name" required minlength="2" :aria-invalid="createCheck.invalid('full_name')" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" /></label>
         <label class="space-y-1 text-xs font-medium text-muted">Temporary PIN ({{ MIN_PIN_LENGTH }}–{{ MAX_PIN_LENGTH }} digits)<input v-model="createForm.password" type="password" inputmode="numeric" :pattern="`[0-9]{${MIN_PIN_LENGTH},${MAX_PIN_LENGTH}}`" :maxlength="MAX_PIN_LENGTH" :minlength="MIN_PIN_LENGTH" required autocomplete="new-password" :aria-invalid="createCheck.invalid('password')" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" :placeholder="`${MIN_PIN_LENGTH}–${MAX_PIN_LENGTH} digits`" /></label>
-        <div class="space-y-1 text-xs font-medium text-muted"><span class="block">Role</span><SearchSelect v-model="createForm.role_code" :options="roleOptions" placeholder="Select a role" search-placeholder="Search roles…" aria-label="User role" :aria-invalid="createCheck.invalid('role_codes')" /></div>
+        <div class="space-y-1 text-xs font-medium text-muted"><span class="block">Role</span><SearchSelect v-model="createForm.role_code" :options="createRoleOptions" placeholder="Select a role" search-placeholder="Search roles…" aria-label="User role" :aria-invalid="createCheck.invalid('role_codes')" /></div>
         <div class="space-y-1 text-xs font-medium text-muted"><span class="block">Branch</span><SearchSelect v-model="createForm.branch_id" :options="branchOptions" placeholder="Select a branch" search-placeholder="Search branches…" aria-label="User branch" :aria-invalid="createCheck.invalid('branch_ids')" /></div>
         <div class="space-y-1 text-xs font-medium text-muted sm:col-span-2">
           <span class="block">Managers <small>(approve or reject this user's transactions · optional)</small></span>
@@ -31,7 +31,7 @@
       <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label class="space-y-1 text-xs font-medium text-muted">Full name<input v-model.trim="editForm.full_name" required minlength="2" :aria-invalid="editCheck.invalid('full_name')" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" /></label>
         <label class="space-y-1 text-xs font-medium text-muted">Email<input v-model.trim="editForm.email" type="email" required :aria-invalid="editCheck.invalid('email')" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" /></label>
-        <div v-if="canManageUsers && !isEditingSelf" class="space-y-1 text-xs font-medium text-muted"><span class="block">Roles <small>(select one or more)</small></span><SearchSelect v-model="editForm.role_codes" :options="roleOptions" multiple placeholder="Select roles" search-placeholder="Search roles…" aria-label="User roles" :aria-invalid="editCheck.invalid('role_codes')" /></div>
+        <div v-if="canManageUsers && !isEditingSelf" class="space-y-1 text-xs font-medium text-muted"><span class="block">Roles <small>(select one or more)</small></span><SearchSelect v-model="editForm.role_codes" :options="editRoleOptions" multiple placeholder="Select roles" search-placeholder="Search roles…" aria-label="User roles" :aria-invalid="editCheck.invalid('role_codes')" /></div>
         <div v-if="canManageUsers && !isEditingSelf && branches.length" class="space-y-1 text-xs font-medium text-muted"><span class="block">Branches <small>(select one or more)</small></span><SearchSelect v-model="editForm.branch_ids" :options="branchOptions" multiple placeholder="Select branches" search-placeholder="Search branches…" aria-label="User branches" :aria-invalid="editCheck.invalid('branch_ids')" /></div>
         <div v-if="canManageUsers && !isEditingSelf" class="space-y-1 text-xs font-medium text-muted sm:col-span-2">
           <span class="block">Managers <small>(only they can approve or reject this user's transactions; empty = anyone with approval rights)</small></span>
@@ -181,7 +181,22 @@ const assignableRoles = computed(() => roles.value.filter((role) => {
   if (hasFullAccess.value || !role.permissions) return true
   return role.permissions.every(permission => permissions.value.includes(permission.code))
 }))
-const roleOptions = computed(() => assignableRoles.value.map(role => ({ value: role.code, label: role.name })))
+// Shared roles, and roles for the branches the user is in (a branch role is only for its branch).
+function roleOptionsFor(branchIds: string[]) {
+  return assignableRoles.value
+    .filter(role => !role.branch_id || branchIds.includes(role.branch_id))
+    .map(role => ({ value: role.code, label: role.branch_id ? `${role.name} (${role.branch?.code || 'branch'})` : role.name }))
+}
+const createRoleOptions = computed(() => roleOptionsFor(createForm.branch_id ? [createForm.branch_id] : []))
+const editRoleOptions = computed(() => roleOptionsFor(editForm.branch_ids))
+// A branch role no longer fits once its branch is taken off the user.
+// Only branch roles are dropped; other roles the editor can't hand out stay as they are.
+function fitsBranches(code: string, branchIds: string[]) {
+  const role = roles.value.find(r => r.code === code)
+  return !role?.branch_id || branchIds.includes(role.branch_id)
+}
+watch(() => createForm.branch_id, () => { if (createForm.role_code && !fitsBranches(createForm.role_code, createForm.branch_id ? [createForm.branch_id] : [])) createForm.role_code = '' })
+watch(() => [...editForm.branch_ids], () => { editForm.role_codes = editForm.role_codes.filter(code => fitsBranches(code, editForm.branch_ids)) })
 const branchOptions = computed(() => branches.value.map(branch => ({ value: branch.id, label: `${branch.code} — ${branch.name}` })))
 const isEditingSelf = computed(() => editingUser.value?.id === currentUserId.value)
 
@@ -381,8 +396,9 @@ async function saveEdit() {
   try {
     await api(`/users/${target.id}`, { method: 'PATCH', body: { email: editForm.email.trim(), full_name: editForm.full_name.trim() } })
     if (canManageUsers.value && target.id !== currentUserId.value) {
-      await api(`/users/${target.id}/roles`, { method: 'POST', body: { role_codes: editForm.role_codes } })
+      // Branches first: a role for a branch needs the user in that branch.
       if (branches.value.length) await api(`/users/${target.id}/branches`, { method: 'POST', body: { branch_ids: editForm.branch_ids } })
+      await api(`/users/${target.id}/roles`, { method: 'POST', body: { role_codes: editForm.role_codes } })
       await api(`/users/${target.id}/managers`, { method: 'POST', body: { manager_ids: editForm.manager_ids } })
     }
     editingUser.value = null

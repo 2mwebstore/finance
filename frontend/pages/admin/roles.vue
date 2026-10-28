@@ -5,18 +5,26 @@
       <button v-if="canManage" class="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white hover:bg-primary-hover" @click="openCreate"><Plus :size="16" /> Add role</button>
     </header>
 
-    <ListSearch v-model="search" placeholder="Search by role name, code or description…" />
+    <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
+      <div class="min-w-0 flex-1"><ListSearch v-model="search" placeholder="Search by role name, code or description…" /></div>
+      <div v-if="branchChoices.length" class="sm:w-64"><SearchSelect v-model="appliesFilter" :options="appliesFilterOptions" aria-label="Roles for" /></div>
+    </div>
     <div v-if="loading" class="text-sm text-muted">Loading roles…</div>
     <AppAlert v-else-if="error" title="Couldn’t load roles" :message="error"><template #action><button type="button" @click="load">Try again</button></template></AppAlert>
     <div v-else class="space-y-3">
-      <article v-for="role in roles" :key="role.id" class="rounded-xl border border-border bg-white p-4">
+      <article v-for="role in visibleRoles" :key="role.id" class="rounded-xl border border-border bg-white p-4">
         <div class="flex items-start justify-between gap-3">
           <div class="min-w-0">
             <div class="flex flex-wrap items-center gap-2"><h2 class="text-sm font-semibold text-navy">{{ role.name }}</h2><span v-if="role.is_system" class="rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-bold uppercase text-muted">System</span></div>
             <p class="mt-1 font-mono text-[10px] text-muted">{{ role.code }}</p>
-            <p class="mt-2 inline-flex max-w-full items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold" :class="scopeTone(role)" :title="scopeHint(role)">
-              <Building2 :size="11" class="shrink-0" /><span class="truncate">{{ scopeLabel(role) }}</span>
-            </p>
+            <div class="mt-2 flex flex-wrap gap-1.5">
+              <span class="inline-flex max-w-full items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold" :class="role.branch_id ? 'bg-amber-50 text-amber-800' : 'bg-indigo-50 text-indigo-600'" :title="role.branch_id ? 'A role for this branch only' : 'Shared by every branch'">
+                <span class="truncate">{{ role.branch_id ? `For ${role.branch?.code || 'one branch'}` : 'Shared' }}</span>
+              </span>
+              <span class="inline-flex max-w-full items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold" :class="scopeTone(role)" :title="scopeHint(role)">
+                <Building2 :size="11" class="shrink-0" /><span class="truncate">{{ scopeLabel(role) }}</span>
+              </span>
+            </div>
           </div>
           <div v-if="canManage && role.can_manage !== false" class="flex shrink-0 gap-1.5">
             <button class="action-chip action-edit" @click="openEdit(role)"><Pencil :size="13" /> Edit</button>
@@ -45,6 +53,11 @@
           <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <label class="space-y-1.5 text-xs font-semibold text-navy">Name<input v-model.trim="form.name" required minlength="2" maxlength="128" :aria-invalid="formCheck.invalid('name')" class="w-full rounded-lg border border-border px-3 py-2.5 text-sm font-normal" /></label>
             <label v-if="formMode === 'create'" class="space-y-1.5 text-xs font-semibold text-navy">Code<input v-model.trim="form.code" required minlength="2" maxlength="64" :aria-invalid="formCheck.invalid('code')" class="w-full rounded-lg border border-border px-3 py-2.5 font-mono text-sm font-normal" placeholder="e.g. store-manager" /></label>
+            <div class="space-y-1.5 text-xs font-semibold text-navy sm:col-span-2">
+              Applies to
+              <SearchSelect v-model="form.branch_id" :options="appliesOptions" :disabled="!!editingRole?.is_system" placeholder="Choose a branch" aria-label="Role applies to" :aria-invalid="formCheck.invalid('branch_id')" />
+              <small class="block font-normal text-muted">{{ editingRole?.is_system ? 'Built-in roles are shared by every branch.' : form.branch_id ? 'Only this branch sees the role, and only its users can be given it.' : 'Every branch can use this role.' }}</small>
+            </div>
             <label class="space-y-1.5 text-xs font-semibold text-navy sm:col-span-2">Description<textarea v-model.trim="form.description" rows="2" maxlength="512" class="w-full rounded-lg border border-border px-3 py-2.5 text-sm font-normal" /></label>
           </div>
           <p class="flex items-start gap-2 rounded-lg bg-canvas px-3 py-2 text-xs text-muted">
@@ -84,6 +97,7 @@ import { useToast } from '~/composables/useToast'
 import { rule } from '~/utils/validation'
 import { PERMISSION_CATALOG, permissionModuleRank } from '~/utils/permissions'
 import { useFormErrors } from '~/composables/useFormErrors'
+import { useBranchOptions } from '~/composables/useBranchOptions'
 
 const { api } = useApi()
 const { can, hasFullAccess } = usePermissions()
@@ -102,15 +116,27 @@ const modalOpen = ref(false)
 const formMode = ref<'create' | 'edit'>('create')
 const editingRole = ref<Role | null>(null)
 const deleteTarget = ref<Role | null>(null)
-const form = reactive({ code: '', name: '', description: '', permission_codes: [] as string[] })
+const form = reactive({ code: '', name: '', description: '', permission_codes: [] as string[], branch_id: '' })
 // Same rules as the API (CreateRoleInput / UpdateRoleInput); the code is set only when creating.
+// Branch-level managers make roles for one of their branches; the owner/admin may share them.
 const formCheck = reactive(useFormErrors(
   () => ({ ...form }),
   () => ({
     name: [rule.required('name'), rule.minLength('name', 2), rule.maxLength('name', 128)],
     ...(formMode.value === 'create' ? { code: [rule.required('code'), rule.minLength('code', 2), rule.maxLength('code', 64)] } : {}),
+    ...(!hasFullAccess.value && !editingRole.value?.is_system ? { branch_id: [rule.required('branch')] } : {}),
   }),
 ))
+
+// Roles are shared or for one branch.
+const { branches } = useBranchOptions()
+const branchChoices = computed(() => branches.value.map(b => ({ value: b.id, label: `${b.code} — ${b.name}` })))
+const appliesOptions = computed(() => [...(hasFullAccess.value || editingRole.value?.is_system ? [{ value: '', label: 'Shared — every branch' }] : []), ...branchChoices.value])
+const SHARED_ONLY = 'shared'
+const appliesFilter = ref('')
+const appliesFilterOptions = computed(() => [{ value: '', label: 'All roles' }, { value: SHARED_ONLY, label: 'Shared roles' }, ...branchChoices.value])
+const visibleRoles = computed(() => roles.value.filter(role => !appliesFilter.value
+  || (appliesFilter.value === SHARED_ONLY ? !role.branch_id : role.branch_id === appliesFilter.value)))
 
 // Without full access a role can only get permissions the signed-in user has (the API checks too).
 const grantablePermissions = computed(() => hasFullAccess.value ? permissions.value : permissions.value.filter(permission => can(permission.code)))
@@ -169,7 +195,7 @@ watch(search, () => load())
 function openCreate() {
   formMode.value = 'create'
   editingRole.value = null
-  Object.assign(form, { code: '', name: '', description: '', permission_codes: [] })
+  Object.assign(form, { code: '', name: '', description: '', permission_codes: [], branch_id: hasFullAccess.value ? '' : (branches.value.length === 1 ? branches.value[0]!.id : '') })
   formError.value = ''
   formCheck.reset()
   modalOpen.value = true
@@ -183,6 +209,7 @@ function openEdit(role: Role) {
     name: role.name,
     description: role.description || '',
     permission_codes: (role.permissions || []).map((permission) => permission.code),
+    branch_id: role.branch_id || '',
   })
   formError.value = ''
   formCheck.reset()
@@ -199,9 +226,9 @@ async function save() {
   saving.value = true
   try {
     if (formMode.value === 'create') {
-      await api('/roles', { method: 'POST', body: { code: form.code, name: form.name, description: form.description, permission_codes: form.permission_codes } })
+      await api('/roles', { method: 'POST', body: { code: form.code, name: form.name, description: form.description, permission_codes: form.permission_codes, branch_id: form.branch_id } })
     } else if (editingRole.value) {
-      await api(`/roles/${editingRole.value.id}`, { method: 'PATCH', body: { name: form.name, description: form.description, permission_codes: form.permission_codes } })
+      await api(`/roles/${editingRole.value.id}`, { method: 'PATCH', body: { name: form.name, description: form.description, permission_codes: form.permission_codes, ...(editingRole.value.is_system ? {} : { branch_id: form.branch_id }) } })
     }
     modalOpen.value = false
     toast.success(`${form.name} is ready to assign.`, { title: formMode.value === 'create' ? 'Role created' : 'Role updated' })

@@ -13,11 +13,25 @@
     </article>
 
     <section class="link-card">
-      <div class="section-label">WORKSPACE</div>
+      <div class="section-label">FINANCIAL ACTIVITY</div>
       <Can perm="dashboard.view"><NuxtLink to="/dashboard"><span>Dashboard</span><small>Business overview</small><ChevronRight :size="17" /></NuxtLink></Can>
       <Can :any="['transactions.view','income.view','expense.view']"><NuxtLink to="/transactions"><span>Transactions</span><small>Review financial activity</small><ChevronRight :size="17" /></NuxtLink></Can>
       <Can :any="['income.create','expense.create']"><NuxtLink to="/transactions/new"><span>Add transaction</span><small>Record income or expense</small><ChevronRight :size="17" /></NuxtLink></Can>
       <Can :any="['reports.view','dashboard.view']"><NuxtLink to="/reports"><span>Reports</span><small>Explore financial insights</small><ChevronRight :size="17" /></NuxtLink></Can>
+      <Can perm="categories.manage"><NuxtLink to="/admin/categories"><span>Categories</span><small>Categories for expense transactions</small><ChevronRight :size="17" /></NuxtLink></Can>
+    </section>
+
+    <section v-if="canViewInventory || canViewSales || canViewPurchases || canViewTransfers || canViewInventoryExpenses" class="link-card">
+      <div class="section-label">INVENTORY</div>
+      <Can perm="inventory.view"><NuxtLink to="/inventory/products"><span>Products</span><small>The products every branch sells</small><ChevronRight :size="17" /></NuxtLink></Can>
+      <Can perm="inventory.view"><NuxtLink to="/inventory/stock"><span>Stock</span><small>What each branch has now</small><ChevronRight :size="17" /></NuxtLink></Can>
+      <Can perm="sales.view"><NuxtLink to="/inventory/sales"><span>Sales</span><small>Goods sold</small><ChevronRight :size="17" /></NuxtLink></Can>
+      <Can perm="purchases.view"><NuxtLink to="/inventory/purchases"><span>Purchases</span><small>Goods bought from suppliers</small><ChevronRight :size="17" /></NuxtLink></Can>
+      <NuxtLink v-if="canViewInventoryExpenses" to="/inventory/expenses"><span>Inventory expenses</span><small>Shipping, packaging, storage…</small><ChevronRight :size="17" /></NuxtLink>
+      <Can perm="inventory.manage"><NuxtLink to="/inventory/expense-categories"><span>Expense categories</span><small>Categories for inventory expenses</small><ChevronRight :size="17" /></NuxtLink></Can>
+      <Can :any="['inventory.manage', 'categories.manage']"><NuxtLink to="/inventory/payment-methods"><span>Payment methods</span><small>Cash, bank, KHQR…</small><ChevronRight :size="17" /></NuxtLink></Can>
+      <NuxtLink v-if="canViewTransfers" to="/inventory/transfers"><span>Transfers</span><small>Stock moved between branches</small><ChevronRight :size="17" /></NuxtLink>
+      <NuxtLink v-if="canViewInventoryReports" to="/inventory/reports"><span>Inventory reports</span><small>Stock value, sales and profit</small><ChevronRight :size="17" /></NuxtLink>
     </section>
 
     <section v-if="showAdmin" class="link-card">
@@ -26,7 +40,7 @@
       <Can perm="roles.view"><NuxtLink to="/admin/roles"><span>Roles &amp; permissions</span><small>Control team access</small><ChevronRight :size="17" /></NuxtLink></Can>
       <Can perm="permissions.view"><NuxtLink to="/admin/permissions"><span>Permission codes</span><small>Review available permissions</small><ChevronRight :size="17" /></NuxtLink></Can>
       <Can perm="users.view"><NuxtLink to="/admin/users"><span>Users</span><small>Manage team accounts</small><ChevronRight :size="17" /></NuxtLink></Can>
-      <Can perm="categories.manage"><NuxtLink to="/admin/categories"><span>Categories</span><small>Manage expense categories</small><ChevronRight :size="17" /></NuxtLink></Can>
+      <Can perm="currency-settings.manage"><NuxtLink to="/admin/currency"><span>Currency</span><small>Exchange rate and default currency</small><ChevronRight :size="17" /></NuxtLink></Can>
       <Can perm="audit-logs.view"><NuxtLink to="/admin/audit"><span>Audit log</span><small>Review account activity</small><ChevronRight :size="17" /></NuxtLink></Can>
       <NuxtLink v-if="canManageBackups" to="/admin/backups"><span>Backups</span><small>Database backups and restore</small><ChevronRight :size="17" /></NuxtLink>
     </section>
@@ -42,8 +56,8 @@
 <script setup lang="ts">
 import { ChevronRight, LogOut } from 'lucide-vue-next'
 const { user, logout } = useAuth()
-const { isSuperAdmin, permissions, canViewBranches, canViewUsers, canViewRoles, canViewPermissionCodes, canViewAudit, canManageBackups } = usePermissions()
-const showAdmin = computed(() => canViewBranches.value || canViewUsers.value || canViewRoles.value || canViewPermissionCodes.value || canViewAudit.value || canManageBackups.value)
+const { can, isSuperAdmin, permissions, canViewBranches, canViewUsers, canViewRoles, canViewPermissionCodes, canViewAudit, canManageBackups, canViewInventory, canViewSales, canViewPurchases, canViewTransfers, canViewInventoryReports, canViewInventoryExpenses } = usePermissions()
+const showAdmin = computed(() => canViewBranches.value || canViewUsers.value || canViewRoles.value || canViewPermissionCodes.value || canViewAudit.value || canManageBackups.value || can('currency-settings.manage'))
 const initials = computed(() => (user.value?.full_name || user.value?.username || 'A').split(/\s+/).filter(Boolean).slice(0, 2).map(part => part[0]?.toUpperCase()).join(''))
 async function onLogout() { await logout(); navigateTo('/login') }
 </script>

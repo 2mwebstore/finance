@@ -187,8 +187,7 @@
           <div class="filter-group">
             <label class="filter-label">Currency</label>
             <div class="currency-options">
-              <button :class="currency === 'USD' ? 'selected' : ''" @click="currency = 'USD'">USD <small>$</small></button>
-              <button :class="currency === 'KHR' ? 'selected' : ''" @click="currency = 'KHR'">KHR <small>៛</small></button>
+              <button v-for="c in dashboardCurrencies" :key="c.code" :class="currency === c.code ? 'selected' : ''" @click="currency = c.code">{{ c.code }} <small>{{ c.symbol.trim() }}</small></button>
             </div>
           </div>
 
@@ -220,7 +219,8 @@ import {
 } from 'lucide-vue-next'
 import { useMediaQuery } from '@vueuse/core'
 import type { Branch, DashboardSummary } from '~/types/api'
-import { formatMoney } from '~/utils/money'
+import { currencyMeta, formatMoney } from '~/utils/money'
+import { useCurrency } from '~/composables/useCurrency'
 import { richTextToPlain } from '~/utils/richText'
 import { currentMonthRange } from '~/utils/dateRanges'
 
@@ -231,7 +231,20 @@ const data = ref<DashboardSummary | null>(null)
 const branches = ref<Branch[]>([])
 const period = ref('this_month')
 const branchId = ref('')
-const currency = ref<'USD' | 'KHR'>('USD')
+const currency = ref('USD')
+// Active currencies (Manage → Currency), plus any the period has amounts in.
+const { currencies: currencyList } = useCurrency()
+const dashboardCurrencies = computed(() => currencyList.value.filter(c => c.active || flowOf(data.value?.by_currency, c.code)))
+
+// A currency's income/expense/net from a by_currency map (older USD/KHR fields as a fallback).
+function flowOf(by: Record<string, { income: string; expense: string; net: string }> | undefined, code: string) {
+  return by?.[code]
+}
+function amountOf(item: any, metric: 'income' | 'expense' | 'net') {
+  const flow = flowOf(item?.by_currency, currency.value)
+  if (flow) return flow[metric]
+  return item?.[`${metric}_${currency.value.toLowerCase()}`]
+}
 const dateRange = ref(currentMonthRange())
 const mobileFiltersOpen = ref(false)
 // A narrower chart canvas on phones keeps the SVG axis labels at a readable size.
@@ -253,15 +266,15 @@ const periodOptions = [
 const chartColors = ['#1769e8', '#58a0ff', '#86bcff', '#22a77a', '#f3b544', '#8b7cf6', '#a8b5c7']
 
 const periodLabel = computed(() => ({ today: 'Today', this_week: 'This week', this_month: 'This month', custom: 'Custom range' })[period.value] || 'Selected period')
-const currencyMark = computed(() => currency.value === 'USD' ? '$' : '៛')
+const currencyMark = computed(() => currencyMeta(currency.value).symbol.trim())
 const branchLabel = computed(() => {
   const selected = branches.value.find(branch => branch.id === branchId.value)
   return selected ? selected.code : 'All branches'
 })
-const selectedIncomeDisplay = computed(() => formatMoney(currency.value === 'USD' ? data.value?.income_usd : data.value?.income_khr, currency.value))
-const selectedExpenseDisplay = computed(() => formatMoney(currency.value === 'USD' ? data.value?.expense_usd : data.value?.expense_khr, currency.value))
-const selectedNetDisplay = computed(() => formatMoney(currency.value === 'USD' ? data.value?.net_usd : data.value?.net_khr, currency.value))
-const selectedNetValue = computed(() => numberValue(currency.value === 'USD' ? data.value?.net_usd : data.value?.net_khr))
+const selectedIncomeDisplay = computed(() => formatMoney(amountOf(data.value, 'income'), currency.value))
+const selectedExpenseDisplay = computed(() => formatMoney(amountOf(data.value, 'expense'), currency.value))
+const selectedNetDisplay = computed(() => formatMoney(amountOf(data.value, 'net'), currency.value))
+const selectedNetValue = computed(() => numberValue(amountOf(data.value, 'net')))
 
 const metrics = computed(() => [
   {
@@ -306,8 +319,8 @@ const dailyItems = computed(() => {
     const item = byDate.get(key)
     days.push({
       date: key,
-      income: numberValue(currency.value === 'USD' ? item?.income_usd : item?.income_khr),
-      expense: numberValue(currency.value === 'USD' ? item?.expense_usd : item?.expense_khr),
+      income: numberValue(amountOf(item, 'income')),
+      expense: numberValue(amountOf(item, 'expense')),
     })
   }
   if (days.length <= 7) return days
@@ -356,7 +369,7 @@ const chartTicks = computed(() => [0, 0.25, 0.5, 0.75, 1].map((ratio) => {
 }))
 
 const categorySegments = computed(() => {
-  const rows = (currency.value === 'USD' ? data.value?.expense_by_category : data.value?.expense_by_category)
+  const rows = data.value?.expense_by_category
     ?.filter((item) => item.currency === currency.value)
     .map((item) => ({ name: item.category_name || 'Uncategorized', amount: numberValue(item.total) }))
     .filter((item) => item.amount > 0)
@@ -433,9 +446,7 @@ function formatStatus(value: string) {
 }
 
 function branchValue(branch: NonNullable<DashboardSummary['by_branch']>[number], metric: 'income' | 'expense' | 'net') {
-  const suffix = currency.value.toLowerCase()
-  const field = `${metric}_${suffix}` as keyof typeof branch
-  return numberValue(branch[field] as string | undefined)
+  return numberValue(amountOf(branch, metric))
 }
 
 function formatBranchAmount(branch: NonNullable<DashboardSummary['by_branch']>[number], metric: 'income' | 'expense' | 'net') {

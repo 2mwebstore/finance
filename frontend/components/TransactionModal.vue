@@ -40,7 +40,7 @@
               <MoneyInput v-model="form.amount" :currency="form.currency" aria-label="Transaction amount" required :aria-invalid="invalid('amount')" />
             </div>
             <small v-if="errors.amount" class="field-error">{{ errors.amount }}</small>
-            <small v-if="amountAtLimit" class="field-hint">Maximum is {{ form.currency === 'USD' ? '$999,999,999.99' : '៛999,999,999,999' }}.</small>
+            <small v-if="amountAtLimit" class="field-hint">Maximum is {{ currencySymbol }}{{ currencyMeta(form.currency).decimals ? '999,999,999.99' : '999,999,999,999' }}.</small>
             <small v-if="mode === 'edit'" class="field-hint">The currency can't be changed after a transaction is created.</small>
           </div>
 
@@ -154,9 +154,11 @@ import { MAX_ATTACHMENTS, filesOfStage, type Branch, type Category, type Transac
 import { richTextToPlain } from '~/utils/richText'
 import { rule } from '~/utils/validation'
 import { useFormErrors } from '~/composables/useFormErrors'
+import { useCurrency } from '~/composables/useCurrency'
+import { currencyMeta } from '~/utils/money'
 
 type TransactionType = 'income' | 'expense'
-type TransactionCurrency = 'USD' | 'KHR'
+type TransactionCurrency = string
 
 const props = withDefaults(defineProps<{
   modelValue: boolean
@@ -222,13 +224,14 @@ const categoryOptions = computed(() => categories.value.map(category => ({
   value: category.id,
   label: `${category.name}${category.is_active ? '' : ' (inactive)'}`,
 })))
-const currencyOptions: { value: TransactionCurrency; symbol: string }[] = [
-  { value: 'USD', symbol: '$' },
-  { value: 'KHR', symbol: '៛' },
-]
+// The active currencies (Manage → Currency), plus an edited transaction's own.
+const { currencies, defaultCurrency, load: loadCurrencies } = useCurrency()
+const currencyOptions = computed(() => currencies.value
+  .filter(c => c.active || (props.mode === 'edit' && c.code === props.transaction?.currency))
+  .map(c => ({ value: c.code, symbol: c.symbol.trim() })))
 // Mirrors MoneyInput's digit limit so people see why extra digits are ignored.
-const amountAtLimit = computed(() => (form.amount.split('.')[0] || '').length >= (form.currency === 'USD' ? 9 : 12))
-const currencySymbol = computed(() => currencyOptions.find(option => option.value === form.currency)?.symbol || '')
+const amountAtLimit = computed(() => (form.amount.split('.')[0] || '').length >= (currencyMeta(form.currency).decimals ? 9 : 12))
+const currencySymbol = computed(() => currencyMeta(form.currency).symbol.trim())
 
 const transactionType = computed<TransactionType>(() => props.mode === 'edit'
   ? props.transaction?.type || props.type
@@ -338,7 +341,7 @@ function resetAttachment() {
 function initializeForm() {
   const txn = props.mode === 'edit' ? props.transaction : null
   form.type = transactionType.value
-  form.currency = txn?.currency || 'USD'
+  form.currency = txn?.currency || defaultCurrency.value
   form.amount = txn?.amount || ''
   form.transaction_date = txn?.transaction_date?.slice(0, 10) || localDate()
   // Default to the user's own branch when it is in their scope, else the first branch they may use.
@@ -397,6 +400,7 @@ async function loadBranches() {
 }
 
 async function prepareModal() {
+  await loadCurrencies()
   initializeForm()
   loadingOptions.value = true
   await Promise.all([loadCategories(), props.mode === 'create' ? loadBranches() : Promise.resolve()])
@@ -506,7 +510,7 @@ onMounted(() => {
 .amount-card:focus-within { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-ring); }
 .amount-card-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .field-label { color: #324b70; font-size: 13px; font-weight: 650; }
-.currency-toggle { display: inline-flex; gap: 2px; border: 1px solid #e0e7f1; border-radius: 10px; padding: 3px; background: #fff; }
+.currency-toggle { display: inline-flex; flex-wrap: wrap; gap: 2px; border: 1px solid #e0e7f1; border-radius: 10px; padding: 3px; background: #fff; }
 .currency-toggle button { min-width: 52px; border: 0; border-radius: 7px; padding: 6px 10px; color: #657993; background: transparent; font-size: 12px; font-weight: 750; letter-spacing: .02em; cursor: pointer; transition: background .15s ease, color .15s ease; }
 .currency-toggle button.is-selected { color: #fff; background: var(--accent); box-shadow: 0 2px 6px rgb(16 40 80 / 14%); }
 .currency-toggle button:disabled { cursor: not-allowed; }

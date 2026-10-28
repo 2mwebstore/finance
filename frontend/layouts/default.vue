@@ -7,11 +7,28 @@
       </NuxtLink>
 
       <nav class="sidebar-nav" aria-label="Main navigation">
-        <div class="nav-section">
+        <div v-if="mainNav.length" class="nav-section">
           <NuxtLink v-for="item in mainNav" :key="item.label" :to="item.to" class="sidebar-link" :class="isActive(item) ? 'is-active' : ''">
             <component :is="item.icon" :size="18" :stroke-width="1.9" />
             <span>{{ item.label }}</span>
-            <ChevronRight v-if="item.label === 'Branches' || item.label === 'Roles & Permissions'" class="nav-chevron" :size="15" />
+          </NuxtLink>
+        </div>
+
+        <div v-if="financialNav.length && mainNav.length" class="nav-divider"></div>
+        <div v-if="financialNav.length" class="nav-section">
+          <p class="nav-caption">FINANCIAL ACTIVITY</p>
+          <NuxtLink v-for="item in financialNav" :key="item.label" :to="item.to" class="sidebar-link" :class="isActive(item) ? 'is-active' : ''">
+            <component :is="item.icon" :size="18" :stroke-width="1.9" />
+            <span>{{ item.label }}</span>
+          </NuxtLink>
+        </div>
+
+        <div v-if="inventoryNav.length" class="nav-divider"></div>
+        <div v-if="inventoryNav.length" class="nav-section">
+          <p class="nav-caption">INVENTORY</p>
+          <NuxtLink v-for="item in inventoryNav" :key="item.label" :to="item.to" class="sidebar-link" :class="isActive(item) ? 'is-active' : ''">
+            <component :is="item.icon" :size="18" :stroke-width="1.9" />
+            <span>{{ item.label }}</span>
           </NuxtLink>
         </div>
 
@@ -98,9 +115,18 @@
 <script setup lang="ts">
 import type { Component } from 'vue'
 import { useResizeObserver } from '@vueuse/core'
+import { useCurrency } from '~/composables/useCurrency'
 import {
+  ArrowLeftRight,
+  Boxes,
   Building2,
+  ChartPie,
   ChartNoAxesCombined,
+  Coins,
+  Package,
+  ShoppingCart,
+  Truck,
+  Wallet,
   ChevronDown,
   ChevronRight,
   DatabaseBackup,
@@ -136,6 +162,12 @@ const {
   canViewPermissionCodes,
   canViewAudit,
   canManageBackups,
+  canViewInventory,
+  canViewSales,
+  canViewPurchases,
+  canViewTransfers,
+  canViewInventoryReports,
+  canViewInventoryExpenses,
   isSuperAdmin,
 } = usePermissions()
 const searchTerm = ref('')
@@ -144,10 +176,31 @@ const mobileMenuOpen = ref(false)
 const mainNav = computed<NavItem[]>(() => {
   const items: NavItem[] = []
   if (canViewDashboard.value) items.push({ label: 'Dashboard', to: '/dashboard', icon: LayoutDashboard })
+  return items
+})
+
+// Income/expense ledger: its activity, reports and categories.
+const financialNav = computed<NavItem[]>(() => {
+  const items: NavItem[] = []
   if (canViewTransactions.value) items.push({ label: 'Transactions', to: '/transactions', icon: ReceiptText })
   if (can('income.view')) items.push({ label: 'Income', to: '/transactions?type=income', icon: TrendingUp, queryType: 'income' })
   if (can('expense.view')) items.push({ label: 'Expense', to: '/transactions?type=expense', icon: TrendingDown, queryType: 'expense' })
   if (canViewReports.value) items.push({ label: 'Reports', to: '/reports', icon: FileChartColumnIncreasing })
+  if (can('categories.manage')) items.push({ label: 'Categories', to: '/admin/categories', icon: Tags })
+  return items
+})
+
+const inventoryNav = computed<NavItem[]>(() => {
+  const items: NavItem[] = []
+  if (canViewInventory.value) items.push({ label: 'Products', to: '/inventory/products', icon: Package })
+  if (canViewInventory.value) items.push({ label: 'Stock', to: '/inventory/stock', icon: Boxes })
+  if (canViewSales.value) items.push({ label: 'Sales', to: '/inventory/sales', icon: ShoppingCart })
+  if (canViewPurchases.value) items.push({ label: 'Purchases', to: '/inventory/purchases', icon: Truck })
+  if (canViewInventoryExpenses.value) items.push({ label: 'Expenses', to: '/inventory/expenses', icon: ReceiptText })
+  if (can('inventory.manage')) items.push({ label: 'Expense Categories', to: '/inventory/expense-categories', icon: Tags })
+  if (can('inventory.manage', 'categories.manage')) items.push({ label: 'Payment Methods', to: '/inventory/payment-methods', icon: Wallet })
+  if (canViewTransfers.value) items.push({ label: 'Transfers', to: '/inventory/transfers', icon: ArrowLeftRight })
+  if (canViewInventoryReports.value) items.push({ label: 'Inventory Reports', to: '/inventory/reports', icon: ChartPie })
   return items
 })
 
@@ -157,7 +210,7 @@ const adminNav = computed<NavItem[]>(() => {
   if (canViewRoles.value) items.push({ label: 'Roles & Permissions', to: '/admin/roles', icon: ShieldCheck })
   if (canViewPermissionCodes.value) items.push({ label: 'Permission Codes', to: '/admin/permissions', icon: KeyRound })
   if (canViewUsers.value) items.push({ label: 'Users', to: '/admin/users', icon: UsersRound })
-  if (can('categories.manage')) items.push({ label: 'Categories', to: '/admin/categories', icon: Tags })
+  if (can('currency-settings.manage')) items.push({ label: 'Currency', to: '/admin/currency', icon: Coins })
   if (canViewAudit.value) items.push({ label: 'Audit Log', to: '/admin/audit', icon: ReceiptText })
   if (canManageBackups.value) items.push({ label: 'Backups', to: '/admin/backups', icon: DatabaseBackup })
   return items
@@ -175,8 +228,9 @@ const mobileNav = computed<NavItem[]>(() => {
 
 // Everything the bottom bar does not cover lives in the Menu sheet's grid.
 const menuSections = computed(() => [
+  { caption: 'FINANCIAL ACTIVITY', items: financialNav.value.filter(item => !mobileNav.value.some(tab => tab.to === item.to)) },
+  { caption: 'INVENTORY', items: inventoryNav.value },
   { caption: 'MANAGE', items: adminNav.value },
-  { caption: 'MORE', items: canViewReports.value ? [{ label: 'Reports', to: '/reports', icon: FileChartColumnIncreasing }] : [] },
 ].filter((section) => section.items.length))
 
 // The highlighted bottom-bar tab: the open Menu sheet, else the route's tab, else Menu
@@ -240,7 +294,10 @@ watch(activeNavKey, async (key, previous) => {
 })
 
 useResizeObserver(mobileNavEl, placeLens)
+// Currency symbols and decimals for every page (Manage → Currency).
+const { load: loadCurrencies } = useCurrency()
 onMounted(async () => {
+  void loadCurrencies()
   await nextTick()
   placeLens()
   // Turn transitions on after the first placement so the lens doesn't slide in from the left.
