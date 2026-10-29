@@ -138,15 +138,15 @@ export const PERMISSION_CATALOG: {
   { code: P.InventoryExpensesCreate, name: 'Create Inventory Expenses', module: 'Inventory Expenses', description: 'Record inventory expenses (shipping, packaging, storage…)' },
   { code: P.InventoryExpensesVoid, name: 'Void Inventory Expenses', module: 'Inventory Expenses', description: 'Void an inventory expense' },
 
-  { code: P.PlatformsView, name: 'View Platforms', module: 'Platforms', description: 'See platforms, partners and the branches they are assigned to' },
-  { code: P.PlatformsManage, name: 'Manage Platforms', module: 'Platforms', description: 'Add and edit platforms and partners, with their default partner % and currency' },
-  { code: P.PlatformAssignmentsManage, name: 'Manage Branch Platform Assignments', module: 'Platforms', description: 'Assign platforms to branches with their partners; change partners and their %, end or move assignments' },
-  { code: P.WinLoseView, name: 'View Win/Lose', module: 'Win/Lose', description: 'See the weekly win/lose entered for your branches' },
-  { code: P.WinLoseCreate, name: 'Enter Win/Lose', module: 'Win/Lose', description: 'Enter a week\'s win/lose and commission for your branches (once a week)' },
+  { code: P.PlatformsView, name: 'View Agents', module: 'Platforms', description: 'See agents, partners and the groups they are assigned to' },
+  { code: P.PlatformsManage, name: 'Manage Agents', module: 'Platforms', description: 'Add and edit agents and partners, with their default partner % and currency' },
+  { code: P.PlatformAssignmentsManage, name: 'Manage Group Agent Assignments', module: 'Platforms', description: 'Assign agents to groups with their partners; change partners and their %, end or move assignments' },
+  { code: P.WinLoseView, name: 'View Win/Lose', module: 'Win/Lose', description: 'See the weekly win/lose entered for your groups' },
+  { code: P.WinLoseCreate, name: 'Enter Win/Lose', module: 'Win/Lose', description: 'Enter a week\'s win/lose and commission for your groups (once a week)' },
   { code: P.WinLoseEdit, name: 'Correct Win/Lose', module: 'Win/Lose', description: 'Change a week already saved, with a reason (kept in the audit log)' },
-  { code: P.WinLoseReportsView, name: 'View Win/Lose Reports', module: 'Win/Lose Reports', description: 'The weekly report and the branch summary for your branches, one branch at a time' },
-  { code: P.WinLoseReportsConsolidated, name: 'View Consolidated Win/Lose', module: 'Win/Lose Reports', description: 'Combined totals across all your branches' },
-  { code: P.WinLoseSettlementsFinalize, name: 'Finalize Weekly Settlements', module: 'Win/Lose Reports', description: 'Finalize or reopen a branch\'s week; a finalized week can\'t be changed' },
+  { code: P.WinLoseReportsView, name: 'View Win/Lose Reports', module: 'Win/Lose Reports', description: 'The weekly report and the group summary for your groups, one group at a time' },
+  { code: P.WinLoseReportsConsolidated, name: 'View Consolidated Win/Lose', module: 'Win/Lose Reports', description: 'Combined totals across all your groups' },
+  { code: P.WinLoseSettlementsFinalize, name: 'Finalize Weekly Settlements', module: 'Win/Lose Reports', description: 'Finalize or reopen a group\'s week; a finalized week can\'t be changed' },
 ]
 
 /** Permission modules in the same order as the sidebar (Settings holds Categories). */

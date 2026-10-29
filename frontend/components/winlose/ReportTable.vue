@@ -3,7 +3,7 @@
     <table class="w-full min-w-[620px] text-left text-xs">
       <thead class="bg-canvas text-[10px] uppercase tracking-wide text-slate-500">
         <tr>
-          <th class="px-3 py-2 font-bold">Platform</th>
+          <th class="px-3 py-2 font-bold">Agent</th>
           <th class="px-3 py-2 font-bold">Partner %</th>
           <th class="px-3 py-2 text-right font-bold">Win/Lose</th>
           <th class="px-3 py-2 text-right font-bold">Commission</th>
@@ -11,9 +11,8 @@
           <th v-if="showWeeks" class="px-3 py-2 text-right font-bold">Weeks</th>
         </tr>
       </thead>
-      <tbody v-for="hq in report.hqs" :key="hq.branch_id" class="divide-y divide-border border-t border-border first:border-t-0">
-        <tr class="bg-slate-50/70"><td :colspan="showWeeks ? 6 : 5" class="px-3 py-2 text-xs font-bold text-navy">{{ hq.branch_code }} — {{ hq.branch_name }}</td></tr>
-        <template v-for="line in linesOf(hq.branch_id)" :key="`${line.platform_id}-${line.currency}`">
+      <tbody v-if="report.lines.length" class="divide-y divide-border">
+        <template v-for="line in report.lines" :key="`${line.platform_id}-${line.currency}`">
           <tr class="text-navy">
             <td class="px-3 py-2">
               <span class="font-mono font-semibold">{{ line.platform_code }}</span> <span class="text-muted">· {{ line.currency }}</span>
@@ -34,16 +33,16 @@
             <td v-if="showWeeks" class="px-3 py-1 text-right tabular-nums">{{ p.entries }}</td>
           </tr>
         </template>
-        <!-- The branch's subtotal in each currency -->
-        <tr v-for="t in hq.totals" :key="`total-${t.currency}`" class="bg-canvas/60 font-semibold text-navy">
-          <td class="px-3 py-2" colspan="2">{{ hq.branch_code }} total · {{ t.currency }}</td>
+        <!-- The total in each currency -->
+        <tr v-for="t in report.totals" :key="`total-${t.currency}`" class="bg-canvas/60 font-semibold text-navy">
+          <td class="px-3 py-2" colspan="2">Total · {{ t.currency }}</td>
           <td class="px-3 py-2 text-right tabular-nums" :class="tone(t.win_lose)">{{ formatAmount(t.win_lose, t.currency) }}</td>
           <td class="px-3 py-2 text-right tabular-nums">{{ formatAmount(t.commission, t.currency) }}</td>
           <td class="px-3 py-2 text-right font-bold tabular-nums" :class="tone(t.jame_ps)">{{ formatAmount(t.jame_ps, t.currency) }}</td>
           <td v-if="showWeeks" class="px-3 py-2 text-right tabular-nums text-muted">{{ t.entries }}</td>
         </tr>
       </tbody>
-      <tbody v-if="!report.lines.length"><tr><td :colspan="showWeeks ? 6 : 5" class="px-3 py-8 text-center text-muted">No results entered for these weeks.</td></tr></tbody>
+      <tbody v-else><tr><td :colspan="showWeeks ? 6 : 5" class="px-3 py-8 text-center text-muted">No results entered for these weeks.</td></tr></tbody>
     </table>
   </div>
 </template>
@@ -53,12 +52,8 @@ import { Handshake } from 'lucide-vue-next'
 import type { WinLoseReport, WinLoseReportLine } from '~/types/api'
 import { formatAmount, rateRange } from '~/utils/winlose'
 
-/** A win/lose report's lines grouped by branch, with each partner's share and the branch's subtotal per currency (`jame_ps` is the Total). */
-const props = withDefaults(defineProps<{ report: WinLoseReport; showWeeks?: boolean }>(), { showWeeks: false })
-
-function linesOf(branchId: string) {
-  return props.report.lines.filter(line => line.branch_id === branchId)
-}
+/** A win/lose report's lines by agent, with each partner's share and the total per currency (`jame_ps` is the Total). */
+withDefaults(defineProps<{ report: WinLoseReport; showWeeks?: boolean }>(), { showWeeks: false })
 
 // Who shared a line's Total: the partner's name, "n partners" (listed below the line) or none.
 function partnersLabel(line: WinLoseReportLine) {

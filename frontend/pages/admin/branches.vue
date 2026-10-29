@@ -23,7 +23,8 @@
     >
       <template #icon><Building2 :size="20" /></template>
       <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <label class="space-y-1 text-xs font-medium text-muted">Branch code<input v-model.trim="form.code" required minlength="2" maxlength="32" :aria-invalid="formCheck.invalid('code')" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" placeholder="PP-01" /></label>
+        <!-- Codes are made up by the API (BR-001, BR-002…) and can't be changed here -->
+        <label class="space-y-1 text-xs font-medium text-muted">Branch code<input :value="form.code" readonly tabindex="-1" class="w-full cursor-default rounded-lg border border-border bg-canvas px-3 py-2 font-mono text-sm text-muted" :placeholder="editing ? '' : 'Made automatically'" /><small v-if="!editing" class="block font-normal">Given automatically when the branch is created.</small></label>
         <label class="space-y-1 text-xs font-medium text-muted">Branch name<input v-model.trim="form.name" required minlength="2" maxlength="128" :aria-invalid="formCheck.invalid('name')" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" placeholder="Phnom Penh HQ" /></label>
         <label class="space-y-1 text-xs font-medium text-muted">Address<input v-model.trim="form.address" maxlength="512" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" /></label>
         <label class="space-y-1 text-xs font-medium text-muted">Phone<input v-model.trim="form.phone" maxlength="32" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" /></label>
@@ -131,7 +132,6 @@ watch(search, () => load())
 const formCheck = reactive(useFormErrors(
   () => ({ ...form }),
   () => ({
-    code: [rule.required('code'), rule.minLength('code', 2), rule.maxLength('code', 32)],
     name: [rule.required('name'), rule.minLength('name', 2), rule.maxLength('name', 128)],
     email: [rule.email('email'), rule.maxLength('email', 255)],
   }),
@@ -147,6 +147,8 @@ function openCreate() {
   editing.value = null
   resetForm()
   showCreate.value = true
+  // Show the code it will get (the API gives it for real when saving).
+  api<{ code: string }>('/branches/next-code').then((r) => { if (showCreate.value && !editing.value) form.code = r.code }).catch(() => {})
 }
 
 function openEdit(branch: Branch) {
@@ -179,11 +181,13 @@ async function save() {
   formError.value = ''
   if (!formCheck.check()) return
   saving.value = true
-  const body = { code: form.code.trim(), name: form.name.trim(), address: form.address.trim(), phone: form.phone.trim(), email: form.email.trim() }
+  // The code is never sent: a new branch gets the next one, and an existing one keeps its own.
+  const body = { name: form.name.trim(), address: form.address.trim(), phone: form.phone.trim(), email: form.email.trim() }
   try {
+    let code = editing.value?.code || ''
     if (editing.value) await api(`/branches/${editing.value.id}`, { method: 'PATCH', body })
-    else await api('/branches', { method: 'POST', body })
-    toast.success(`${body.name} is saved.`, { title: editing.value ? 'Branch updated' : 'Branch created' })
+    else code = (await api<Branch>('/branches', { method: 'POST', body })).code
+    toast.success(`${code} · ${body.name} is saved.`, { title: editing.value ? 'Branch updated' : 'Branch created' })
     showCreate.value = false
     editing.value = null
     resetForm()

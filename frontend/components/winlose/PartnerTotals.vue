@@ -2,7 +2,7 @@
   <article v-if="partners.length" class="overflow-x-auto rounded-xl border border-border bg-white">
     <header class="flex flex-wrap items-baseline justify-between gap-2 border-b border-border px-4 py-3">
       <h2 class="flex items-center gap-2 text-sm font-semibold text-navy"><Handshake :size="15" /> By partner</h2>
-      <p class="text-[11px] text-muted">Each partner’s share of the Total; a platform shared by several partners counts for each.</p>
+      <p class="text-[11px] text-muted">Each partner’s share of the Total; an agent shared by several partners counts for each.</p>
     </header>
     <table class="w-full min-w-[560px] text-left text-xs">
       <thead class="bg-canvas text-[10px] uppercase tracking-wide text-slate-500">
@@ -26,7 +26,7 @@
             <td class="px-3 py-2 text-right font-bold tabular-nums" :class="tone(t.jame_ps)">{{ formatAmount(t.jame_ps, t.currency) }}</td>
             <td class="px-3 py-2 text-right tabular-nums text-muted">{{ t.entries }}</td>
             <td class="px-3 py-2 text-right">
-              <NuxtLink v-if="i === 0 && p.partner_id" :to="{ path: '/winlose/reports/partner-statement', query: { partner: p.partner_id, from, to, branch: branchId || undefined } }" class="font-semibold text-primary">Statement</NuxtLink>
+              <NuxtLink v-if="i === 0 && p.partner_id" :to="{ path: '/winlose/reports/partner-statement', query: { partner: p.partner_id, from, to } }" class="font-semibold text-primary">Statement</NuxtLink>
             </td>
           </tr>
         </template>
@@ -41,7 +41,7 @@ import type { WinLoseReport } from '~/types/api'
 import { formatAmount } from '~/utils/winlose'
 
 /** A report's totals for each partner (their share of the Total), per currency, with a link to the partner's statement. */
-defineProps<{ partners: WinLoseReport['partners']; from: string; to: string; branchId?: string }>()
+defineProps<{ partners: WinLoseReport['partners']; from: string; to: string }>()
 
 function tone(value: string) {
   return Number(value) < 0 ? 'text-expense' : ''

@@ -21,6 +21,11 @@ func TestPlatformMigrationMatchesStartupSQL(t *testing.T) {
 			t.Errorf("migration 000013 is missing or differs from:\n%s", stmt)
 		}
 	}
+	for _, c := range platformColumns {
+		if !strings.Contains(migration, squash(c.ddl)) {
+			t.Errorf("migration 000013 is missing the %s.%s column", c.table, c.column)
+		}
+	}
 	for _, fk := range platformForeignKeys {
 		if !strings.Contains(migration, squash(fk.sql())) {
 			t.Errorf("migration 000013 is missing foreign key %s", fk.name)

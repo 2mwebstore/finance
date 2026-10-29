@@ -34,6 +34,16 @@ func (bc *BranchController) Create(c *gin.Context) {
 	c.JSON(http.StatusCreated, branchJSON(branch))
 }
 
+// NextCode is the code a new branch will get (shown, read-only, on the Add branch form).
+func (bc *BranchController) NextCode(c *gin.Context) {
+	code, err := bc.svc.NextCode(c.Request.Context())
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"code": code})
+}
+
 func (bc *BranchController) Update(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {

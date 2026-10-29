@@ -141,15 +141,15 @@ func AllPermissions() []struct {
 		{InventoryExpensesCreate, "Create Inventory Expenses", "Inventory Expenses", "Record inventory expenses (shipping, packaging, storage…)"},
 		{InventoryExpensesVoid, "Void Inventory Expenses", "Inventory Expenses", "Void an inventory expense"},
 
-		{PlatformsView, "View Platforms", "Platforms", "See platforms, partners and the branches they are assigned to"},
-		{PlatformsManage, "Manage Platforms", "Platforms", "Add and edit platforms and partners, with their default partner % and currency"},
-		{PlatformAssignmentsManage, "Manage Branch Platform Assignments", "Platforms", "Assign platforms to branches with their partners; change partners and their %, end or move assignments"},
-		{WinLoseView, "View Win/Lose", "Win/Lose", "See the weekly win/lose entered for your branches"},
-		{WinLoseCreate, "Enter Win/Lose", "Win/Lose", "Enter a week's win/lose and commission for your branches (once a week)"},
+		{PlatformsView, "View Agents", "Platforms", "See agents, partners and the groups they are assigned to"},
+		{PlatformsManage, "Manage Agents", "Platforms", "Add and edit agents and partners, with their default partner % and currency"},
+		{PlatformAssignmentsManage, "Manage Group Agent Assignments", "Platforms", "Assign agents to groups with their partners; change partners and their %, end or move assignments"},
+		{WinLoseView, "View Win/Lose", "Win/Lose", "See the weekly win/lose entered for your groups"},
+		{WinLoseCreate, "Enter Win/Lose", "Win/Lose", "Enter a week's win/lose and commission for your groups (once a week)"},
 		{WinLoseEdit, "Correct Win/Lose", "Win/Lose", "Change a week already saved, with a reason (kept in the audit log)"},
-		{WinLoseReportsView, "View Win/Lose Reports", "Win/Lose Reports", "The weekly report and the branch summary for your branches, one branch at a time"},
-		{WinLoseReportsConsolidated, "View Consolidated Win/Lose", "Win/Lose Reports", "Combined totals across all your branches"},
-		{WinLoseSettlementsFinalize, "Finalize Weekly Settlements", "Win/Lose Reports", "Finalize or reopen a branch's week; a finalized week can't be changed"},
+		{WinLoseReportsView, "View Win/Lose Reports", "Win/Lose Reports", "The weekly report and the group summary for your groups, one group at a time"},
+		{WinLoseReportsConsolidated, "View Consolidated Win/Lose", "Win/Lose Reports", "Combined totals across all your groups"},
+		{WinLoseSettlementsFinalize, "Finalize Weekly Settlements", "Win/Lose Reports", "Finalize or reopen a group's week; a finalized week can't be changed"},
 	}
 }
 

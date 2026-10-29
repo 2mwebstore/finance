@@ -35,12 +35,34 @@ func (pc *PlatformController) scope(c *gin.Context) (*accessScope, services.Bran
 	return scope, services.BranchScope{All: scope.AllBranches, IDs: scope.BranchIDs}, true
 }
 
+// actorOf is the signed-in user (the auth middleware has already checked there is one).
+func actorOf(c *gin.Context) uuid.UUID {
+	id, _ := getActorID(c)
+	return id
+}
+
+// ownGroupUnless is the group asked for in the query, else the person's own (the PLATFORMS
+// pages don't ask for a group).
+func (pc *PlatformController) ownGroupUnless(c *gin.Context, scope services.BranchScope) (*uuid.UUID, bool) {
+	branchID, ok := queryID(c, "branch_id")
+	if !ok || branchID != nil {
+		return branchID, ok
+	}
+	own, err := pc.svc.OwnGroup(c.Request.Context(), actorOf(c), scope)
+	if err != nil {
+		writePlatformError(c, err)
+		return nil, false
+	}
+	return &own, true
+}
+
 func writePlatformError(c *gin.Context, err error) {
 	switch {
-	case errors.Is(err, services.ErrPlatformNotFound), errors.Is(err, services.ErrPartnerNotFound), errors.Is(err, services.ErrAssignmentNotFound), errors.Is(err, services.ErrSettlementNotFound):
+	case errors.Is(err, services.ErrPlatformNotFound), errors.Is(err, services.ErrPartnerNotFound), errors.Is(err, services.ErrAssignmentNotFound), errors.Is(err, services.ErrSettlementNotFound),
+		errors.Is(err, services.ErrGroupNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 	case errors.Is(err, services.ErrBranchAccessDenied):
-		c.JSON(http.StatusForbidden, gin.H{"error": "you can only work in your own branches"})
+		c.JSON(http.StatusForbidden, gin.H{"error": "you can only work in your own groups"})
 	default:
 		writeServiceError(c, err)
 	}
@@ -151,7 +173,8 @@ func (pc *PlatformController) ListAssignments(c *gin.Context) {
 	if !ok {
 		return
 	}
-	branchID, ok := queryID(c, "branch_id")
+	// No branch_id: the person's own group.
+	branchID, ok := pc.ownGroupUnless(c, scope)
 	if !ok {
 		return
 	}
@@ -281,6 +304,134 @@ func (pc *PlatformController) MoveAssignment(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ended": ended, "created": created})
 }
 
+// ===== Groups (titled sets of agents) =====
+
+func groupDetails(g *services.GroupRow) map[string]interface{} {
+	agents := make([]string, len(g.Agents))
+	for i, a := range g.Agents {
+		agents[i] = a.PlatformCode
+	}
+	partners := make([]string, len(g.Partners))
+	for i, p := range g.Partners {
+		partners[i] = p.PartnerID.String() + ": " + p.CommissionRate.String()
+	}
+	return map[string]interface{}{"title": g.Title, "agents": agents, "partners": partners, "currency": g.Currency, "is_active": g.IsActive}
+}
+
+func (pc *PlatformController) ListGroups(c *gin.Context) {
+	_, scope, ok := pc.scope(c)
+	if !ok {
+		return
+	}
+	// No branch_id: the person's own group (branch).
+	branchID, ok := pc.ownGroupUnless(c, scope)
+	if !ok {
+		return
+	}
+	platformID, ok := queryID(c, "platform_id")
+	if !ok {
+		return
+	}
+	rows, err := pc.svc.ListGroups(c.Request.Context(), *branchID, services.GroupFilter{PlatformID: platformID, Status: c.Query("status")}, scope)
+	if err != nil {
+		writePlatformError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": orEmpty(rows)})
+}
+
+func (pc *PlatformController) CreateGroup(c *gin.Context) {
+	_, scope, ok := pc.scope(c)
+	if !ok {
+		return
+	}
+	var in services.GroupInput
+	if !bindJSON(c, &in) {
+		return
+	}
+	actor := actorOf(c)
+	g, err := pc.svc.CreateGroup(c.Request.Context(), in, scope, actor)
+	if err != nil {
+		writePlatformError(c, err)
+		return
+	}
+	pc.record(c, actor, "platform.group.create", "assignment_group", g.ID.String(), &g.BranchID, groupDetails(g))
+	c.JSON(http.StatusCreated, g)
+}
+
+func (pc *PlatformController) UpdateGroup(c *gin.Context) {
+	_, scope, ok := pc.scope(c)
+	if !ok {
+		return
+	}
+	id, ok := paramID(c)
+	if !ok {
+		return
+	}
+	var in services.GroupUpdateInput
+	if !bindJSON(c, &in) {
+		return
+	}
+	actor := actorOf(c)
+	before, after, err := pc.svc.UpdateGroup(c.Request.Context(), id, in, scope, actor)
+	if err != nil {
+		writePlatformError(c, err)
+		return
+	}
+	pc.record(c, actor, "platform.group.update", "assignment_group", id.String(), &after.BranchID, map[string]interface{}{
+		"before": groupDetails(before), "after": groupDetails(after),
+	})
+	c.JSON(http.StatusOK, after)
+}
+
+type groupActiveInput struct {
+	IsActive *bool `json:"is_active" binding:"required"`
+}
+
+func (pc *PlatformController) SetGroupActive(c *gin.Context) {
+	_, scope, ok := pc.scope(c)
+	if !ok {
+		return
+	}
+	id, ok := paramID(c)
+	if !ok {
+		return
+	}
+	var in groupActiveInput
+	if !bindJSON(c, &in) {
+		return
+	}
+	g, err := pc.svc.SetGroupActive(c.Request.Context(), id, *in.IsActive, scope)
+	if err != nil {
+		writePlatformError(c, err)
+		return
+	}
+	action := "platform.group.turn_off"
+	if g.IsActive {
+		action = "platform.group.turn_on"
+	}
+	pc.record(c, actorOf(c), action, "assignment_group", id.String(), &g.BranchID, groupDetails(g))
+	c.JSON(http.StatusOK, g)
+}
+
+func (pc *PlatformController) DeleteGroup(c *gin.Context) {
+	_, scope, ok := pc.scope(c)
+	if !ok {
+		return
+	}
+	id, ok := paramID(c)
+	if !ok {
+		return
+	}
+	g, err := pc.svc.DeleteGroup(c.Request.Context(), id, scope)
+	if err != nil {
+		writePlatformError(c, err)
+		return
+	}
+	pc.record(c, actorOf(c), "platform.group.delete", "assignment_group", id.String(), &g.BranchID, groupDetails(g))
+	c.JSON(http.StatusOK, gin.H{"deleted": true})
+}
+
 // ===== Weekly win/lose =====
 
 func (pc *PlatformController) Formula(c *gin.Context) {
@@ -297,15 +448,9 @@ func (pc *PlatformController) WeekSheet(c *gin.Context) {
 	if !ok {
 		return
 	}
-	branchID, ok := queryID(c, "branch_id")
-	if !ok {
-		return
-	}
-	if branchID == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "choose a branch", "fields": gin.H{"branch_id": "choose a branch"}})
-		return
-	}
-	sheet, err := pc.svc.WeekSheet(c.Request.Context(), c.Query("week_start"), *branchID, scope)
+	// No branch_id: the person's own group.
+	actor, _ := getActorID(c)
+	sheet, err := pc.svc.WeekSheet(c.Request.Context(), c.Query("week_start"), c.Query("branch_id"), scope, actor)
 	if err != nil {
 		writePlatformError(c, err)
 		return
@@ -322,7 +467,8 @@ func (pc *PlatformController) Preview(c *gin.Context) {
 	if !bindJSON(c, &in) {
 		return
 	}
-	rows, err := pc.svc.Preview(c.Request.Context(), in, scope)
+	actor, _ := getActorID(c)
+	rows, err := pc.svc.Preview(c.Request.Context(), in, scope, actor)
 	if err != nil {
 		writePlatformError(c, err)
 		return
@@ -345,13 +491,31 @@ func (pc *PlatformController) SaveWeek(c *gin.Context) {
 		writePlatformError(c, err)
 		return
 	}
-	// Each changed saved week goes in the audit log with its old and new figures.
+	// Each changed saved week goes in the audit log with its old and new figures (or title).
 	for _, cr := range corrections {
-		pc.record(c, actor, "winlose.correct", "weekly_platform_result", cr.ResultID.String(), &sheet.BranchID, map[string]interface{}{
+		action, entity := "winlose.correct", "weekly_platform_result"
+		if cr.PlatformCode == "" {
+			action, entity = "winlose.entry.rename", "weekly_entry"
+		}
+		pc.record(c, actor, action, entity, cr.ResultID.String(), &sheet.BranchID, map[string]interface{}{
 			"week_start": sheet.WeekStart, "branch": sheet.BranchCode, "platform": cr.PlatformCode, "before": cr.Before, "after": cr.After, "reason": in.Reason,
 		})
 	}
 	c.JSON(http.StatusOK, sheet)
+}
+
+// ListEntries is Data Entry's list: the saved weeks of the person's groups, newest first.
+func (pc *PlatformController) ListEntries(c *gin.Context) {
+	_, scope, ok := pc.scope(c)
+	if !ok {
+		return
+	}
+	rows, err := pc.svc.ListEntries(c.Request.Context(), c.Query("search"), scope)
+	if err != nil {
+		writePlatformError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": orEmpty(rows)})
 }
 
 // ===== Settlements =====
@@ -361,7 +525,8 @@ func (pc *PlatformController) ListSettlements(c *gin.Context) {
 	if !ok {
 		return
 	}
-	branchID, ok := queryID(c, "branch_id")
+	// No branch_id: the person's own group.
+	branchID, ok := pc.ownGroupUnless(c, scope)
 	if !ok {
 		return
 	}
@@ -438,7 +603,7 @@ func (pc *PlatformController) Report(c *gin.Context) {
 	}
 	report, err := pc.svc.Report(c.Request.Context(), services.ReportFilter{DateFrom: c.Query("date_from"), DateTo: c.Query("date_to"), BranchID: branchID,
 		PartnerID: partnerID, ByWeek: c.Query("by_week") == "true"},
-		scope, access.Can(permissions.WinLoseReportsConsolidated))
+		scope, access.Can(permissions.WinLoseReportsConsolidated), actorOf(c))
 	if err != nil {
 		writePlatformError(c, err)
 		return

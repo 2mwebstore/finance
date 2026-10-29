@@ -576,6 +576,24 @@ export interface PlatformAssignment {
   weeks: number
 }
 
+/** A titled group of agents (Group Agent Assignments), with the same partners and currency on each. */
+export interface AssignmentGroup {
+  id: string
+  title: string
+  /** Empty: each agent's own default. */
+  currency: string
+  starts_on: string
+  /** Off: its agents leave Data Entry (weeks already saved stay). */
+  is_active: boolean
+  created_at: string
+  created_by: string
+  agents: { assignment_id: string; platform_id: string; platform_code: string; currency: Currency; commission_rate: string; starts_on: string; weeks: number }[]
+  /** The same on every agent, by name. */
+  partners: AssignmentPartner[]
+  /** Weeks entered under its agents (taken-out ones too); a group with weeks can't be deleted. */
+  weeks: number
+}
+
 export interface WinLoseFormula {
   version: string
   description: string
@@ -613,12 +631,29 @@ export interface WeekSheetRow {
 }
 
 /** An HQ's week (Monday to Sunday): every platform it had that week. */
-export interface WeekSheet {
+/** A group's saved week on Data Entry: its title (one per group and week). */
+export interface WinLoseEntry {
+  id: string
+  title: string
   week_start: string
   week_end: string
   branch_id: string
   branch_code: string
+  created_at: string
+  created_by: string
+  /** The week is finalized. */
+  locked: boolean
+}
+
+export interface WeekSheet {
+  week_start: string
+  week_end: string
+  /** The group (branch): the person's own for a new entry. */
+  branch_id: string
+  branch_code: string
   branch_name: string
+  /** Null until the week is saved. */
+  entry: { id: string; title: string; created_at: string; created_by: string } | null
   formula: WinLoseFormula
   settlement: { id: string; status: 'finalized' | 'reopened'; week_start: string; week_end: string } | null
   /** The week is finalized: nothing can change. */
@@ -649,9 +684,6 @@ export interface WinLoseSums {
 export interface WinLoseReportLine extends WinLoseSums {
   /** Only with by_week (the partner statement). */
   week_start?: string
-  branch_id: string
-  branch_code: string
-  branch_name: string
   platform_id: string
   platform_code: string
   platform_name: string
@@ -664,10 +696,10 @@ export interface WinLoseReportLine extends WinLoseSums {
 export interface WinLoseReport {
   date_from: string
   date_to: string
-  /** Every HQ in the user's scope (Main HQ view); otherwise one HQ. */
+  /** Every group in the user's scope (they may see consolidated totals); otherwise their own group. Groups aren't shown apart. */
   consolidated: boolean
+  /** By agent and currency (and week, with by_week). */
   lines: WinLoseReportLine[]
-  hqs: { branch_id: string; branch_code: string; branch_name: string; totals: WinLoseSums[] }[]
   platforms: { platform_id: string; platform_code: string; platform_name: string; totals: WinLoseSums[] }[]
   /** Per partner, with the Total being their share (partner_id null: weeks with no partner). A week shared by two partners counts for each. */
   partners: { partner_id: string | null; partner_name: string; totals: WinLoseSums[] }[]

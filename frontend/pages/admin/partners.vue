@@ -4,7 +4,7 @@
       <div>
         <p class="text-[10px] font-bold tracking-[0.14em] text-slate-400">PLATFORMS</p>
         <h1 class="text-xl font-bold text-navy">Partners</h1>
-        <p class="mt-1 text-xs text-muted">Who shares in each branch-platform’s Total, each at their own %. A platform can have several partners; a partner’s default % is used when they’re assigned.</p>
+        <p class="mt-1 text-xs text-muted">Who shares in each group-agent’s Total, each at their own %. An agent can have several partners; a partner’s default % is used when they’re assigned.</p>
       </div>
       <button v-if="canManage" type="button" class="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white hover:bg-primary-hover" @click="openCreate"><Plus :size="16" /> Add partner</button>
     </header>

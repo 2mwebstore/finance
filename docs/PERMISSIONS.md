@@ -55,15 +55,15 @@ Server-side authorization is enforced on every protected API. The UI uses the sa
 | `inventory-expenses.view` | View Inventory Expenses | Inventory Expenses | See inventory expenses of your branches |
 | `inventory-expenses.create` | Create Inventory Expenses | Inventory Expenses | Record inventory expenses (shipping, packaging, storage…) |
 | `inventory-expenses.void` | Void Inventory Expenses | Inventory Expenses | Void an inventory expense |
-| `platforms.view` | View Platforms | Platforms | See platforms, partners and the branches they are assigned to |
-| `platforms.manage` | Manage Platforms | Platforms | Add and edit platforms and partners, with their default partner % and currency |
-| `platform-assignments.manage` | Manage Branch Platform Assignments | Platforms | Assign platforms to branches with their partners; change partners and their %, end or move assignments |
-| `winlose.view` | View Win/Lose | Win/Lose | See the weekly win/lose entered for your branches |
-| `winlose.create` | Enter Win/Lose | Win/Lose | Enter a week's win/lose and commission for your branches (once a week) |
+| `platforms.view` | View Agents | Platforms | See agents, partners and the groups they are assigned to |
+| `platforms.manage` | Manage Agents | Platforms | Add and edit agents and partners, with their default partner % and currency |
+| `platform-assignments.manage` | Manage Group Agent Assignments | Platforms | Assign agents to groups with their partners; change partners and their %, end or move assignments |
+| `winlose.view` | View Win/Lose | Win/Lose | See the weekly win/lose entered for your groups |
+| `winlose.create` | Enter Win/Lose | Win/Lose | Enter a week's win/lose and commission for your groups (once a week) |
 | `winlose.edit` | Correct Win/Lose | Win/Lose | Change a week already saved, with a reason (kept in the audit log) |
-| `winlose-reports.view` | View Win/Lose Reports | Win/Lose Reports | The weekly report and the branch summary for your branches, one branch at a time |
-| `winlose-reports.consolidated` | View Consolidated Win/Lose | Win/Lose Reports | Combined totals across all your branches |
-| `winlose-settlements.finalize` | Finalize Weekly Settlements | Win/Lose Reports | Finalize or reopen a branch's week; a finalized week can't be changed |
+| `winlose-reports.view` | View Win/Lose Reports | Win/Lose Reports | The weekly report and the group summary for your groups, one group at a time |
+| `winlose-reports.consolidated` | View Consolidated Win/Lose | Win/Lose Reports | Combined totals across all your groups |
+| `winlose-settlements.finalize` | Finalize Weekly Settlements | Win/Lose Reports | Finalize or reopen a group's week; a finalized week can't be changed |
 
 ## By module
 
@@ -159,19 +159,19 @@ Inventory is separate from income/expense. Products are shared by every branch; 
 Inventory expenses use their own categories (type `inv_expense`, managed with `inventory.manage` on Inventory → Expense categories) and come off the sales profit as net profit. Inventory reports (stock value, sales and profit, purchases, expenses, low stock) need both `reports.view` and `inventory.view`. Nobody approves a purchase they created; people with `purchases.approve` record their own purchases as approved unless they send them for approval.
 
 ### Platforms & weekly win/lose
-Win/lose is entered per branch: people enter and see it only for their own branches (owner/admin see every branch). A platform can be assigned to many branches and a branch can have many platforms, each assignment with its own partners (each at their own %) and currency.
+In the PLATFORMS menu a platform is called an **agent** and a branch a **group** (the codes keep the old names). Win/lose is entered per group: people enter and see it only for their own groups (owner/admin see every group). An agent can be assigned to many groups and a group can have many agents, each assignment with its own partners (each at their own %) and currency.
 
 | Code | Description |
 |------|-------------|
-| `platforms.view` | See platforms, partners and the branches they are assigned to |
-| `platforms.manage` | Add and edit platforms and partners, with their default partner % and currency |
-| `platform-assignments.manage` | Assign platforms to branches with their partners; change partners and their %, end or move assignments |
-| `winlose.view` | See the weekly win/lose entered for your branches |
-| `winlose.create` | Enter a week's win/lose and commission for your branches (once a week) |
+| `platforms.view` | See agents, partners and the groups they are assigned to |
+| `platforms.manage` | Add and edit agents and partners, with their default partner % and currency |
+| `platform-assignments.manage` | Assign agents to groups with their partners; change partners and their %, end or move assignments |
+| `winlose.view` | See the weekly win/lose entered for your groups |
+| `winlose.create` | Enter a week's win/lose and commission for your groups (once a week) |
 | `winlose.edit` | Change a week already saved, with a reason (kept in the audit log) |
-| `winlose-reports.view` | The weekly report and the branch summary for your branches, one branch at a time |
-| `winlose-reports.consolidated` | Combined totals across all your branches |
-| `winlose-settlements.finalize` | Finalize or reopen a branch's week; a finalized week can't be changed |
+| `winlose-reports.view` | The weekly report and the group summary for your groups, one group at a time |
+| `winlose-reports.consolidated` | Combined totals across all your groups |
+| `winlose-settlements.finalize` | Finalize or reopen a group's week; a finalized week can't be changed |
 
 Win/lose is entered once a week (Monday to Sunday) per branch and platform. A saved week keeps the partners, partner %, currency and formula version it was worked out with; changing it needs `winlose.edit` and a reason (audit log). A finalized week can't be changed until someone with `winlose-settlements.finalize` reopens it. Reports without one branch chosen (all your branches together) need `winlose-reports.consolidated`. Owner/admin (Manage Branches) get these permissions automatically when they first ship.
 

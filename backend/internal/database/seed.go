@@ -103,7 +103,7 @@ func EnsureRequiredPermissions(db *gorm.DB) error {
 		permissions.PurchasesView, permissions.PurchasesCreate, permissions.PurchasesApprove, permissions.PurchasesVoid,
 		permissions.InventoryExpensesView, permissions.InventoryExpensesCreate, permissions.InventoryExpensesVoid,
 		permissions.SalesEdit, permissions.PurchasesEdit,
-		// Platforms and daily win/lose.
+		// Platforms (shown as agents) and weekly win/lose.
 		permissions.PlatformsView, permissions.PlatformsManage, permissions.PlatformAssignmentsManage,
 		permissions.WinLoseView, permissions.WinLoseCreate, permissions.WinLoseEdit,
 		permissions.WinLoseReportsView, permissions.WinLoseReportsConsolidated, permissions.WinLoseSettlementsFinalize,
@@ -130,6 +130,11 @@ func EnsureRequiredPermissions(db *gorm.DB) error {
 			}
 		} else if err != nil {
 			return err
+		} else if perm.Name != p.Name || perm.Description != p.Description {
+			// The catalog's wording wins: pages and permissions are renamed in the app now and then.
+			if err := db.Model(&perm).Updates(map[string]interface{}{"name": p.Name, "description": p.Description}).Error; err != nil {
+				return fmt.Errorf("rename permission %s: %w", p.Code, err)
+			}
 		}
 		for _, roleCode := range []string{"super_admin", "owner"} {
 			var role models.Role

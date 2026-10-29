@@ -11,7 +11,7 @@ import (
 )
 
 var (
-	ErrPaymentMethodNotFound = errors.New("payment method not found")
+	ErrPaymentMethodNotFound  = errors.New("payment method not found")
 	ErrPaymentMethodCodeTaken = errors.New("payment method code already exists")
 )
 

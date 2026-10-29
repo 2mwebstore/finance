@@ -1,5 +1,5 @@
--- Platforms and weekly win/lose (HQ = branch): platforms, partners, branch-platform assignments
--- and their partners, weekly results with each partner's share, and weekly settlements. Same SQL
+-- Platforms and weekly win/lose (HQ = branch): platforms, partners, titled groups of
+-- branch-platform assignments and their partners, weekly results with each partner's share, titled weekly entries, and weekly settlements. Same SQL
 -- as internal/database/platforms.go. Only adds: safe to run again. The tables take the collation of
 -- branches.id, so their foreign keys can be created whichever collation the database uses.
 
@@ -44,11 +44,30 @@ PREPARE create_table FROM @ddl;
 EXECUTE create_table;
 DEALLOCATE PREPARE create_table;
 
+-- assignment_groups
+SET @ddl = CONCAT('CREATE TABLE IF NOT EXISTS assignment_groups (
+    id CHAR(36) NOT NULL,
+    branch_id CHAR(36) NOT NULL,
+    title VARCHAR(128) NOT NULL,
+    currency VARCHAR(3) NOT NULL DEFAULT '''',
+    starts_on DATE NOT NULL,
+    is_active TINYINT(1) NOT NULL DEFAULT 1,
+    created_by_id CHAR(36) NOT NULL,
+    created_at DATETIME(3) NULL,
+    updated_at DATETIME(3) NULL,
+    PRIMARY KEY (id),
+    KEY idx_assignment_groups_branch (branch_id)
+)', ' ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=', @coll);
+PREPARE create_table FROM @ddl;
+EXECUTE create_table;
+DEALLOCATE PREPARE create_table;
+
 -- hq_platform_assignments
 SET @ddl = CONCAT('CREATE TABLE IF NOT EXISTS hq_platform_assignments (
     id CHAR(36) NOT NULL,
     branch_id CHAR(36) NOT NULL,
     platform_id CHAR(36) NOT NULL,
+    group_id CHAR(36) NULL,
     commission_rate DECIMAL(7,4) NOT NULL,
     currency VARCHAR(3) NOT NULL,
     is_active TINYINT(1) NOT NULL DEFAULT 1,
@@ -64,6 +83,7 @@ SET @ddl = CONCAT('CREATE TABLE IF NOT EXISTS hq_platform_assignments (
     PRIMARY KEY (id),
     UNIQUE KEY uq_hq_platform_active (branch_id, platform_id, active_key),
     KEY idx_hq_platform_assignments_platform (platform_id),
+    KEY idx_hq_platform_assignments_group (group_id),
     KEY idx_hq_platform_assignments_deleted_at (deleted_at)
 )', ' ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=', @coll);
 PREPARE create_table FROM @ddl;
@@ -134,6 +154,24 @@ PREPARE create_table FROM @ddl;
 EXECUTE create_table;
 DEALLOCATE PREPARE create_table;
 
+-- weekly_entries
+SET @ddl = CONCAT('CREATE TABLE IF NOT EXISTS weekly_entries (
+    id CHAR(36) NOT NULL,
+    branch_id CHAR(36) NOT NULL,
+    week_start DATE NOT NULL,
+    title VARCHAR(128) NOT NULL,
+    created_by_id CHAR(36) NOT NULL,
+    updated_by_id CHAR(36) NULL,
+    created_at DATETIME(3) NULL,
+    updated_at DATETIME(3) NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_weekly_entry (branch_id, week_start),
+    KEY idx_weekly_entries_created_at (created_at)
+)', ' ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=', @coll);
+PREPARE create_table FROM @ddl;
+EXECUTE create_table;
+DEALLOCATE PREPARE create_table;
+
 -- weekly_settlements
 SET @ddl = CONCAT('CREATE TABLE IF NOT EXISTS weekly_settlements (
     id CHAR(36) NOT NULL,
@@ -174,7 +212,45 @@ PREPARE create_table FROM @ddl;
 EXECUTE create_table;
 DEALLOCATE PREPARE create_table;
 
+-- Columns added after the first builds, each added only when missing.
+
+SET @col = IF(
+    (SELECT COUNT(*) FROM information_schema.columns
+      WHERE table_schema = DATABASE() AND table_name = 'hq_platform_assignments' AND column_name = 'group_id') = 0,
+    'ALTER TABLE hq_platform_assignments ADD COLUMN group_id CHAR(36) NULL AFTER platform_id, ADD KEY idx_hq_platform_assignments_group (group_id)',
+    'SELECT 1');
+PREPARE add_column FROM @col;
+EXECUTE add_column;
+DEALLOCATE PREPARE add_column;
+
 -- Foreign keys, each added only when missing.
+
+SET @fk = IF(
+    (SELECT COUNT(*) FROM information_schema.table_constraints
+      WHERE table_schema = DATABASE() AND table_name = 'assignment_groups' AND constraint_name = 'fk_assignment_groups_branch' AND constraint_type = 'FOREIGN KEY') = 0,
+    'ALTER TABLE assignment_groups ADD CONSTRAINT fk_assignment_groups_branch FOREIGN KEY (branch_id) REFERENCES branches(id)',
+    'SELECT 1');
+PREPARE add_fk FROM @fk;
+EXECUTE add_fk;
+DEALLOCATE PREPARE add_fk;
+
+SET @fk = IF(
+    (SELECT COUNT(*) FROM information_schema.table_constraints
+      WHERE table_schema = DATABASE() AND table_name = 'assignment_groups' AND constraint_name = 'fk_assignment_groups_created_by' AND constraint_type = 'FOREIGN KEY') = 0,
+    'ALTER TABLE assignment_groups ADD CONSTRAINT fk_assignment_groups_created_by FOREIGN KEY (created_by_id) REFERENCES users(id)',
+    'SELECT 1');
+PREPARE add_fk FROM @fk;
+EXECUTE add_fk;
+DEALLOCATE PREPARE add_fk;
+
+SET @fk = IF(
+    (SELECT COUNT(*) FROM information_schema.table_constraints
+      WHERE table_schema = DATABASE() AND table_name = 'hq_platform_assignments' AND constraint_name = 'fk_hq_platform_assignments_group' AND constraint_type = 'FOREIGN KEY') = 0,
+    'ALTER TABLE hq_platform_assignments ADD CONSTRAINT fk_hq_platform_assignments_group FOREIGN KEY (group_id) REFERENCES assignment_groups(id)',
+    'SELECT 1');
+PREPARE add_fk FROM @fk;
+EXECUTE add_fk;
+DEALLOCATE PREPARE add_fk;
 
 SET @fk = IF(
     (SELECT COUNT(*) FROM information_schema.table_constraints
@@ -270,6 +346,24 @@ SET @fk = IF(
     (SELECT COUNT(*) FROM information_schema.table_constraints
       WHERE table_schema = DATABASE() AND table_name = 'weekly_partner_results' AND constraint_name = 'fk_weekly_partner_results_partner' AND constraint_type = 'FOREIGN KEY') = 0,
     'ALTER TABLE weekly_partner_results ADD CONSTRAINT fk_weekly_partner_results_partner FOREIGN KEY (partner_id) REFERENCES partners(id)',
+    'SELECT 1');
+PREPARE add_fk FROM @fk;
+EXECUTE add_fk;
+DEALLOCATE PREPARE add_fk;
+
+SET @fk = IF(
+    (SELECT COUNT(*) FROM information_schema.table_constraints
+      WHERE table_schema = DATABASE() AND table_name = 'weekly_entries' AND constraint_name = 'fk_weekly_entries_branch' AND constraint_type = 'FOREIGN KEY') = 0,
+    'ALTER TABLE weekly_entries ADD CONSTRAINT fk_weekly_entries_branch FOREIGN KEY (branch_id) REFERENCES branches(id)',
+    'SELECT 1');
+PREPARE add_fk FROM @fk;
+EXECUTE add_fk;
+DEALLOCATE PREPARE add_fk;
+
+SET @fk = IF(
+    (SELECT COUNT(*) FROM information_schema.table_constraints
+      WHERE table_schema = DATABASE() AND table_name = 'weekly_entries' AND constraint_name = 'fk_weekly_entries_created_by' AND constraint_type = 'FOREIGN KEY') = 0,
+    'ALTER TABLE weekly_entries ADD CONSTRAINT fk_weekly_entries_created_by FOREIGN KEY (created_by_id) REFERENCES users(id)',
     'SELECT 1');
 PREPARE add_fk FROM @fk;
 EXECUTE add_fk;

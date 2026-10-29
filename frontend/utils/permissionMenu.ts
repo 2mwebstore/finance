@@ -83,13 +83,13 @@ export const PERMISSION_MENU: PermissionMenuSection[] = [
   {
     caption: 'PLATFORMS',
     pages: [
-      { key: 'winlose-entry', label: 'Win/Lose Entry', icon: NotebookPen, codes: [P.WinLoseView, P.WinLoseCreate, P.WinLoseEdit] },
+      { key: 'winlose-entry', label: 'Data Entry', icon: NotebookPen, codes: [P.WinLoseView, P.WinLoseCreate, P.WinLoseEdit] },
       { key: 'winlose-weekly', label: 'Weekly Report', icon: CalendarRange, codes: [P.WinLoseReportsView, P.WinLoseReportsConsolidated, P.WinLoseSettlementsFinalize] },
-      { key: 'winlose-branch-summary', label: 'Branch Summary', icon: ChartColumn, codes: [P.WinLoseReportsView, P.WinLoseReportsConsolidated] },
+      { key: 'winlose-branch-summary', label: 'Group Summary', icon: ChartColumn, codes: [P.WinLoseReportsView, P.WinLoseReportsConsolidated] },
       { key: 'winlose-partner-statement', label: 'Partner Statement', icon: ScrollText, codes: [P.WinLoseReportsView, P.WinLoseReportsConsolidated] },
-      { key: 'platforms', label: 'Platforms', icon: Layers, codes: [P.PlatformsView, P.PlatformsManage] },
+      { key: 'platforms', label: 'Agents', icon: Layers, codes: [P.PlatformsView, P.PlatformsManage] },
       { key: 'partners', label: 'Partners', icon: Handshake, codes: [P.PlatformsView, P.PlatformsManage] },
-      { key: 'platform-assignments', label: 'Branch Platform Assignments', icon: Network, codes: [P.PlatformsView, P.PlatformAssignmentsManage] },
+      { key: 'platform-assignments', label: 'Group Agent Assignments', icon: Network, codes: [P.PlatformsView, P.PlatformAssignmentsManage] },
     ],
   },
   {

@@ -55,7 +55,7 @@ func newWLFixture(t *testing.T) *wlFixture {
 		t.Fatal(err)
 	}
 	f := &wlFixture{db: db, svc: NewPlatformService(db, "Asia/Phnom_Penh"), ctx: context.Background()}
-	for _, table := range []string{"weekly_settlement_totals", "weekly_settlements", "weekly_partner_results", "weekly_platform_results", "assignment_partners", "hq_platform_assignments"} {
+	for _, table := range []string{"weekly_settlement_totals", "weekly_settlements", "weekly_entries", "weekly_partner_results", "weekly_platform_results", "assignment_partners", "hq_platform_assignments", "assignment_groups"} {
 		db.Exec("DELETE FROM " + table)
 	}
 	db.Exec("DELETE FROM platforms WHERE code LIKE 'TWL%'")
@@ -122,7 +122,7 @@ func (f *wlFixture) assign(t *testing.T, platforms []models.Platform, hqs ...int
 }
 
 func (f *wlFixture) save(week time.Time, hq int, can func(string) bool, reason string, rows ...WeekEntryRow) (*WeekSheet, []Correction, error) {
-	return f.svc.SaveWeek(f.ctx, WeekEntryInput{WeekStart: dayString(week), BranchID: f.hq[hq].ID.String(), Rows: rows, Reason: reason}, all, can, f.actor)
+	return f.svc.SaveWeek(f.ctx, WeekEntryInput{WeekStart: dayString(week), BranchID: f.hq[hq].ID.String(), Title: "TWL week", Rows: rows, Reason: reason}, all, can, f.actor)
 }
 
 func row(p models.Platform, winLose, commission string) WeekEntryRow {
@@ -147,7 +147,7 @@ func TestPlatformAssignmentsManyToMany(t *testing.T) {
 		t.Fatalf("%d assignments, want 4 (2 platforms × 2 HQs)", got)
 	}
 	f.assign(t, []models.Platform{f.p1}, 2)
-	sheet, err := f.svc.WeekSheet(f.ctx, dayString(f.week.AddDate(0, 0, 3)), f.hq[0].ID, all)
+	sheet, err := f.svc.WeekSheet(f.ctx, dayString(f.week.AddDate(0, 0, 3)), f.hq[0].ID.String(), all, f.actor)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +160,7 @@ func TestPlatformAssignmentsManyToMany(t *testing.T) {
 
 	// No second active assignment of a platform in an HQ; the whole request is refused.
 	_, err = f.svc.Assign(f.ctx, AssignmentInput{PlatformIDs: []string{f.p2.ID.String()}, BranchIDs: f.ids(3, 0)}, all, f.actor)
-	if err == nil || !strings.Contains(err.Error(), "already has") {
+	if err == nil || !strings.Contains(err.Error(), "is already assigned") {
 		t.Fatalf("a duplicate active assignment must be refused, got %v", err)
 	}
 	var n int64
@@ -208,11 +208,11 @@ func TestAssignmentHistoryKept(t *testing.T) {
 	if len(rows) != 2 {
 		t.Errorf("history: %d assignments, want 2", len(rows))
 	}
-	sheet, _ := f.svc.WeekSheet(f.ctx, dayString(f.week), f.hq[2].ID, all)
+	sheet, _ := f.svc.WeekSheet(f.ctx, dayString(f.week), f.hq[2].ID.String(), all, f.actor)
 	if !sheetRow(t, sheet, f.p1).Saved {
 		t.Error("the old HQ's saved week stays")
 	}
-	later, _ := f.svc.WeekSheet(f.ctx, dayString(next), f.hq[2].ID, all)
+	later, _ := f.svc.WeekSheet(f.ctx, dayString(next), f.hq[2].ID.String(), all, f.actor)
 	if len(later.Rows) != 0 {
 		t.Error("after the move the old HQ no longer has the platform")
 	}
@@ -290,7 +290,7 @@ func TestWeeklyEntryCalculationAndRateHistory(t *testing.T) {
 	if _, err := f.svc.Assign(f.ctx, AssignmentInput{PlatformIDs: []string{f.p1.ID.String()}, BranchIDs: f.ids(3), StartsOn: dayString(mid)}, all, f.actor); err != nil {
 		t.Fatal(err)
 	}
-	if s, _ := f.svc.WeekSheet(f.ctx, dayString(f.week), f.hq[3].ID, all); len(s.Rows) != 1 {
+	if s, _ := f.svc.WeekSheet(f.ctx, dayString(f.week), f.hq[3].ID.String(), all, f.actor); len(s.Rows) != 1 {
 		t.Error("a platform assigned on the Wednesday is part of that week")
 	}
 	// Not assigned, or a week that hasn't started: refused.
@@ -306,13 +306,13 @@ func TestWinLoseHQAccess(t *testing.T) {
 	f := newWLFixture(t)
 	f.assign(t, []models.Platform{f.p1}, 0, 1)
 	only2 := f.scope(1)
-	if _, err := f.svc.WeekSheet(f.ctx, dayString(f.week), f.hq[0].ID, only2); !errors.Is(err, ErrBranchAccessDenied) {
+	if _, err := f.svc.WeekSheet(f.ctx, dayString(f.week), f.hq[0].ID.String(), only2, f.actor); !errors.Is(err, ErrBranchAccessDenied) {
 		t.Errorf("another HQ's week must be refused, got %v", err)
 	}
-	if _, _, err := f.svc.SaveWeek(f.ctx, WeekEntryInput{WeekStart: dayString(f.week), BranchID: f.hq[0].ID.String(), Rows: []WeekEntryRow{row(f.p1, "1", "1")}}, only2, canAll, f.actor); !errors.Is(err, ErrBranchAccessDenied) {
+	if _, _, err := f.svc.SaveWeek(f.ctx, WeekEntryInput{WeekStart: dayString(f.week), BranchID: f.hq[0].ID.String(), Title: "TWL week", Rows: []WeekEntryRow{row(f.p1, "1", "1")}}, only2, canAll, f.actor); !errors.Is(err, ErrBranchAccessDenied) {
 		t.Errorf("saving another HQ's week must be refused, got %v", err)
 	}
-	if _, err := f.svc.Report(f.ctx, ReportFilter{BranchID: &f.hq[0].ID}, only2, true); !errors.Is(err, ErrBranchAccessDenied) {
+	if _, err := f.svc.Report(f.ctx, ReportFilter{BranchID: &f.hq[0].ID}, only2, true, f.actor); !errors.Is(err, ErrBranchAccessDenied) {
 		t.Errorf("another HQ's report must be refused, got %v", err)
 	}
 	if list, _ := f.svc.ListAssignments(f.ctx, AssignmentFilter{}, only2); len(list) != 1 || list[0].BranchID != f.hq[1].ID {
@@ -321,10 +321,30 @@ func TestWinLoseHQAccess(t *testing.T) {
 	if _, err := f.svc.Assign(f.ctx, AssignmentInput{PlatformIDs: []string{f.p2.ID.String()}, BranchIDs: f.ids(0)}, only2, f.actor); !errors.Is(err, ErrBranchAccessDenied) {
 		t.Errorf("assigning to another HQ must be refused, got %v", err)
 	}
-	if _, err := f.svc.Report(f.ctx, ReportFilter{}, f.scope(0, 1), false); err == nil {
-		t.Error("totals across HQs need the consolidated permission")
+	if _, err := f.svc.Report(f.ctx, ReportFilter{}, f.scope(0, 1), false, f.actor); err == nil {
+		t.Error("two groups, no default branch and no consolidated access: there's no group to report on")
 	}
-	if r, err := f.svc.Report(f.ctx, ReportFilter{}, only2, false); err != nil || r.Consolidated {
+	// Without consolidated access the report is the person's own group (their default branch).
+	f.db.Model(&models.User{}).Where("id = ?", f.actor).Update("default_branch_id", f.hq[0].ID)
+	defer f.db.Model(&models.User{}).Where("id = ?", f.actor).Update("default_branch_id", nil)
+	if _, _, err := f.save(f.week, 0, canAll, "", row(f.p1, "100", "0")); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := f.save(f.week, 1, canAll, "", row(f.p1, "900", "0")); err != nil {
+		t.Fatal(err)
+	}
+	own, err := f.svc.Report(f.ctx, ReportFilter{DateFrom: dayString(f.week), DateTo: dayString(f.week.AddDate(0, 0, 6))}, f.scope(0, 1), false, f.actor)
+	if err != nil || own.Consolidated || len(own.Lines) != 1 || !own.Lines[0].WinLose.Equal(decimal.NewFromInt(100)) {
+		t.Errorf("own group only: %v %+v", err, own)
+	}
+	// Assigning and finalizing without a group go to the person's own group too.
+	if list, err := f.svc.Assign(f.ctx, AssignmentInput{PlatformIDs: []string{f.p2.ID.String()}}, all, f.actor); err != nil || len(list) != 1 || list[0].BranchID != f.hq[0].ID {
+		t.Errorf("assign to the own group: %v %+v", err, list)
+	}
+	if st, err := f.svc.FinalizeWeek(f.ctx, FinalizeInput{WeekStart: dayString(f.week)}, all, f.actor); err != nil || st.BranchID != f.hq[0].ID {
+		t.Errorf("finalize the own group's week: %v", err)
+	}
+	if r, err := f.svc.Report(f.ctx, ReportFilter{}, only2, false, f.actor); err != nil || r.Consolidated {
 		t.Errorf("a user with one HQ gets that HQ's report, got %v", err)
 	}
 }
@@ -343,7 +363,7 @@ func TestWinLoseReportsByCurrencyAndWeek(t *testing.T) {
 	must(f.save(f.week.AddDate(0, 0, 7), 0, canAll, "", row(f.p1, "100", "0")))                  // next week: 35 USD
 
 	// A range starting mid-week still counts that week; the next week is left out.
-	r, err := f.svc.Report(f.ctx, ReportFilter{DateFrom: dayString(f.week.AddDate(0, 0, 3)), DateTo: dayString(f.week.AddDate(0, 0, 6))}, all, true)
+	r, err := f.svc.Report(f.ctx, ReportFilter{DateFrom: dayString(f.week.AddDate(0, 0, 3)), DateTo: dayString(f.week.AddDate(0, 0, 6))}, all, true, f.actor)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -356,10 +376,16 @@ func TestWinLoseReportsByCurrencyAndWeek(t *testing.T) {
 			t.Errorf("%s total %s, want %s", s.Currency, s.JamePS, want[s.Currency])
 		}
 	}
-	if len(r.HQs) != 2 || !r.Consolidated || r.DateFrom != dayString(f.week) {
-		t.Errorf("consolidated over both HQs from the week's Monday, got %d HQs from %s", len(r.HQs), r.DateFrom)
+	// Consolidated: both groups added up by agent (one USD line), from the week's Monday.
+	if len(r.Lines) != 2 || !r.Consolidated || r.DateFrom != dayString(f.week) {
+		t.Errorf("one line per agent and currency across both groups from the week's Monday, got %d lines from %s", len(r.Lines), r.DateFrom)
 	}
-	two, _ := f.svc.Report(f.ctx, ReportFilter{DateFrom: dayString(f.week), DateTo: dayString(f.week.AddDate(0, 0, 13)), BranchID: &f.hq[0].ID}, all, false)
+	for _, l := range r.Lines {
+		if l.Currency == "USD" && (l.Entries != 2 || !l.JamePS.Equal(decimal.NewFromInt(280))) {
+			t.Errorf("USD line across both groups: %d entries, total %s; want 2, 280", l.Entries, l.JamePS)
+		}
+	}
+	two, _ := f.svc.Report(f.ctx, ReportFilter{DateFrom: dayString(f.week), DateTo: dayString(f.week.AddDate(0, 0, 13)), BranchID: &f.hq[0].ID}, all, false, f.actor)
 	for _, l := range two.Lines {
 		if l.Currency == "USD" && (l.Entries != 2 || !l.JamePS.Equal(decimal.NewFromInt(455))) {
 			t.Errorf("two weeks of HQ1 USD: %d weeks, total %s; want 2 weeks, 455", l.Entries, l.JamePS)
@@ -483,12 +509,12 @@ func TestPartners(t *testing.T) {
 	}
 
 	// Each line shows its partners' shares; totals per partner; the statement is the partner's share.
-	r, err := f.svc.Report(f.ctx, ReportFilter{DateFrom: dayString(f.week), DateTo: dayString(f.week.AddDate(0, 0, 13))}, all, true)
+	r, err := f.svc.Report(f.ctx, ReportFilter{DateFrom: dayString(f.week), DateTo: dayString(f.week.AddDate(0, 0, 13))}, all, true, f.actor)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, l := range r.Lines {
-		if l.BranchID == f.hq[0].ID && l.PlatformID == f.p1.ID {
+		if l.PlatformID == f.p1.ID {
 			if !l.JamePS.Equal(n(675)) || !l.WinLose.Equal(n(1600)) || len(l.Partners) != 2 || !l.Partners[0].JamePS.Equal(n(235)) || !l.Partners[1].JamePS.Equal(n(440)) {
 				t.Errorf("line: total %s, win/lose %s, shares %+v", l.JamePS, l.WinLose, l.Partners)
 			}
@@ -503,7 +529,7 @@ func TestPartners(t *testing.T) {
 	if totals[a.Name+" USD"] != "440" || totals[b.Name+" USD"] != "235" || totals[b.Name+" KHR"] != "10000" || totals[" USD"] != "" {
 		t.Errorf("totals per partner: %v", totals)
 	}
-	st, err := f.svc.Report(f.ctx, ReportFilter{DateFrom: dayString(f.week), DateTo: dayString(f.week.AddDate(0, 0, 13)), PartnerID: &b.ID, ByWeek: true}, all, true)
+	st, err := f.svc.Report(f.ctx, ReportFilter{DateFrom: dayString(f.week), DateTo: dayString(f.week.AddDate(0, 0, 13)), PartnerID: &b.ID, ByWeek: true}, all, true, f.actor)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -556,5 +582,154 @@ func TestPartners(t *testing.T) {
 		if row.PlatformID == f.p1.ID && (len(row.Partners) != 1 || row.Partners[0].PartnerName != b.Name || row.Partners[0].CommissionRate.String() != "25") {
 			t.Errorf("the assignment lists its partner: %+v", row.Partners)
 		}
+	}
+}
+
+func TestWeeklyEntries(t *testing.T) {
+	f := newWLFixture(t)
+	f.assign(t, []models.Platform{f.p1}, 0, 1)
+	// The entry goes in the person's own group: their default branch.
+	f.db.Model(&models.User{}).Where("id = ?", f.actor).Update("default_branch_id", f.hq[1].ID)
+	in := WeekEntryInput{WeekStart: dayString(f.week), Rows: []WeekEntryRow{row(f.p1, "1000", "0")}}
+	if _, _, err := f.svc.SaveWeek(f.ctx, in, all, canAll, f.actor); err == nil {
+		t.Error("an entry needs a title")
+	}
+	in.Title = "  Week 1 TWL2  "
+	sheet, _, err := f.svc.SaveWeek(f.ctx, in, all, canAll, f.actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sheet.BranchID != f.hq[1].ID || sheet.Entry == nil || sheet.Entry.Title != "Week 1 TWL2" || !sheet.Rows[0].Saved {
+		t.Fatalf("saved under the default branch with its title: %s %+v", sheet.BranchCode, sheet.Entry)
+	}
+	// Without a default branch and with several branches there is no group to use.
+	f.db.Model(&models.User{}).Where("id = ?", f.actor).Update("default_branch_id", nil)
+	f.db.Exec("DELETE FROM user_branches WHERE user_id = ?", f.actor)
+	if _, err := f.svc.WeekSheet(f.ctx, dayString(f.week), "", all, f.actor); err == nil {
+		t.Error("no default branch and no single branch: the own group can't be worked out")
+	}
+	// Renaming needs Correct Win/Lose; the amounts can be left as they are.
+	in.BranchID, in.Title = f.hq[1].ID.String(), "Week 1 (checked)"
+	onlyCreate := func(code string) bool { return code == permissions.WinLoseCreate }
+	if _, _, err := f.svc.SaveWeek(f.ctx, in, all, onlyCreate, f.actor); err == nil {
+		t.Error("changing the title of a saved entry needs Correct Win/Lose")
+	}
+	_, corrections, err := f.svc.SaveWeek(f.ctx, in, all, canAll, f.actor)
+	if err != nil || len(corrections) != 1 || corrections[0].After["title"] != "Week 1 (checked)" {
+		t.Errorf("the rename is one correction for the audit log: %v %+v", err, corrections)
+	}
+	// The list: newest first, only the groups in scope.
+	if _, _, err := f.save(f.week.AddDate(0, 0, 7), 0, canAll, "", row(f.p1, "5", "0")); err != nil {
+		t.Fatal(err)
+	}
+	list, err := f.svc.ListEntries(f.ctx, "", all)
+	if err != nil || len(list) != 2 || list[0].BranchID != f.hq[0].ID || list[1].Title != "Week 1 (checked)" {
+		t.Errorf("both entries, newest first: %v %+v", err, list)
+	}
+	if mine, _ := f.svc.ListEntries(f.ctx, "", f.scope(1)); len(mine) != 1 || mine[0].BranchID != f.hq[1].ID {
+		t.Errorf("only the groups in scope: %+v", mine)
+	}
+	if found, _ := f.svc.ListEntries(f.ctx, "checked", all); len(found) != 1 {
+		t.Errorf("search by title: %+v", found)
+	}
+}
+
+func TestAssignmentGroups(t *testing.T) {
+	f := newWLFixture(t)
+	f.db.Exec("DELETE FROM partners WHERE name LIKE 'TWL%'")
+	f.db.Model(&models.User{}).Where("id = ?", f.actor).Update("default_branch_id", f.hq[0].ID)
+	defer f.db.Model(&models.User{}).Where("id = ?", f.actor).Update("default_branch_id", nil)
+	partner, err := f.svc.SavePartner(f.ctx, nil, PartnerInput{Name: "TWL Group Partner", DefaultRate: "20"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := func(ps ...models.Platform) []string {
+		out := []string{}
+		for _, p := range ps {
+			out = append(out, p.ID.String())
+		}
+		return out
+	}
+	start := dayString(f.week.AddDate(0, 0, -21))
+
+	// A titled group in the person's own branch, its agents with the partner at their default %.
+	if _, err := f.svc.CreateGroup(f.ctx, GroupInput{Title: " ", PlatformIDs: ids(f.p1)}, all, f.actor); err == nil {
+		t.Error("a group needs a title")
+	}
+	g, err := f.svc.CreateGroup(f.ctx, GroupInput{Title: "  V-series  ", PlatformIDs: ids(f.p1, f.p2), PartnerIDs: []string{partner.ID.String()}, StartsOn: start}, all, f.actor)
+	if err != nil || g.Title != "V-series" || g.BranchID != f.hq[0].ID || len(g.Agents) != 2 || len(g.Partners) != 1 || g.Partners[0].CommissionRate.String() != "20" {
+		t.Fatalf("group: %v %+v", err, g)
+	}
+	if _, err := f.svc.CreateGroup(f.ctx, GroupInput{Title: "Other", PlatformIDs: ids(f.p1)}, all, f.actor); err == nil || !strings.Contains(err.Error(), "V-series") {
+		t.Errorf("an agent is in one group at a time, got %v", err)
+	}
+	if _, _, err := f.save(f.week, 0, canAll, "", row(f.p1, "1000", "0")); err != nil {
+		t.Fatal(err)
+	}
+
+	// Off: its agents leave Data Entry (the saved week stays) and the Agents page's count.
+	if _, err := f.svc.SetGroupActive(f.ctx, g.ID, false, all); err != nil {
+		t.Fatal(err)
+	}
+	if sheet, _ := f.svc.WeekSheet(f.ctx, dayString(f.week), f.hq[0].ID.String(), all, f.actor); len(sheet.Rows) != 1 || !sheet.Rows[0].Saved {
+		t.Errorf("off: only the saved agent stays on its week, got %d rows", len(sheet.Rows))
+	}
+	if next, _ := f.svc.WeekSheet(f.ctx, dayString(f.week.AddDate(0, 0, 7)), f.hq[0].ID.String(), all, f.actor); len(next.Rows) != 0 {
+		t.Errorf("off: no agents on a new week, got %d", len(next.Rows))
+	}
+	agents, _ := f.svc.ListPlatforms(f.ctx, true)
+	for _, a := range agents {
+		if a.ID == f.p2.ID && a.ActiveHQs != 0 {
+			t.Errorf("an off group doesn't count for the agent, got %d", a.ActiveHQs)
+		}
+	}
+	if _, err := f.svc.SetGroupActive(f.ctx, g.ID, true, all); err != nil {
+		t.Fatal(err)
+	}
+	agents, _ = f.svc.ListPlatforms(f.ctx, true)
+	for _, a := range agents {
+		if a.ID == f.p2.ID && a.ActiveHQs != 1 {
+			t.Errorf("a switched-on group counts for the agent, got %d", a.ActiveHQs)
+		}
+	}
+	if next, _ := f.svc.WeekSheet(f.ctx, dayString(f.week.AddDate(0, 0, 7)), f.hq[0].ID.String(), all, f.actor); len(next.Rows) != 2 {
+		t.Errorf("on again: both agents, got %d", len(next.Rows))
+	}
+
+	// Update: rename, take out the agent without weeks (removed), new % for the partner.
+	_, after, err := f.svc.UpdateGroup(f.ctx, g.ID, GroupUpdateInput{Title: "V1 only", PlatformIDs: ids(f.p1),
+		Partners: []AssignmentPartnerInput{{PartnerID: partner.ID.String(), CommissionRate: "30"}}}, all, f.actor)
+	if err != nil || after.Title != "V1 only" || len(after.Agents) != 1 || after.Partners[0].CommissionRate.String() != "30" {
+		t.Fatalf("update: %v %+v", err, after)
+	}
+	var gone int64
+	f.db.Unscoped().Model(&models.HQPlatformAssignment{}).Where("platform_id = ? AND group_id = ?", f.p2.ID, g.ID).Count(&gone)
+	if gone != 0 {
+		t.Error("an agent taken out before any week is entered is removed")
+	}
+
+	// Delete: only while no week is entered.
+	other, err := f.svc.CreateGroup(f.ctx, GroupInput{Title: "P2", PlatformIDs: ids(f.p2)}, all, f.actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.svc.DeleteGroup(f.ctx, g.ID, all); err == nil {
+		t.Error("a group with weeks entered can't be deleted")
+	}
+	if _, err := f.svc.DeleteGroup(f.ctx, other.ID, all); err != nil {
+		t.Fatalf("a group without weeks can be deleted: %v", err)
+	}
+	// Taking out an agent with weeks ends it (history); one put in starts today.
+	_, after, err = f.svc.UpdateGroup(f.ctx, g.ID, GroupUpdateInput{Title: "V1 only", PlatformIDs: ids(f.p2)}, all, f.actor)
+	if err != nil || len(after.Agents) != 1 || after.Agents[0].PlatformID != f.p2.ID || after.Agents[0].StartsOn != dayString(f.svc.today()) || after.Weeks != 1 {
+		t.Fatalf("swap agents: %v %+v", err, after)
+	}
+	var ended models.HQPlatformAssignment
+	if err := f.db.Where("platform_id = ? AND group_id = ?", f.p1.ID, g.ID).First(&ended).Error; err != nil || ended.IsActive || ended.EndsOn == nil {
+		t.Errorf("the agent with weeks is ended, not removed: %v %+v", err, ended)
+	}
+	list, err := f.svc.ListGroups(f.ctx, f.hq[0].ID, GroupFilter{}, all)
+	if err != nil || len(list) != 1 || list[0].ID != g.ID {
+		t.Errorf("one group left: %v %d", err, len(list))
 	}
 }

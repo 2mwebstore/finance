@@ -74,7 +74,7 @@ func (s *PlatformService) SavePartner(ctx context.Context, id *uuid.UUID, in Par
 			return nil, err
 		}
 		if active > 0 {
-			return nil, fieldError("is_active", fmt.Sprintf("%d branch assignments still have this partner; take them off first", active))
+			return nil, fieldError("is_active", fmt.Sprintf("%d group assignments still have this partner; take them off first", active))
 		}
 	}
 	p.Name, p.Phone, p.Note, p.DefaultRate = name, strings.TrimSpace(in.Phone), strings.TrimSpace(in.Note), rate

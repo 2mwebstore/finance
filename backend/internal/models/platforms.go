@@ -40,6 +40,8 @@ type HQPlatformAssignment struct {
 	Base
 	BranchID   uuid.UUID `gorm:"type:char(36);not null" json:"branch_id"`
 	PlatformID uuid.UUID `gorm:"type:char(36);not null" json:"platform_id"`
+	// GroupID is the titled group the assignment belongs to (nil: made before groups, now ended).
+	GroupID *uuid.UUID `gorm:"type:char(36)" json:"group_id"`
 	// CommissionRate (shown as "Partner %") is used when the assignment has no partners; with
 	// partners, each has their own % (AssignmentPartner).
 	CommissionRate decimal.Decimal `gorm:"type:decimal(7,4);not null" json:"commission_rate"`
@@ -55,6 +57,23 @@ type HQPlatformAssignment struct {
 }
 
 func (HQPlatformAssignment) TableName() string { return "hq_platform_assignments" }
+
+// AssignmentGroup is a titled set of agents (assignments) a branch reports, with the same partners
+// and currency. Turned off, its agents leave Data Entry; weeks already saved stay.
+type AssignmentGroup struct {
+	ID       uuid.UUID `gorm:"type:char(36);primaryKey" json:"id"`
+	BranchID uuid.UUID `gorm:"type:char(36);not null" json:"-"`
+	Title    string    `gorm:"size:128;not null" json:"title"`
+	// Currency: "" is each agent's own default.
+	Currency    string    `gorm:"size:3;not null" json:"currency"`
+	StartsOn    time.Time `gorm:"type:date;not null" json:"starts_on"`
+	IsActive    bool      `gorm:"not null" json:"is_active"`
+	CreatedByID uuid.UUID `gorm:"type:char(36);not null" json:"-"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+func (AssignmentGroup) TableName() string { return "assignment_groups" }
 
 // AssignmentPartner is one of an assignment's partners with their %.
 type AssignmentPartner struct {
@@ -122,6 +141,21 @@ type WeeklySettlement struct {
 	ReopenedAt    *time.Time `json:"reopened_at,omitempty"`
 	ReopenReason  string     `gorm:"size:512" json:"reopen_reason"`
 }
+
+// WeeklyEntry is a group's (branch's) week as people see it on Data Entry: a title, and the week's
+// results (weekly_platform_results) for the group. One per group and week.
+type WeeklyEntry struct {
+	ID          uuid.UUID  `gorm:"type:char(36);primaryKey" json:"id"`
+	BranchID    uuid.UUID  `gorm:"type:char(36);not null" json:"branch_id"`
+	WeekStart   time.Time  `gorm:"type:date;not null" json:"week_start"`
+	Title       string     `gorm:"size:128;not null" json:"title"`
+	CreatedByID uuid.UUID  `gorm:"type:char(36);not null" json:"created_by_id"`
+	UpdatedByID *uuid.UUID `gorm:"type:char(36)" json:"updated_by_id,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+}
+
+func (WeeklyEntry) TableName() string { return "weekly_entries" }
 
 // WeeklySettlementTotal is a finalized week's totals in one currency.
 type WeeklySettlementTotal struct {

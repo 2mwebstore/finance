@@ -90,6 +90,7 @@ func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config, store storage.Store, 
 			{
 				branches.GET("", middleware.RequireAnyPermission(db, permissions.BranchesView, permissions.BranchesManage, permissions.UsersCreate, permissions.UsersManage), branchCtrl.List)
 				branches.POST("", middleware.RequireAnyPermission(db, permissions.BranchesCreate, permissions.BranchesManage), branchCtrl.Create)
+				branches.GET("/next-code", middleware.RequireAnyPermission(db, permissions.BranchesCreate, permissions.BranchesManage), branchCtrl.NextCode)
 				branches.GET("/:id", middleware.RequireAnyPermission(db, permissions.BranchesView, permissions.BranchesManage), branchCtrl.Get)
 				branches.PATCH("/:id", middleware.RequireAnyPermission(db, permissions.BranchesEdit, permissions.BranchesManage), branchCtrl.Update)
 				branches.DELETE("/:id", middleware.RequireAnyPermission(db, permissions.BranchesManage), branchCtrl.Delete)
@@ -250,6 +251,12 @@ func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config, store storage.Store, 
 				api.POST("/partners", need(permissions.PlatformsManage), platformCtrl.SavePartner)
 				api.PATCH("/partners/:id", need(permissions.PlatformsManage), platformCtrl.SavePartner)
 
+				// Groups: titled sets of agents in the person's own branch (the Group Agent Assignments page).
+				api.GET("/platform-groups", need(permissions.PlatformsView, permissions.PlatformAssignmentsManage), platformCtrl.ListGroups)
+				api.POST("/platform-groups", need(permissions.PlatformAssignmentsManage), platformCtrl.CreateGroup)
+				api.PATCH("/platform-groups/:id", need(permissions.PlatformAssignmentsManage), platformCtrl.UpdateGroup)
+				api.POST("/platform-groups/:id/active", need(permissions.PlatformAssignmentsManage), platformCtrl.SetGroupActive)
+				api.DELETE("/platform-groups/:id", need(permissions.PlatformAssignmentsManage), platformCtrl.DeleteGroup)
 				api.GET("/platform-assignments", need(permissions.PlatformsView, permissions.PlatformAssignmentsManage), platformCtrl.ListAssignments)
 				api.POST("/platform-assignments", need(permissions.PlatformAssignmentsManage), platformCtrl.Assign)
 				api.PATCH("/platform-assignments/:id", need(permissions.PlatformAssignmentsManage), platformCtrl.UpdateAssignment)
@@ -259,6 +266,8 @@ func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config, store storage.Store, 
 				wl := api.Group("/winlose")
 				wl.GET("/formula", need(permissions.WinLoseView, permissions.WinLoseCreate, permissions.WinLoseEdit, permissions.WinLoseReportsView), platformCtrl.Formula)
 				// New rows need winlose.create and changed saved rows winlose.edit (checked per row).
+				wl.GET("/entries", need(permissions.WinLoseView, permissions.WinLoseCreate, permissions.WinLoseEdit), platformCtrl.ListEntries)
+				// No branch_id: the person's own group (their default branch).
 				wl.GET("/entry", need(permissions.WinLoseView, permissions.WinLoseCreate, permissions.WinLoseEdit), platformCtrl.WeekSheet)
 				wl.POST("/entry/preview", need(permissions.WinLoseCreate, permissions.WinLoseEdit), platformCtrl.Preview)
 				wl.PUT("/entry", need(permissions.WinLoseCreate, permissions.WinLoseEdit), platformCtrl.SaveWeek)

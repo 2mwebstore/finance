@@ -11,9 +11,10 @@ import (
 	"gorm.io/gorm"
 )
 
-// Win/lose reports: the weekly report, the branch summary and the partner statement all come from
-// the weekly results added up by branch, platform and currency (and week, for the statement), with
-// each partner's share of the Total. A week is in the range when its Monday is (the range's first
+// Win/lose reports: the weekly report, the group summary and the partner statement all come from
+// the weekly results added up by agent (platform) and currency (and week, for the statement), with
+// each partner's share of the Total. They cover the person's own group (branch), or every group in
+// their scope for people who may see consolidated totals; groups aren't shown apart. A week is in the range when its Monday is (the range's first
 // day counts from its own week's Monday). Amounts are never added up across currencies: every
 // total is per currency. JamePS is what the app shows as "Total".
 
@@ -53,12 +54,10 @@ type LineShare struct {
 	Entries     int64           `json:"entries"`
 }
 
-// ReportLine is one branch's platform in one currency over the range (or one week).
+// ReportLine is one agent (platform) in one currency over the range (or one week), across the
+// groups covered.
 type ReportLine struct {
 	WeekStart    string    `json:"week_start,omitempty"`
-	BranchID     uuid.UUID `json:"branch_id"`
-	BranchCode   string    `json:"branch_code"`
-	BranchName   string    `json:"branch_name"`
 	PlatformID   uuid.UUID `json:"platform_id"`
 	PlatformCode string    `json:"platform_code"`
 	PlatformName string    `json:"platform_name"`
@@ -68,13 +67,6 @@ type ReportLine struct {
 	// Partners: who the Total was shared by, by name (empty when no week had partners).
 	Partners []LineShare `json:"partners"`
 	Sums
-}
-
-type HQTotals struct {
-	BranchID   uuid.UUID `json:"branch_id"`
-	BranchCode string    `json:"branch_code"`
-	BranchName string    `json:"branch_name"`
-	Totals     []Sums    `json:"totals"`
 }
 
 type PlatformTotals struct {
@@ -95,10 +87,9 @@ type PartnerTotals struct {
 type WinLoseReport struct {
 	DateFrom string `json:"date_from"`
 	DateTo   string `json:"date_to"`
-	// Consolidated: every HQ in the user's scope (Main HQ view); otherwise one HQ.
+	// Consolidated: every group in the user's scope; otherwise their own group.
 	Consolidated bool             `json:"consolidated"`
 	Lines        []ReportLine     `json:"lines"`
-	HQs          []HQTotals       `json:"hqs"`
 	Platforms    []PlatformTotals `json:"platforms"`
 	Partners     []PartnerTotals  `json:"partners"`
 	Totals       []Sums           `json:"totals"`
@@ -106,7 +97,7 @@ type WinLoseReport struct {
 
 type reportRow struct {
 	WeekStart                                                     *time.Time
-	BranchID, PlatformID                                          uuid.UUID
+	PlatformID                                                    uuid.UUID
 	PartnerID                                                     *uuid.UUID
 	Currency                                                      string
 	RateMin, RateMax, WinLose, Commission, AdjustedAmount, JamePS decimal.Decimal
@@ -118,16 +109,16 @@ func (r reportRow) key() string {
 	if r.WeekStart != nil {
 		week = r.WeekStart.Format("2006-01-02")
 	}
-	return strings.Join([]string{week, r.BranchID.String(), r.PlatformID.String(), r.Currency}, "|")
+	return strings.Join([]string{week, r.PlatformID.String(), r.Currency}, "|")
 }
 
 func (r reportRow) sums() Sums {
 	return Sums{Currency: r.Currency, WinLose: r.WinLose, Commission: r.Commission, AdjustedAmount: r.AdjustedAmount, JamePS: r.JamePS, Entries: r.Entries}
 }
 
-// Report adds up results over a range. Without consolidated access it covers one HQ: the one
-// asked for, or the user's only HQ.
-func (s *PlatformService) Report(ctx context.Context, f ReportFilter, scope BranchScope, consolidated bool) (*WinLoseReport, error) {
+// Report adds up results over a range. Without consolidated access it covers one group: the one
+// asked for (the API still takes branch_id), else the person's own.
+func (s *PlatformService) Report(ctx context.Context, f ReportFilter, scope BranchScope, consolidated bool, actor uuid.UUID) (*WinLoseReport, error) {
 	from, err := s.parseDay("date_from", f.DateFrom)
 	if err != nil {
 		return nil, err
@@ -147,14 +138,14 @@ func (s *PlatformService) Report(ctx context.Context, f ReportFilter, scope Bran
 		return nil, ErrBranchAccessDenied
 	}
 	if branchID == nil && !consolidated {
-		if scope.All || len(scope.IDs) != 1 {
-			return nil, fieldError("branch_id", "choose a branch (totals across branches need View Consolidated Win/Lose)")
+		own, err := s.OwnGroup(ctx, actor, scope)
+		if err != nil {
+			return nil, err
 		}
-		only := scope.IDs[0]
-		branchID = &only
+		branchID = &own
 	}
 
-	group := "r.branch_id, r.platform_id, r.currency"
+	group := "r.platform_id, r.currency"
 	if f.ByWeek {
 		group = "r.week_start, " + group
 	}
@@ -190,18 +181,14 @@ func (s *PlatformService) Report(ctx context.Context, f ReportFilter, scope Bran
 		lineRows = shareRows
 	}
 
-	var branchIDs, platformIDs, partnerIDs []uuid.UUID
+	var platformIDs, partnerIDs []uuid.UUID
 	for _, r := range lineRows {
-		branchIDs, platformIDs = append(branchIDs, r.BranchID), append(platformIDs, r.PlatformID)
+		platformIDs = append(platformIDs, r.PlatformID)
 	}
 	for _, r := range shareRows {
 		if r.PartnerID != nil {
 			partnerIDs = append(partnerIDs, *r.PartnerID)
 		}
-	}
-	branches, err := s.branchesIn(ctx, branchIDs)
-	if err != nil {
-		return nil, err
 	}
 	platforms, err := s.platformsIn(ctx, platformIDs)
 	if err != nil {
@@ -223,8 +210,8 @@ func (s *PlatformService) Report(ctx context.Context, f ReportFilter, scope Bran
 	}
 	lines := make([]ReportLine, len(lineRows))
 	for i, r := range lineRows {
-		b, p := branches[r.BranchID], platforms[r.PlatformID]
-		l := ReportLine{BranchID: r.BranchID, BranchCode: b.Code, BranchName: b.Name, PlatformID: r.PlatformID, PlatformCode: p.Code, PlatformName: p.Name,
+		p := platforms[r.PlatformID]
+		l := ReportLine{PlatformID: r.PlatformID, PlatformCode: p.Code, PlatformName: p.Name,
 			RateMin: r.RateMin, RateMax: r.RateMax, Partners: []LineShare{}, Sums: r.sums()}
 		if r.WeekStart != nil {
 			l.WeekStart = r.WeekStart.Format("2006-01-02")
@@ -246,9 +233,6 @@ func (s *PlatformService) Report(ctx context.Context, f ReportFilter, scope Bran
 		if a.WeekStart != b.WeekStart {
 			return a.WeekStart < b.WeekStart
 		}
-		if a.BranchCode != b.BranchCode {
-			return a.BranchCode < b.BranchCode
-		}
 		if a.PlatformCode != b.PlatformCode {
 			return a.PlatformCode < b.PlatformCode
 		}
@@ -259,10 +243,8 @@ func (s *PlatformService) Report(ctx context.Context, f ReportFilter, scope Bran
 	if out.Lines == nil {
 		out.Lines = []ReportLine{}
 	}
-	hqs := map[uuid.UUID]*HQTotals{}
 	plats := map[uuid.UUID]*PlatformTotals{}
 	total := map[string]*Sums{}
-	hqSums := map[uuid.UUID]map[string]*Sums{}
 	platSums := map[uuid.UUID]map[string]*Sums{}
 	bump := func(m map[string]*Sums, add Sums) {
 		if m[add.Currency] == nil {
@@ -271,15 +253,10 @@ func (s *PlatformService) Report(ctx context.Context, f ReportFilter, scope Bran
 		m[add.Currency].add(add)
 	}
 	for _, l := range lines {
-		if hqs[l.BranchID] == nil {
-			hqs[l.BranchID] = &HQTotals{BranchID: l.BranchID, BranchCode: l.BranchCode, BranchName: l.BranchName}
-			hqSums[l.BranchID] = map[string]*Sums{}
-		}
 		if plats[l.PlatformID] == nil {
 			plats[l.PlatformID] = &PlatformTotals{PlatformID: l.PlatformID, PlatformCode: l.PlatformCode, PlatformName: l.PlatformName}
 			platSums[l.PlatformID] = map[string]*Sums{}
 		}
-		bump(hqSums[l.BranchID], l.Sums)
 		bump(platSums[l.PlatformID], l.Sums)
 		bump(total, l.Sums)
 	}
@@ -296,7 +273,7 @@ func (s *PlatformService) Report(ctx context.Context, f ReportFilter, scope Bran
 		}
 		bump(partSums[key], r.sums())
 	}
-	out.HQs, out.Platforms, out.Partners, out.Totals = []HQTotals{}, []PlatformTotals{}, []PartnerTotals{}, sortedSums(total)
+	out.Platforms, out.Partners, out.Totals = []PlatformTotals{}, []PartnerTotals{}, sortedSums(total)
 	for key, p := range parts {
 		p.Totals = sortedSums(partSums[key])
 		out.Partners = append(out.Partners, *p)
@@ -309,15 +286,10 @@ func (s *PlatformService) Report(ctx context.Context, f ReportFilter, scope Bran
 		}
 		return a.PartnerName < b.PartnerName
 	})
-	for id, h := range hqs {
-		h.Totals = sortedSums(hqSums[id])
-		out.HQs = append(out.HQs, *h)
-	}
 	for id, p := range plats {
 		p.Totals = sortedSums(platSums[id])
 		out.Platforms = append(out.Platforms, *p)
 	}
-	sort.Slice(out.HQs, func(i, j int) bool { return out.HQs[i].BranchCode < out.HQs[j].BranchCode })
 	sort.Slice(out.Platforms, func(i, j int) bool { return out.Platforms[i].PlatformCode < out.Platforms[j].PlatformCode })
 	return out, nil
 }

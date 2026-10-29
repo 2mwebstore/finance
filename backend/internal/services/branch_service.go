@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/cambodia-finance/income-expense/internal/models"
@@ -28,7 +29,8 @@ func NewBranchService(db *gorm.DB) *BranchService {
 }
 
 type CreateBranchInput struct {
-	Code      string  `json:"code" binding:"required,min=2,max=32"`
+	// Empty: the next code is made up (BR-001, BR-002…); the app always leaves it empty.
+	Code      string  `json:"code" binding:"omitempty,min=2,max=32"`
 	Name      string  `json:"name" binding:"required,min=2,max=128"`
 	Address   string  `json:"address"`
 	Phone     string  `json:"phone"`
@@ -46,7 +48,45 @@ type UpdateBranchInput struct {
 	ManagerID *string `json:"manager_id"`
 }
 
+// branchCodePrefix starts every generated branch code: BR-001, BR-002…
+const branchCodePrefix = "BR-"
+
+// NextCode is the code the next new branch gets: one more than the highest BR-number used so far
+// (deleted branches included, so a code is never given twice). Codes typed in before, like PP-01,
+// don't count.
+func (s *BranchService) NextCode(ctx context.Context) (string, error) {
+	var codes []string
+	if err := s.db.WithContext(ctx).Unscoped().Model(&models.Branch{}).Where("code LIKE ?", branchCodePrefix+"%").Pluck("code", &codes).Error; err != nil {
+		return "", err
+	}
+	highest := 0
+	for _, c := range codes {
+		if n, err := strconv.Atoi(strings.TrimPrefix(c, branchCodePrefix)); err == nil && n > highest {
+			highest = n
+		}
+	}
+	return fmt.Sprintf("%s%03d", branchCodePrefix, highest+1), nil
+}
+
 func (s *BranchService) Create(ctx context.Context, in CreateBranchInput) (*models.Branch, error) {
+	if strings.TrimSpace(in.Code) == "" {
+		// Two branches made at the same moment can get the same number: try the next one.
+		for attempt := 0; ; attempt++ {
+			code, err := s.NextCode(ctx)
+			if err != nil {
+				return nil, err
+			}
+			in.Code = code
+			branch, err := s.create(ctx, in)
+			if !(isDuplicate(err) || errors.Is(err, ErrBranchCodeTaken)) || attempt == 4 {
+				return branch, err
+			}
+		}
+	}
+	return s.create(ctx, in)
+}
+
+func (s *BranchService) create(ctx context.Context, in CreateBranchInput) (*models.Branch, error) {
 	code := strings.ToUpper(strings.TrimSpace(in.Code))
 	var existing models.Branch
 	if err := s.db.WithContext(ctx).Where("code = ?", code).First(&existing).Error; err == nil {

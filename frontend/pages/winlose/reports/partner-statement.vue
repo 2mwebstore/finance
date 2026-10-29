@@ -4,15 +4,14 @@
       <div>
         <p class="text-[10px] font-bold tracking-[0.14em] text-slate-400">PLATFORMS · REPORTS</p>
         <h1 class="text-xl font-bold text-navy">Partner statement</h1>
-        <p class="mt-1 text-xs text-muted">One partner’s weeks across their branches and platforms: the platform’s Win/Lose and Commission, and their share of the Total at their %. USD and KHR are kept apart.</p>
+        <p class="mt-1 text-xs text-muted">One partner’s weeks across their agents: the agent’s Win/Lose and Commission, and their share of the Total at their %. USD and KHR are kept apart.</p>
       </div>
       <button type="button" class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-white px-3 py-2 text-sm font-medium text-navy disabled:opacity-50" :disabled="!report?.lines.length || !partnerId" @click="exportCsv"><Download :size="16" /> Export CSV</button>
     </header>
 
-    <div class="grid grid-cols-1 gap-2 sm:grid-cols-3">
+    <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
       <SearchSelect v-model="partnerId" :options="partnerOptions" placeholder="Choose a partner" aria-label="Partner" />
       <DateRangePicker v-model="range" />
-      <SearchSelect v-model="branchId" :options="hqOptions" placeholder="Choose a branch" aria-label="Branch" />
     </div>
 
     <p v-if="!partnerId" class="rounded-xl border border-border bg-white p-6 text-center text-sm text-muted">Choose a partner to see their statement.</p>
@@ -35,8 +34,7 @@
           <table class="w-full min-w-[640px] text-left text-xs">
             <thead class="bg-canvas text-[10px] uppercase tracking-wide text-slate-500">
               <tr>
-                <th class="px-3 py-2 font-bold">Branch</th>
-                <th class="px-3 py-2 font-bold">Platform</th>
+                <th class="px-3 py-2 font-bold">Agent</th>
                 <th class="px-3 py-2 font-bold">Partner %</th>
                 <th class="px-3 py-2 text-right font-bold">Win/Lose</th>
                 <th class="px-3 py-2 text-right font-bold">Commission</th>
@@ -44,9 +42,8 @@
               </tr>
             </thead>
             <tbody v-for="week in weeks" :key="week.start" class="divide-y divide-border border-t border-border first:border-t-0">
-              <tr class="bg-slate-50/70"><td colspan="6" class="px-3 py-2 text-xs font-bold text-navy">Week of {{ formatDocDate(week.start) }} – {{ formatDocDate(plusDays(week.start, 6)) }}</td></tr>
+              <tr class="bg-slate-50/70"><td colspan="5" class="px-3 py-2 text-xs font-bold text-navy">Week of {{ formatDocDate(week.start) }} – {{ formatDocDate(plusDays(week.start, 6)) }}</td></tr>
               <tr v-for="(l, i) in week.lines" :key="i" class="text-navy">
-                <td class="px-3 py-2">{{ l.branch_code }} — {{ l.branch_name }}</td>
                 <td class="px-3 py-2"><span class="font-mono font-semibold">{{ l.platform_code }}</span> <span class="text-muted">· {{ l.currency }}</span></td>
                 <td class="px-3 py-2 text-muted">{{ rateRange(l.rate_min, l.rate_max) }}</td>
                 <td class="px-3 py-2 text-right tabular-nums" :class="tone(l.win_lose)">{{ formatAmount(l.win_lose, l.currency) }}</td>
@@ -55,13 +52,13 @@
               </tr>
               <!-- The week's subtotal in each currency -->
               <tr v-for="t in week.totals" :key="`total-${t.currency}`" class="bg-canvas/60 font-semibold text-navy">
-                <td class="px-3 py-2" colspan="3">Week total · {{ t.currency }}</td>
+                <td class="px-3 py-2" colspan="2">Week total · {{ t.currency }}</td>
                 <td class="px-3 py-2 text-right tabular-nums" :class="tone(t.win_lose)">{{ formatAmount(t.win_lose, t.currency) }}</td>
                 <td class="px-3 py-2 text-right tabular-nums">{{ formatAmount(t.commission, t.currency) }}</td>
                 <td class="px-3 py-2 text-right font-bold tabular-nums" :class="tone(t.jame_ps)">{{ formatAmount(t.jame_ps, t.currency) }}</td>
               </tr>
             </tbody>
-            <tbody v-if="!report.lines.length"><tr><td colspan="6" class="px-3 py-8 text-center text-muted">No weeks entered for this partner in these dates.</td></tr></tbody>
+            <tbody v-if="!report.lines.length"><tr><td colspan="5" class="px-3 py-8 text-center text-muted">No weeks entered for this partner in these dates.</td></tr></tbody>
           </table>
         </div>
       </template>
@@ -79,7 +76,7 @@ import { downloadCsv, formatAmount, formatRate, plusDays, rateRange } from '~/ut
 const route = useRoute()
 const today = todayISO()
 const range = ref({ from: String(route.query.from || `${today.slice(0, 8)}01`), to: String(route.query.to || today) }) // this month so far
-const { report, loading, error, branchId, hqOptions, partners, partnerId, partnerOptions } = useWinLoseReport(() => range.value, { byWeek: true, needPartner: true })
+const { report, loading, error, partners, partnerId, partnerOptions } = useWinLoseReport(() => range.value, { byWeek: true, needPartner: true })
 const partner = computed(() => partners.value.find(p => p.id === partnerId.value))
 
 // The lines by week, newest first, each week with its subtotal per currency.
@@ -109,8 +106,8 @@ function tone(value: string | number) {
 function exportCsv() {
   if (!report.value || !partner.value) return
   downloadCsv(`partner-statement-${partner.value.name.replace(/[^\w-]+/g, '_')}-${range.value.from}-to-${range.value.to}.csv`,
-    ['Partner', 'Week start', 'Week end', 'Branch code', 'Branch', 'Platform', 'Currency', 'Partner %', 'Win/Lose', 'Commission', 'Share'],
-    report.value.lines.map(l => [partner.value!.name, l.week_start || '', l.week_start ? plusDays(l.week_start, 6) : '', l.branch_code, l.branch_name, l.platform_code, l.currency,
+    ['Partner', 'Week start', 'Week end', 'Agent', 'Currency', 'Partner %', 'Win/Lose', 'Commission', 'Share'],
+    report.value.lines.map(l => [partner.value!.name, l.week_start || '', l.week_start ? plusDays(l.week_start, 6) : '', l.platform_code, l.currency,
       l.rate_min === l.rate_max ? Number(l.rate_min) : `${Number(l.rate_min)}-${Number(l.rate_max)}`, Number(l.win_lose), Number(l.commission), Number(l.jame_ps)]))
 }
 </script>

@@ -72,6 +72,14 @@ type WeekSheetRow struct {
 	UpdatedAt      *time.Time       `json:"updated_at"`
 }
 
+// EntryState is the week's entry as Data Entry lists it (nil until the week is saved).
+type EntryState struct {
+	ID        uuid.UUID `json:"id"`
+	Title     string    `json:"title"`
+	CreatedAt time.Time `json:"created_at"`
+	CreatedBy string    `json:"created_by"`
+}
+
 // WeekSheet is an HQ's week (Monday to Sunday): every platform it had that week.
 type WeekSheet struct {
 	WeekStart  string           `json:"week_start"`
@@ -79,6 +87,7 @@ type WeekSheet struct {
 	BranchID   uuid.UUID        `json:"branch_id"`
 	BranchCode string           `json:"branch_code"`
 	BranchName string           `json:"branch_name"`
+	Entry      *EntryState      `json:"entry"`
 	Formula    winlose.Formula  `json:"formula"`
 	Settlement *SettlementState `json:"settlement"`
 	// Locked: the week is finalized, so nothing can be changed.
@@ -97,6 +106,7 @@ type sheetParts struct {
 	platforms   map[uuid.UUID]models.Platform
 	partners    map[uuid.UUID]models.Partner
 	settlement  *models.WeeklySettlement
+	entry       *models.WeeklyEntry
 }
 
 // loadWeek reads an HQ's week. A platform the HQ had on any day of the week is on the sheet; if
@@ -106,7 +116,7 @@ func (s *PlatformService) loadWeek(tx *gorm.DB, start time.Time, branchID uuid.U
 	p := &sheetParts{assignments: map[uuid.UUID]models.HQPlatformAssignment{}, results: map[uuid.UUID]models.WeeklyPlatformResult{},
 		shares: map[uuid.UUID][]models.WeeklyPartnerResult{}}
 	if err := tx.First(&p.branch, "id = ?", branchID).Error; err != nil {
-		return nil, fieldError("branch_id", "this branch was not found")
+		return nil, fieldError("branch_id", "this group was not found")
 	}
 	var assignments []models.HQPlatformAssignment
 	if err := tx.Where("branch_id = ? AND starts_on <= ? AND (ends_on IS NULL OR ends_on >= ?)", branchID, dayString(end), dayString(start)).
@@ -134,6 +144,25 @@ func (s *PlatformService) loadWeek(tx *gorm.DB, start time.Time, branchID uuid.U
 	for _, r := range results {
 		p.results[r.PlatformID] = r
 		platformIDs, resultIDs = append(platformIDs, r.PlatformID), append(resultIDs, r.ID)
+	}
+	// The agents of a group that is turned off leave the sheet (a week already saved stays).
+	var groupIDs, off []uuid.UUID
+	for _, a := range p.assignments {
+		if a.GroupID != nil {
+			groupIDs = append(groupIDs, *a.GroupID)
+		}
+	}
+	if len(groupIDs) > 0 {
+		if err := tx.Model(&models.AssignmentGroup{}).Where("id IN ? AND is_active = ?", groupIDs, false).Pluck("id", &off).Error; err != nil {
+			return nil, err
+		}
+	}
+	for _, g := range off {
+		for platformID, a := range p.assignments {
+			if _, saved := p.results[platformID]; !saved && a.GroupID != nil && *a.GroupID == g {
+				delete(p.assignments, platformID)
+			}
+		}
 	}
 	if len(resultIDs) > 0 {
 		var shares []models.WeeklyPartnerResult
@@ -166,6 +195,17 @@ func (s *PlatformService) loadWeek(tx *gorm.DB, start time.Time, branchID uuid.U
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
 	}
+	entries := tx.Where("branch_id = ? AND week_start = ?", branchID, dayString(start))
+	if lock {
+		entries = entries.Clauses(clause.Locking{Strength: "UPDATE"})
+	}
+	var entry models.WeeklyEntry
+	err = entries.First(&entry).Error
+	if err == nil {
+		p.entry = &entry
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
 	return p, nil
 }
 
@@ -191,10 +231,53 @@ func (p *sheetParts) sharesOf(result *models.WeeklyPlatformResult, assignment uu
 	return out
 }
 
-// WeekSheet returns the HQ's week that contains the given day (any day of it; empty is this week).
-func (s *PlatformService) WeekSheet(ctx context.Context, week string, branchID uuid.UUID, scope BranchScope) (*WeekSheet, error) {
-	if !scope.Has(branchID) {
-		return nil, ErrBranchAccessDenied
+// OwnGroup is the group (branch) a person works in on the PLATFORMS pages (entries, assignments,
+// settlements, reports without consolidated access): their default branch, else their only
+// branch. Those pages don't ask for one.
+func (s *PlatformService) OwnGroup(ctx context.Context, actor uuid.UUID, scope BranchScope) (uuid.UUID, error) {
+	var user models.User
+	if err := s.db.WithContext(ctx).Preload("Branches").First(&user, "id = ?", actor).Error; err != nil {
+		return uuid.Nil, err
+	}
+	if user.DefaultBranchID != nil && scope.Has(*user.DefaultBranchID) {
+		return *user.DefaultBranchID, nil
+	}
+	var mine []uuid.UUID
+	for _, b := range user.Branches {
+		if scope.Has(b.ID) {
+			mine = append(mine, b.ID)
+		}
+	}
+	if len(mine) == 1 {
+		return mine[0], nil
+	}
+	if !scope.All && len(scope.IDs) == 1 {
+		return scope.IDs[0], nil
+	}
+	return uuid.Nil, fieldError("branch_id", "your account has no default branch, so there's no group to work in; ask an admin to set one in Manage → Users")
+}
+
+// groupFor is the group asked for (an entry being edited), else the person's own.
+func (s *PlatformService) groupFor(ctx context.Context, raw string, scope BranchScope, actor uuid.UUID) (uuid.UUID, error) {
+	if strings.TrimSpace(raw) == "" {
+		return s.OwnGroup(ctx, actor, scope)
+	}
+	id, err := uuid.Parse(raw)
+	if err != nil {
+		return uuid.Nil, fieldError("branch_id", "choose a group")
+	}
+	if !scope.Has(id) {
+		return uuid.Nil, ErrBranchAccessDenied
+	}
+	return id, nil
+}
+
+// WeekSheet returns a group's week that contains the given day (any day of it; empty is this
+// week). An empty group is the person's own.
+func (s *PlatformService) WeekSheet(ctx context.Context, week, group string, scope BranchScope, actor uuid.UUID) (*WeekSheet, error) {
+	branchID, err := s.groupFor(ctx, group, scope, actor)
+	if err != nil {
+		return nil, err
 	}
 	day, err := s.parseDay("week_start", week)
 	if err != nil {
@@ -225,7 +308,13 @@ func (s *PlatformService) sheet(ctx context.Context, start time.Time, p *sheetPa
 			users = append(users, *r.UpdatedByID)
 		}
 	}
+	if p.entry != nil {
+		users = append(users, p.entry.CreatedByID)
+	}
 	names := s.userNames(ctx, users)
+	if p.entry != nil {
+		out.Entry = &EntryState{ID: p.entry.ID, Title: p.entry.Title, CreatedAt: p.entry.CreatedAt, CreatedBy: names[p.entry.CreatedByID]}
+	}
 	seen := map[uuid.UUID]bool{}
 	add := func(platformID uuid.UUID) {
 		if seen[platformID] {
@@ -283,14 +372,17 @@ type WeekEntryRow struct {
 
 type WeekEntryInput struct {
 	// Any day of the week (normally its Monday).
-	WeekStart string         `json:"week_start" binding:"required"`
-	BranchID  string         `json:"branch_id" binding:"required,uuid"`
-	Rows      []WeekEntryRow `json:"rows" binding:"required,max=500,dive"`
+	WeekStart string `json:"week_start" binding:"required"`
+	// Empty: the person's own group; an entry being edited sends its group.
+	BranchID string         `json:"branch_id" binding:"omitempty,uuid"`
+	Title    string         `json:"title" binding:"max=128"`
+	Rows     []WeekEntryRow `json:"rows" binding:"required,max=500,dive"`
 	// Needed when a saved week is changed (kept in the audit log).
 	Reason string `json:"reason" binding:"max=512"`
 }
 
-// Correction is a saved week that was changed (for the audit log).
+// Correction is a saved week that was changed (for the audit log). A title change has no
+// platform code; ResultID is then the entry's.
 type Correction struct {
 	ResultID     uuid.UUID
 	PlatformCode string
@@ -338,7 +430,7 @@ func (s *PlatformService) plan(p *sheetParts, rows []WeekEntryRow, formula winlo
 	for i, row := range rows {
 		platformID := uuid.MustParse(row.PlatformID)
 		if seen[platformID] {
-			return nil, fieldError("rows", "a platform is listed twice")
+			return nil, fieldError("rows", "an agent is listed twice")
 		}
 		seen[platformID] = true
 		if strings.TrimSpace(row.WinLose) == "" && strings.TrimSpace(row.Commission) == "" {
@@ -386,10 +478,10 @@ type PreviewRow struct {
 }
 
 // Preview works out rows without saving them (the entry page shows the Total as people type).
-func (s *PlatformService) Preview(ctx context.Context, in WeekEntryInput, scope BranchScope) ([]PreviewRow, error) {
-	branchID := uuid.MustParse(in.BranchID)
-	if !scope.Has(branchID) {
-		return nil, ErrBranchAccessDenied
+func (s *PlatformService) Preview(ctx context.Context, in WeekEntryInput, scope BranchScope, actor uuid.UUID) ([]PreviewRow, error) {
+	branchID, err := s.groupFor(ctx, in.BranchID, scope, actor)
+	if err != nil {
+		return nil, err
 	}
 	day, err := s.parseDay("week_start", in.WeekStart)
 	if err != nil {
@@ -414,13 +506,17 @@ func (s *PlatformService) Preview(ctx context.Context, in WeekEntryInput, scope 
 	return out, nil
 }
 
-// SaveWeek saves an HQ's week in one transaction, with each partner's share. New rows need
-// winlose.create; changing a saved row needs winlose.edit and a reason. A finalized week can't be
-// changed.
+// SaveWeek saves a group's week in one transaction: its entry's title and its results, with each
+// partner's share. A new entry and new rows need winlose.create; changing a saved row or the
+// title needs winlose.edit (a saved row also a reason). A finalized week can't be changed.
 func (s *PlatformService) SaveWeek(ctx context.Context, in WeekEntryInput, scope BranchScope, can func(string) bool, actor uuid.UUID) (*WeekSheet, []Correction, error) {
-	branchID := uuid.MustParse(in.BranchID)
-	if !scope.Has(branchID) {
-		return nil, nil, ErrBranchAccessDenied
+	branchID, err := s.groupFor(ctx, in.BranchID, scope, actor)
+	if err != nil {
+		return nil, nil, err
+	}
+	title := strings.TrimSpace(in.Title)
+	if title == "" {
+		return nil, nil, fieldError("title", "title is required")
 	}
 	day, err := s.parseDay("week_start", in.WeekStart)
 	if err != nil {
@@ -449,6 +545,27 @@ func (s *PlatformService) SaveWeek(ctx context.Context, in WeekEntryInput, scope
 			return err
 		}
 		now := time.Now()
+		switch {
+		case parts.entry == nil:
+			if !can(permissions.WinLoseCreate) {
+				return errors.New("you can't add entries (needs Enter Win/Lose)")
+			}
+			entry := models.WeeklyEntry{ID: uuid.New(), BranchID: branchID, WeekStart: start, Title: title, CreatedByID: actor}
+			if err := tx.Create(&entry).Error; err != nil {
+				if isDuplicate(err) {
+					return errors.New("this week was just saved by someone else; reload and check it")
+				}
+				return err
+			}
+		case parts.entry.Title != title:
+			if !can(permissions.WinLoseEdit) {
+				return errors.New("you can't change a saved entry's title (needs Correct Win/Lose)")
+			}
+			if err := tx.Model(parts.entry).Updates(map[string]interface{}{"title": title, "updated_by_id": actor, "updated_at": now}).Error; err != nil {
+				return err
+			}
+			corrections = append(corrections, Correction{ResultID: parts.entry.ID, Before: map[string]string{"title": parts.entry.Title}, After: map[string]string{"title": title}})
+		}
 		for _, p := range plans {
 			code := parts.platforms[p.platform].Code
 			if p.existing == nil {
@@ -506,8 +623,62 @@ func (s *PlatformService) SaveWeek(ctx context.Context, in WeekEntryInput, scope
 	if err != nil {
 		return nil, nil, err
 	}
-	sheet, err := s.WeekSheet(ctx, dayString(start), branchID, scope)
+	sheet, err := s.WeekSheet(ctx, dayString(start), branchID.String(), scope, actor)
 	return sheet, corrections, err
+}
+
+// ===== Entries =====
+
+// EntryRow is one saved week on Data Entry's list.
+type EntryRow struct {
+	ID         uuid.UUID `json:"id"`
+	Title      string    `json:"title"`
+	WeekStart  string    `json:"week_start"`
+	WeekEnd    string    `json:"week_end"`
+	BranchID   uuid.UUID `json:"branch_id"`
+	BranchCode string    `json:"branch_code"`
+	CreatedAt  time.Time `json:"created_at"`
+	CreatedBy  string    `json:"created_by"`
+	// Locked: the week is finalized.
+	Locked bool `json:"locked"`
+}
+
+// ListEntries lists the entries of the groups in scope, newest first (at most 500).
+func (s *PlatformService) ListEntries(ctx context.Context, search string, scope BranchScope) ([]EntryRow, error) {
+	q := scope.where(s.db.WithContext(ctx).Model(&models.WeeklyEntry{}), "branch_id")
+	if search = strings.TrimSpace(search); search != "" {
+		q = q.Where("title LIKE ?", "%"+strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(search)+"%")
+	}
+	var list []models.WeeklyEntry
+	if err := q.Order("created_at DESC, id").Limit(500).Find(&list).Error; err != nil {
+		return nil, err
+	}
+	var branchIDs, users []uuid.UUID
+	for _, e := range list {
+		branchIDs, users = append(branchIDs, e.BranchID), append(users, e.CreatedByID)
+	}
+	branches, err := s.branchesIn(ctx, branchIDs)
+	if err != nil {
+		return nil, err
+	}
+	names := s.userNames(ctx, users)
+	locked := map[string]bool{}
+	if len(branchIDs) > 0 {
+		var settled []models.WeeklySettlement
+		if err := s.db.WithContext(ctx).Where("branch_id IN ? AND status = ?", branchIDs, models.SettlementFinalized).Find(&settled).Error; err != nil {
+			return nil, err
+		}
+		for _, st := range settled {
+			locked[st.BranchID.String()+dayString(st.WeekStart)] = true
+		}
+	}
+	out := make([]EntryRow, len(list))
+	for i, e := range list {
+		out[i] = EntryRow{ID: e.ID, Title: e.Title, WeekStart: dayString(e.WeekStart), WeekEnd: dayString(e.WeekStart.AddDate(0, 0, 6)),
+			BranchID: e.BranchID, BranchCode: branches[e.BranchID].Code, CreatedAt: e.CreatedAt, CreatedBy: names[e.CreatedByID],
+			Locked: locked[e.BranchID.String()+dayString(e.WeekStart)]}
+	}
+	return out, nil
 }
 
 // ===== Weekly settlements =====
@@ -582,16 +753,17 @@ func (s *PlatformService) settlementViews(ctx context.Context, list []models.Wee
 }
 
 type FinalizeInput struct {
-	BranchID  string `json:"branch_id" binding:"required,uuid"`
+	// Empty: the person's own group.
+	BranchID  string `json:"branch_id" binding:"omitempty,uuid"`
 	WeekStart string `json:"week_start" binding:"required"` // a Monday
 }
 
 // FinalizeWeek freezes an HQ's week: its totals per currency are kept and the week locked. A
 // reopened week can be finalized again (the totals are worked out afresh).
 func (s *PlatformService) FinalizeWeek(ctx context.Context, in FinalizeInput, scope BranchScope, actor uuid.UUID) (*SettlementView, error) {
-	branchID := uuid.MustParse(in.BranchID)
-	if !scope.Has(branchID) {
-		return nil, ErrBranchAccessDenied
+	branchID, err := s.groupFor(ctx, in.BranchID, scope, actor)
+	if err != nil {
+		return nil, err
 	}
 	start, err := s.parseDay("week_start", in.WeekStart)
 	if err != nil {
