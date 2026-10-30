@@ -4,14 +4,14 @@
       <div>
         <p class="text-[10px] font-bold tracking-[0.14em] text-slate-400">PLATFORMS · REPORTS</p>
         <h1 class="text-xl font-bold text-navy">Group summary</h1>
-        <p class="mt-1 text-xs text-muted">Totals for the weeks starting in the dates you choose, by agent and by partner. USD and KHR are kept apart.</p>
+        <p class="mt-1 text-xs text-muted">Totals for the weeks starting in the dates you choose, by agent and by group. USD and KHR are kept apart.</p>
       </div>
       <button type="button" class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-white px-3 py-2 text-sm font-medium text-navy disabled:opacity-50" :disabled="!report?.platforms.length" @click="exportCsv"><Download :size="16" /> Export CSV</button>
     </header>
 
-    <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
-      <DateRangePicker v-model="range" />
-      <SearchSelect v-model="partnerId" :options="[{ value: '', label: 'All partners' }, ...partnerOptions]" aria-label="Partner" />
+    <div class="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+      <WinloseDateFilter v-model="range" />
+      <SearchSelect v-model="groupId" :options="groupOptions" aria-label="Group" />
     </div>
 
     <div v-if="loading && !report" class="text-sm text-muted">Loading…</div>
@@ -49,7 +49,7 @@
         </table>
       </article>
 
-      <WinlosePartnerTotals v-if="!partnerId" :partners="report.partners" :from="report.date_from" :to="range.to" />
+      <WinloseGroupTotals v-if="!groupId" :groups="report.groups" />
     </template>
   </section>
 </template>
@@ -57,12 +57,11 @@
 <script setup lang="ts">
 import { Download, Layers } from 'lucide-vue-next'
 import { useWinLoseReport } from '~/composables/useWinLoseReport'
-import { todayISO } from '~/utils/inventory'
+import { currentMonthRange } from '~/utils/dateRanges'
 import { downloadCsv, formatAmount } from '~/utils/winlose'
 
-const today = todayISO()
-const range = ref({ from: `${today.slice(0, 8)}01`, to: today }) // this month so far
-const { report, loading, error, partnerId, partnerOptions } = useWinLoseReport(() => range.value)
+const range = ref(currentMonthRange()) // this month
+const { report, loading, error, groupId, groupOptions } = useWinLoseReport(() => range.value)
 
 function tone(value: string) {
   return Number(value) < 0 ? 'text-expense' : ''

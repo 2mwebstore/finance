@@ -141,9 +141,9 @@ func AllPermissions() []struct {
 		{InventoryExpensesCreate, "Create Inventory Expenses", "Inventory Expenses", "Record inventory expenses (shipping, packaging, storage…)"},
 		{InventoryExpensesVoid, "Void Inventory Expenses", "Inventory Expenses", "Void an inventory expense"},
 
-		{PlatformsView, "View Agents", "Platforms", "See agents, partners and the groups they are assigned to"},
-		{PlatformsManage, "Manage Agents", "Platforms", "Add and edit agents and partners, with their default partner % and currency"},
-		{PlatformAssignmentsManage, "Manage Group Agent Assignments", "Platforms", "Assign agents to groups with their partners; change partners and their %, end or move assignments"},
+		{PlatformsView, "View Agents", "Platforms", "See agents and the groups they are in"},
+		{PlatformsManage, "Manage Agents", "Platforms", "Add and edit agents and their currency"},
+		{PlatformAssignmentsManage, "Manage Group Agent Assignments", "Platforms", "Make titled groups of agents with their rates; update, turn off or delete them"},
 		{WinLoseView, "View Win/Lose", "Win/Lose", "See the weekly win/lose entered for your groups"},
 		{WinLoseCreate, "Enter Win/Lose", "Win/Lose", "Enter a week's win/lose and commission for your groups (once a week)"},
 		{WinLoseEdit, "Correct Win/Lose", "Win/Lose", "Change a week already saved, with a reason (kept in the audit log)"},

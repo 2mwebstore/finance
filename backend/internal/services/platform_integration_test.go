@@ -622,15 +622,48 @@ func TestWeeklyEntries(t *testing.T) {
 	if _, _, err := f.save(f.week.AddDate(0, 0, 7), 0, canAll, "", row(f.p1, "5", "0")); err != nil {
 		t.Fatal(err)
 	}
-	list, err := f.svc.ListEntries(f.ctx, "", all)
+	list, err := f.svc.ListEntries(f.ctx, EntryFilter{}, all)
 	if err != nil || len(list) != 2 || list[0].BranchID != f.hq[0].ID || list[1].Title != "Week 1 (checked)" {
 		t.Errorf("both entries, newest first: %v %+v", err, list)
 	}
-	if mine, _ := f.svc.ListEntries(f.ctx, "", f.scope(1)); len(mine) != 1 || mine[0].BranchID != f.hq[1].ID {
+	if mine, _ := f.svc.ListEntries(f.ctx, EntryFilter{}, f.scope(1)); len(mine) != 1 || mine[0].BranchID != f.hq[1].ID {
 		t.Errorf("only the groups in scope: %+v", mine)
 	}
-	if found, _ := f.svc.ListEntries(f.ctx, "checked", all); len(found) != 1 {
+	if found, _ := f.svc.ListEntries(f.ctx, EntryFilter{Search: "checked"}, all); len(found) != 1 {
 		t.Errorf("search by title: %+v", found)
+	}
+	// Filter by the day they were created (the business's days).
+	today, yesterday := dayString(f.svc.today()), dayString(f.svc.today().AddDate(0, 0, -1))
+	if found, _ := f.svc.ListEntries(f.ctx, EntryFilter{CreatedFrom: today, CreatedTo: today}, all); len(found) != 2 {
+		t.Errorf("both entries were made today, got %d", len(found))
+	}
+	if found, _ := f.svc.ListEntries(f.ctx, EntryFilter{CreatedTo: yesterday}, all); len(found) != 0 {
+		t.Errorf("none were made by yesterday, got %d", len(found))
+	}
+
+	// Deleting an entry (with a reason) removes its week's amounts for good: it can be entered again.
+	newest := list[0]
+	if _, _, err := f.svc.DeleteEntry(f.ctx, newest.ID, "", all); err == nil {
+		t.Error("deleting an entry needs a reason")
+	}
+	entry, removed, err := f.svc.DeleteEntry(f.ctx, newest.ID, "entered twice", all)
+	if err != nil || entry.ID != newest.ID || len(removed) != 1 {
+		t.Fatalf("delete: %v %d", err, len(removed))
+	}
+	var left int64
+	f.db.Unscoped().Model(&models.WeeklyPlatformResult{}).Where("branch_id = ? AND week_start = ?", newest.BranchID, newest.WeekStart).Count(&left)
+	if left != 0 {
+		t.Errorf("its amounts are gone, %d left", left)
+	}
+	if _, _, err := f.save(f.week.AddDate(0, 0, 7), 0, canAll, "", row(f.p1, "7", "0")); err != nil {
+		t.Errorf("the week can be entered again: %v", err)
+	}
+	// A finalized week's entry can't be deleted.
+	if _, err := f.svc.FinalizeWeek(f.ctx, FinalizeInput{BranchID: f.hq[1].ID.String(), WeekStart: dayString(f.week)}, all, f.actor); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := f.svc.DeleteEntry(f.ctx, list[1].ID, "wrong", all); err == nil {
+		t.Error("a finalized week's entry can't be deleted")
 	}
 }
 
@@ -639,32 +672,54 @@ func TestAssignmentGroups(t *testing.T) {
 	f.db.Exec("DELETE FROM partners WHERE name LIKE 'TWL%'")
 	f.db.Model(&models.User{}).Where("id = ?", f.actor).Update("default_branch_id", f.hq[0].ID)
 	defer f.db.Model(&models.User{}).Where("id = ?", f.actor).Update("default_branch_id", nil)
-	partner, err := f.svc.SavePartner(f.ctx, nil, PartnerInput{Name: "TWL Group Partner", DefaultRate: "20"})
-	if err != nil {
-		t.Fatal(err)
+	agent := func(p models.Platform, rate string) GroupAgentInput {
+		return GroupAgentInput{PlatformID: p.ID.String(), CommissionRate: rate}
 	}
-	ids := func(ps ...models.Platform) []string {
-		out := []string{}
-		for _, p := range ps {
-			out = append(out, p.ID.String())
+	rateOf := func(g *GroupRow, p models.Platform) string {
+		for _, a := range g.Agents {
+			if a.PlatformID == p.ID {
+				return a.CommissionRate.String()
+			}
 		}
-		return out
+		return "-"
 	}
 	start := dayString(f.week.AddDate(0, 0, -21))
 
-	// A titled group in the person's own branch, its agents with the partner at their default %.
-	if _, err := f.svc.CreateGroup(f.ctx, GroupInput{Title: " ", PlatformIDs: ids(f.p1)}, all, f.actor); err == nil {
+	// A titled group in the person's own branch, each agent at its own rate.
+	if _, err := f.svc.CreateGroup(f.ctx, GroupInput{Title: " ", Agents: []GroupAgentInput{agent(f.p1, "10")}}, all, f.actor); err == nil {
 		t.Error("a group needs a title")
 	}
-	g, err := f.svc.CreateGroup(f.ctx, GroupInput{Title: "  V-series  ", PlatformIDs: ids(f.p1, f.p2), PartnerIDs: []string{partner.ID.String()}, StartsOn: start}, all, f.actor)
-	if err != nil || g.Title != "V-series" || g.BranchID != f.hq[0].ID || len(g.Agents) != 2 || len(g.Partners) != 1 || g.Partners[0].CommissionRate.String() != "20" {
+	if _, err := f.svc.CreateGroup(f.ctx, GroupInput{Title: "No rate", Agents: []GroupAgentInput{agent(f.p1, "")}}, all, f.actor); err == nil {
+		t.Error("each agent needs a rate")
+	}
+	g, err := f.svc.CreateGroup(f.ctx, GroupInput{Title: "  V-series  ", Agents: []GroupAgentInput{agent(f.p1, "20"), agent(f.p2, "10")}, StartsOn: start}, all, f.actor)
+	if err != nil || g.Title != "V-series" || g.BranchID != f.hq[0].ID || len(g.Agents) != 2 || len(g.Partners) != 0 || rateOf(g, f.p1) != "20" || rateOf(g, f.p2) != "10" {
 		t.Fatalf("group: %v %+v", err, g)
 	}
-	if _, err := f.svc.CreateGroup(f.ctx, GroupInput{Title: "Other", PlatformIDs: ids(f.p1)}, all, f.actor); err == nil || !strings.Contains(err.Error(), "V-series") {
+	if _, err := f.svc.CreateGroup(f.ctx, GroupInput{Title: "Other", Agents: []GroupAgentInput{agent(f.p1, "5")}}, all, f.actor); err == nil || !strings.Contains(err.Error(), "V-series") {
 		t.Errorf("an agent is in one group at a time, got %v", err)
 	}
-	if _, _, err := f.save(f.week, 0, canAll, "", row(f.p1, "1000", "0")); err != nil {
+	// The Total is at the agent's rate.
+	sheet, _, err := f.save(f.week, 0, canAll, "", row(f.p1, "1000", "0"))
+	if err != nil {
 		t.Fatal(err)
+	}
+	if r := sheetRow(t, sheet, f.p1); !r.JamePS.Equal(decimal.NewFromInt(200)) {
+		t.Errorf("1000 at 20%% is 200, got %s", r.JamePS)
+	}
+	// Reports: totals by group, and a filter by group.
+	f.assign(t, []models.Platform{f.p1}, 1) // TWL2: an assignment in no group
+	if _, _, err := f.save(f.week, 1, canAll, "", row(f.p1, "50", "0")); err != nil {
+		t.Fatal(err)
+	}
+	week := ReportFilter{DateFrom: dayString(f.week), DateTo: dayString(f.week.AddDate(0, 0, 6))}
+	r, err := f.svc.Report(f.ctx, week, all, true, f.actor)
+	if err != nil || len(r.Groups) != 2 || r.Groups[0].Title != "V-series" || !r.Groups[0].Totals[0].JamePS.Equal(decimal.NewFromInt(200)) || r.Groups[1].GroupID != nil {
+		t.Errorf("by group (no group last): %v %+v", err, r.Groups)
+	}
+	week.GroupID = &g.ID
+	if r, err := f.svc.Report(f.ctx, week, all, true, f.actor); err != nil || len(r.Lines) != 1 || !r.Lines[0].WinLose.Equal(decimal.NewFromInt(1000)) {
+		t.Errorf("only the group's agents: %v %+v", err, r)
 	}
 
 	// Off: its agents leave Data Entry (the saved week stays) and the Agents page's count.
@@ -696,10 +751,14 @@ func TestAssignmentGroups(t *testing.T) {
 		t.Errorf("on again: both agents, got %d", len(next.Rows))
 	}
 
-	// Update: rename, take out the agent without weeks (removed), new % for the partner.
-	_, after, err := f.svc.UpdateGroup(f.ctx, g.ID, GroupUpdateInput{Title: "V1 only", PlatformIDs: ids(f.p1),
-		Partners: []AssignmentPartnerInput{{PartnerID: partner.ID.String(), CommissionRate: "30"}}}, all, f.actor)
-	if err != nil || after.Title != "V1 only" || len(after.Agents) != 1 || after.Partners[0].CommissionRate.String() != "30" {
+	// Update: rename, take out the agent without weeks (removed), a new rate; partners from before go.
+	partner, err := f.svc.SavePartner(f.ctx, nil, PartnerInput{Name: "TWL Old Partner", DefaultRate: "5"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.db.Create(&models.AssignmentPartner{ID: uuid.New(), AssignmentID: g.Agents[0].AssignmentID, PartnerID: partner.ID, CommissionRate: decimal.NewFromInt(5)})
+	_, after, err := f.svc.UpdateGroup(f.ctx, g.ID, GroupUpdateInput{Title: "V1 only", Agents: []GroupAgentInput{agent(f.p1, "30")}}, all, f.actor)
+	if err != nil || after.Title != "V1 only" || len(after.Agents) != 1 || rateOf(after, f.p1) != "30" || len(after.Partners) != 0 {
 		t.Fatalf("update: %v %+v", err, after)
 	}
 	var gone int64
@@ -709,9 +768,12 @@ func TestAssignmentGroups(t *testing.T) {
 	}
 
 	// Delete: only while no week is entered.
-	other, err := f.svc.CreateGroup(f.ctx, GroupInput{Title: "P2", PlatformIDs: ids(f.p2)}, all, f.actor)
+	other, err := f.svc.CreateGroup(f.ctx, GroupInput{Title: "P2", Agents: []GroupAgentInput{agent(f.p2, "15")}}, all, f.actor)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if found, err := f.svc.GroupByID(f.ctx, other.ID, f.scope(1)); err == nil || found != nil {
+		t.Error("another branch's group is not found")
 	}
 	if _, err := f.svc.DeleteGroup(f.ctx, g.ID, all); err == nil {
 		t.Error("a group with weeks entered can't be deleted")
@@ -720,8 +782,8 @@ func TestAssignmentGroups(t *testing.T) {
 		t.Fatalf("a group without weeks can be deleted: %v", err)
 	}
 	// Taking out an agent with weeks ends it (history); one put in starts today.
-	_, after, err = f.svc.UpdateGroup(f.ctx, g.ID, GroupUpdateInput{Title: "V1 only", PlatformIDs: ids(f.p2)}, all, f.actor)
-	if err != nil || len(after.Agents) != 1 || after.Agents[0].PlatformID != f.p2.ID || after.Agents[0].StartsOn != dayString(f.svc.today()) || after.Weeks != 1 {
+	_, after, err = f.svc.UpdateGroup(f.ctx, g.ID, GroupUpdateInput{Title: "V1 only", Agents: []GroupAgentInput{agent(f.p2, "12.5")}}, all, f.actor)
+	if err != nil || len(after.Agents) != 1 || after.Agents[0].PlatformID != f.p2.ID || after.Agents[0].StartsOn != dayString(f.svc.today()) || rateOf(after, f.p2) != "12.5" || after.Weeks != 1 {
 		t.Fatalf("swap agents: %v %+v", err, after)
 	}
 	var ended models.HQPlatformAssignment
@@ -731,5 +793,11 @@ func TestAssignmentGroups(t *testing.T) {
 	list, err := f.svc.ListGroups(f.ctx, f.hq[0].ID, GroupFilter{}, all)
 	if err != nil || len(list) != 1 || list[0].ID != g.ID {
 		t.Errorf("one group left: %v %d", err, len(list))
+	}
+	if found, _ := f.svc.ListGroups(f.ctx, f.hq[0].ID, GroupFilter{Search: "v1 ON"}, all); len(found) != 1 {
+		t.Errorf("search by title (any case): %d", len(found))
+	}
+	if found, _ := f.svc.ListGroups(f.ctx, f.hq[0].ID, GroupFilter{Search: "nothing like it"}, all); len(found) != 0 {
+		t.Errorf("a search with no match: %d", len(found))
 	}
 }

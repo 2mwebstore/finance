@@ -39,9 +39,7 @@
       <Can :any="['winlose.view', 'winlose.create', 'winlose.edit']"><NuxtLink to="/winlose/entry"><span>Data entry</span><small>Titled weeks of each agent’s win/lose</small><ChevronRight :size="17" /></NuxtLink></Can>
       <Can perm="winlose-reports.view"><NuxtLink to="/winlose/reports/weekly"><span>Weekly report</span><small>Weeks by group and agent, and settlements</small><ChevronRight :size="17" /></NuxtLink></Can>
       <Can perm="winlose-reports.view"><NuxtLink to="/winlose/reports/branch-summary"><span>Group summary</span><small>Totals per group, USD and KHR apart</small><ChevronRight :size="17" /></NuxtLink></Can>
-      <Can perm="winlose-reports.view"><NuxtLink to="/winlose/reports/partner-statement"><span>Partner statement</span><small>One partner’s weeks across groups</small><ChevronRight :size="17" /></NuxtLink></Can>
-      <Can :any="['platforms.view', 'platforms.manage']"><NuxtLink to="/admin/platforms"><span>Agents</span><small>Agents, default partner % and currencies</small><ChevronRight :size="17" /></NuxtLink></Can>
-      <Can :any="['platforms.view', 'platforms.manage']"><NuxtLink to="/admin/partners"><span>Partners</span><small>Who shares in each agent’s Total</small><ChevronRight :size="17" /></NuxtLink></Can>
+      <Can :any="['platforms.view', 'platforms.manage']"><NuxtLink to="/admin/platforms"><span>Agents</span><small>Agents and their currencies</small><ChevronRight :size="17" /></NuxtLink></Can>
       <Can :any="['platforms.view', 'platform-assignments.manage']"><NuxtLink to="/admin/platform-assignments"><span>Group agent assignments</span><small>Which agents each group reports</small><ChevronRight :size="17" /></NuxtLink></Can>
     </section>
 

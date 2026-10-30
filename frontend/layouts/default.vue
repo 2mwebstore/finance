@@ -131,9 +131,7 @@ import {
   Building2,
   CalendarRange,
   ChartColumn,
-  Handshake,
   Layers,
-  ScrollText,
   Network,
   NotebookPen,
   ChartPie,
@@ -229,10 +227,8 @@ const platformsNav = computed<NavItem[]>(() => {
   if (can('winlose-reports.view')) {
     items.push({ label: 'Weekly Report', to: '/winlose/reports/weekly', icon: CalendarRange })
     items.push({ label: 'Group Summary', to: '/winlose/reports/branch-summary', icon: ChartColumn })
-    items.push({ label: 'Partner Statement', to: '/winlose/reports/partner-statement', icon: ScrollText })
   }
   if (can('platforms.view', 'platforms.manage')) items.push({ label: 'Agents', to: '/admin/platforms', icon: Layers })
-  if (can('platforms.view', 'platforms.manage')) items.push({ label: 'Partners', to: '/admin/partners', icon: Handshake })
   if (can('platforms.view', 'platform-assignments.manage')) items.push({ label: 'Group Agent Assignments', to: '/admin/platform-assignments', icon: Network })
   return items
 })

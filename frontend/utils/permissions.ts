@@ -138,9 +138,9 @@ export const PERMISSION_CATALOG: {
   { code: P.InventoryExpensesCreate, name: 'Create Inventory Expenses', module: 'Inventory Expenses', description: 'Record inventory expenses (shipping, packaging, storage…)' },
   { code: P.InventoryExpensesVoid, name: 'Void Inventory Expenses', module: 'Inventory Expenses', description: 'Void an inventory expense' },
 
-  { code: P.PlatformsView, name: 'View Agents', module: 'Platforms', description: 'See agents, partners and the groups they are assigned to' },
-  { code: P.PlatformsManage, name: 'Manage Agents', module: 'Platforms', description: 'Add and edit agents and partners, with their default partner % and currency' },
-  { code: P.PlatformAssignmentsManage, name: 'Manage Group Agent Assignments', module: 'Platforms', description: 'Assign agents to groups with their partners; change partners and their %, end or move assignments' },
+  { code: P.PlatformsView, name: 'View Agents', module: 'Platforms', description: 'See agents and the groups they are in' },
+  { code: P.PlatformsManage, name: 'Manage Agents', module: 'Platforms', description: 'Add and edit agents and their currency' },
+  { code: P.PlatformAssignmentsManage, name: 'Manage Group Agent Assignments', module: 'Platforms', description: 'Make titled groups of agents with their rates; update, turn off or delete them' },
   { code: P.WinLoseView, name: 'View Win/Lose', module: 'Win/Lose', description: 'See the weekly win/lose entered for your groups' },
   { code: P.WinLoseCreate, name: 'Enter Win/Lose', module: 'Win/Lose', description: 'Enter a week\'s win/lose and commission for your groups (once a week)' },
   { code: P.WinLoseEdit, name: 'Correct Win/Lose', module: 'Win/Lose', description: 'Change a week already saved, with a reason (kept in the audit log)' },
@@ -184,8 +184,8 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionCode[]> = {
   '/inventory/payment-methods': [P.InventoryManage, P.CategoriesManage],
   '/admin/currency': [P.CurrencySettingsManage],
   '/admin/platforms': [P.PlatformsView, P.PlatformsManage],
-  '/admin/partners': [P.PlatformsView, P.PlatformsManage],
   '/admin/platform-assignments': [P.PlatformsView, P.PlatformAssignmentsManage],
+  '/admin/platform-assignments/new': [P.PlatformAssignmentsManage],
   '/winlose/entry': [P.WinLoseView, P.WinLoseCreate, P.WinLoseEdit],
   '/winlose/reports': [P.WinLoseReportsView],
   // The API also needs inventory.view; the menu shows it only with both.

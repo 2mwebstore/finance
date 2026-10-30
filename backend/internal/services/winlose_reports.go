@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cambodia-finance/income-expense/internal/models"
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
@@ -23,6 +24,8 @@ type ReportFilter struct {
 	BranchID         *uuid.UUID
 	// PartnerID: only weeks the partner has a share of, with the Total being their share.
 	PartnerID *uuid.UUID
+	// GroupID: only the agents of one titled group (Group Agent Assignments).
+	GroupID *uuid.UUID
 	// ByWeek gives one line per week as well (the partner statement).
 	ByWeek bool
 }
@@ -84,6 +87,13 @@ type PartnerTotals struct {
 	Totals      []Sums     `json:"totals"`
 }
 
+// GroupTotalsRow is one titled group's totals (nil: weeks of agents not in a group).
+type GroupTotalsRow struct {
+	GroupID *uuid.UUID `json:"group_id"`
+	Title   string     `json:"title"`
+	Totals  []Sums     `json:"totals"`
+}
+
 type WinLoseReport struct {
 	DateFrom string `json:"date_from"`
 	DateTo   string `json:"date_to"`
@@ -92,6 +102,7 @@ type WinLoseReport struct {
 	Lines        []ReportLine     `json:"lines"`
 	Platforms    []PlatformTotals `json:"platforms"`
 	Partners     []PartnerTotals  `json:"partners"`
+	Groups       []GroupTotalsRow `json:"groups"`
 	Totals       []Sums           `json:"totals"`
 }
 
@@ -154,6 +165,9 @@ func (s *PlatformService) Report(ctx context.Context, f ReportFilter, scope Bran
 			Where("r.deleted_at IS NULL AND r.week_start BETWEEN ? AND ?", dayString(weekStart(from)), dayString(to))
 		if branchID != nil {
 			q = q.Where("r.branch_id = ?", *branchID)
+		}
+		if f.GroupID != nil {
+			q = q.Where("r.assignment_id IN (SELECT id FROM hq_platform_assignments WHERE group_id = ?)", *f.GroupID)
 		}
 		return q
 	}
@@ -274,6 +288,9 @@ func (s *PlatformService) Report(ctx context.Context, f ReportFilter, scope Bran
 		bump(partSums[key], r.sums())
 	}
 	out.Platforms, out.Partners, out.Totals = []PlatformTotals{}, []PartnerTotals{}, sortedSums(total)
+	if out.Groups, err = s.groupTotals(ctx, results()); err != nil {
+		return nil, err
+	}
 	for key, p := range parts {
 		p.Totals = sortedSums(partSums[key])
 		out.Partners = append(out.Partners, *p)
@@ -291,6 +308,67 @@ func (s *PlatformService) Report(ctx context.Context, f ReportFilter, scope Bran
 		out.Platforms = append(out.Platforms, *p)
 	}
 	sort.Slice(out.Platforms, func(i, j int) bool { return out.Platforms[i].PlatformCode < out.Platforms[j].PlatformCode })
+	return out, nil
+}
+
+// groupTotals adds the results up by the titled group of the assignment each was entered under:
+// by title, weeks of agents in no group last.
+func (s *PlatformService) groupTotals(ctx context.Context, results *gorm.DB) ([]GroupTotalsRow, error) {
+	var rows []struct {
+		GroupID                                     *uuid.UUID
+		Currency                                    string
+		WinLose, Commission, AdjustedAmount, JamePS decimal.Decimal
+		Entries                                     int64
+	}
+	if err := results.Joins("JOIN hq_platform_assignments a ON a.id = r.assignment_id").
+		Select("a.group_id, r.currency, SUM(r.win_lose) AS win_lose, SUM(r.commission) AS commission, SUM(r.adjusted_amount) AS adjusted_amount, SUM(r.jame_ps) AS jame_ps, COUNT(*) AS entries").
+		Group("a.group_id, r.currency").Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	var ids []uuid.UUID
+	for _, r := range rows {
+		if r.GroupID != nil {
+			ids = append(ids, *r.GroupID)
+		}
+	}
+	titles := map[uuid.UUID]string{}
+	if len(ids) > 0 {
+		var groups []models.AssignmentGroup
+		if err := s.db.WithContext(ctx).Where("id IN ?", ids).Find(&groups).Error; err != nil {
+			return nil, err
+		}
+		for _, g := range groups {
+			titles[g.ID] = g.Title
+		}
+	}
+	byGroup := map[string]*GroupTotalsRow{}
+	sums := map[string]map[string]*Sums{}
+	for _, r := range rows {
+		key := ""
+		if r.GroupID != nil {
+			key = r.GroupID.String()
+		}
+		if byGroup[key] == nil {
+			byGroup[key] = &GroupTotalsRow{GroupID: r.GroupID}
+			if r.GroupID != nil {
+				byGroup[key].Title = titles[*r.GroupID]
+			}
+			sums[key] = map[string]*Sums{}
+		}
+		sums[key][r.Currency] = &Sums{Currency: r.Currency, WinLose: r.WinLose, Commission: r.Commission, AdjustedAmount: r.AdjustedAmount, JamePS: r.JamePS, Entries: r.Entries}
+	}
+	out := make([]GroupTotalsRow, 0, len(byGroup))
+	for key, g := range byGroup {
+		g.Totals = sortedSums(sums[key])
+		out = append(out, *g)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		if (a.GroupID == nil) != (b.GroupID == nil) {
+			return b.GroupID == nil
+		}
+		return a.Title < b.Title
+	})
 	return out, nil
 }
 

@@ -701,6 +701,8 @@ export interface WinLoseReport {
   /** By agent and currency (and week, with by_week). */
   lines: WinLoseReportLine[]
   platforms: { platform_id: string; platform_code: string; platform_name: string; totals: WinLoseSums[] }[]
+  /** Per titled group (group_id null: agents in no group), by title. */
+  groups: { group_id: string | null; title: string; totals: WinLoseSums[] }[]
   /** Per partner, with the Total being their share (partner_id null: weeks with no partner). A week shared by two partners counts for each. */
   partners: { partner_id: string | null; partner_name: string; totals: WinLoseSums[] }[]
   totals: WinLoseSums[]

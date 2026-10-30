@@ -629,6 +629,46 @@ func (s *PlatformService) SaveWeek(ctx context.Context, in WeekEntryInput, scope
 
 // ===== Entries =====
 
+var ErrEntryNotFound = errors.New("entry not found")
+
+// DeleteEntry removes an entry and its week's amounts for its group (all or nothing). It needs a
+// reason (audit log); a finalized week can't be changed. It returns what was removed.
+func (s *PlatformService) DeleteEntry(ctx context.Context, id uuid.UUID, reason string, scope BranchScope) (*models.WeeklyEntry, []models.WeeklyPlatformResult, error) {
+	reason = strings.TrimSpace(reason)
+	if len(reason) < 3 {
+		return nil, nil, fieldError("reason", "give a reason for deleting the entry")
+	}
+	var entry models.WeeklyEntry
+	var removed []models.WeeklyPlatformResult
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&entry, "id = ?", id).Error; err != nil || !scope.Has(entry.BranchID) {
+			return ErrEntryNotFound
+		}
+		week := dayString(entry.WeekStart)
+		var finalized int64
+		if err := tx.Model(&models.WeeklySettlement{}).Where("branch_id = ? AND week_start = ? AND status = ?", entry.BranchID, week, models.SettlementFinalized).
+			Count(&finalized).Error; err != nil {
+			return err
+		}
+		if finalized > 0 {
+			return fmt.Errorf("the week of %s is finalized; reopen it on the weekly report to delete the entry", week)
+		}
+		q := tx.Where("branch_id = ? AND week_start = ?", entry.BranchID, week)
+		if err := q.Clauses(clause.Locking{Strength: "UPDATE"}).Find(&removed).Error; err != nil {
+			return err
+		}
+		// For good (with each partner's share), so the week can be entered again.
+		if err := tx.Unscoped().Where("branch_id = ? AND week_start = ?", entry.BranchID, week).Delete(&models.WeeklyPlatformResult{}).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&entry).Error
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return &entry, removed, nil
+}
+
 // EntryRow is one saved week on Data Entry's list.
 type EntryRow struct {
 	ID         uuid.UUID `json:"id"`
@@ -643,11 +683,38 @@ type EntryRow struct {
 	Locked bool `json:"locked"`
 }
 
+// EntryFilter narrows Data Entry's list: words in the title, and the days it was created on
+// (YYYY-MM-DD, either may be empty).
+type EntryFilter struct {
+	Search                 string
+	CreatedFrom, CreatedTo string
+}
+
+// likePattern matches text anywhere in a column (LIKE's own wildcards taken literally).
+func likePattern(text string) string {
+	return "%" + strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(text) + "%"
+}
+
 // ListEntries lists the entries of the groups in scope, newest first (at most 500).
-func (s *PlatformService) ListEntries(ctx context.Context, search string, scope BranchScope) ([]EntryRow, error) {
+func (s *PlatformService) ListEntries(ctx context.Context, f EntryFilter, scope BranchScope) ([]EntryRow, error) {
 	q := scope.where(s.db.WithContext(ctx).Model(&models.WeeklyEntry{}), "branch_id")
-	if search = strings.TrimSpace(search); search != "" {
-		q = q.Where("title LIKE ?", "%"+strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(search)+"%")
+	if search := strings.TrimSpace(f.Search); search != "" {
+		q = q.Where("title LIKE ?", likePattern(search))
+	}
+	// Created days are the business's days (its time zone), from midnight to midnight.
+	if strings.TrimSpace(f.CreatedFrom) != "" {
+		day, err := s.parseDay("created_from", f.CreatedFrom)
+		if err != nil {
+			return nil, err
+		}
+		q = q.Where("created_at >= ?", time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, s.loc))
+	}
+	if strings.TrimSpace(f.CreatedTo) != "" {
+		day, err := s.parseDay("created_to", f.CreatedTo)
+		if err != nil {
+			return nil, err
+		}
+		q = q.Where("created_at < ?", time.Date(day.Year(), day.Month(), day.Day()+1, 0, 0, 0, 0, s.loc))
 	}
 	var list []models.WeeklyEntry
 	if err := q.Order("created_at DESC, id").Limit(500).Find(&list).Error; err != nil {

@@ -484,8 +484,10 @@ type assignPlan struct {
 	branches               map[uuid.UUID]models.Branch
 	platforms              map[uuid.UUID]models.Platform
 	shares                 []models.AssignmentPartner
-	currency               string // "" is each platform's default
-	starts                 time.Time
+	// rates: each platform's own Partner % (a group's agents); missing: the platform's default.
+	rates    map[uuid.UUID]decimal.Decimal
+	currency string // "" is each platform's default
+	starts   time.Time
 }
 
 // planAssign checks an assignment request: active partners (at their default %), currency, the
@@ -582,6 +584,9 @@ func (s *PlatformService) applyAssign(tx *gorm.DB, plan *assignPlan, actor uuid.
 			}
 			if plan.currency != "" {
 				a.Currency = plan.currency
+			}
+			if rate, ok := plan.rates[platformID]; ok {
+				a.CommissionRate = rate
 			}
 			if err := tx.Create(&a).Error; err != nil {
 				if isDuplicate(err) {

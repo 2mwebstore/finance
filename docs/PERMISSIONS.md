@@ -55,9 +55,9 @@ Server-side authorization is enforced on every protected API. The UI uses the sa
 | `inventory-expenses.view` | View Inventory Expenses | Inventory Expenses | See inventory expenses of your branches |
 | `inventory-expenses.create` | Create Inventory Expenses | Inventory Expenses | Record inventory expenses (shipping, packaging, storage…) |
 | `inventory-expenses.void` | Void Inventory Expenses | Inventory Expenses | Void an inventory expense |
-| `platforms.view` | View Agents | Platforms | See agents, partners and the groups they are assigned to |
-| `platforms.manage` | Manage Agents | Platforms | Add and edit agents and partners, with their default partner % and currency |
-| `platform-assignments.manage` | Manage Group Agent Assignments | Platforms | Assign agents to groups with their partners; change partners and their %, end or move assignments |
+| `platforms.view` | View Agents | Platforms | See agents and the groups they are in |
+| `platforms.manage` | Manage Agents | Platforms | Add and edit agents and their currency |
+| `platform-assignments.manage` | Manage Group Agent Assignments | Platforms | Make titled groups of agents with their rates; update, turn off or delete them |
 | `winlose.view` | View Win/Lose | Win/Lose | See the weekly win/lose entered for your groups |
 | `winlose.create` | Enter Win/Lose | Win/Lose | Enter a week's win/lose and commission for your groups (once a week) |
 | `winlose.edit` | Correct Win/Lose | Win/Lose | Change a week already saved, with a reason (kept in the audit log) |
@@ -163,9 +163,9 @@ In the PLATFORMS menu a platform is called an **agent** and a branch a **group**
 
 | Code | Description |
 |------|-------------|
-| `platforms.view` | See agents, partners and the groups they are assigned to |
-| `platforms.manage` | Add and edit agents and partners, with their default partner % and currency |
-| `platform-assignments.manage` | Assign agents to groups with their partners; change partners and their %, end or move assignments |
+| `platforms.view` | See agents and the groups they are in |
+| `platforms.manage` | Add and edit agents and their currency |
+| `platform-assignments.manage` | Make titled groups of agents with their rates; update, turn off or delete them |
 | `winlose.view` | See the weekly win/lose entered for your groups |
 | `winlose.create` | Enter a week's win/lose and commission for your groups (once a week) |
 | `winlose.edit` | Change a week already saved, with a reason (kept in the audit log) |

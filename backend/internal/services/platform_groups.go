@@ -21,26 +21,47 @@ import (
 
 var ErrGroupNotFound = errors.New("group not found")
 
+// GroupAgentInput is one of a group's agents with its rate (percent: 35 = 35%): the Total is
+// worked out at it.
+type GroupAgentInput struct {
+	PlatformID     string `json:"platform_id" binding:"required,uuid"`
+	CommissionRate string `json:"commission_rate"`
+}
+
 type GroupInput struct {
-	Title       string   `json:"title" binding:"max=128"`
-	PlatformIDs []string `json:"platform_ids" binding:"required,min=1,max=100,dive,uuid"`
-	// Each partner at their default %.
-	PartnerIDs []string `json:"partner_ids" binding:"max=50,dive,uuid"`
+	Title  string            `json:"title" binding:"max=128"`
+	Agents []GroupAgentInput `json:"agents" binding:"required,min=1,max=100,dive"`
 	// Empty: each agent's default.
 	Currency string `json:"currency"`
 	// The first day results can be entered; empty is today.
 	StartsOn string `json:"starts_on"`
 }
 
+// GroupUpdateInput replaces a group's title, agents (with their rates) and currency. Partners a
+// group had from before are taken off: each agent's rate is used from then on.
 type GroupUpdateInput struct {
-	Title       string   `json:"title" binding:"max=128"`
-	PlatformIDs []string `json:"platform_ids" binding:"required,min=1,max=100,dive,uuid"`
-	// The partners and their % (replaces the ones it had; empty: no partners).
-	Partners []AssignmentPartnerInput `json:"partners" binding:"max=50,dive"`
-	// The agents' own Partner %, used without partners; empty keeps each one's.
-	CommissionRate string `json:"commission_rate"`
+	Title  string            `json:"title" binding:"max=128"`
+	Agents []GroupAgentInput `json:"agents" binding:"required,min=1,max=100,dive"`
 	// Empty: each agent's default.
 	Currency string `json:"currency"`
+}
+
+// agentRates reads a group's agents: each once, each with a rate from 0 to 100.
+func agentRates(agents []GroupAgentInput) ([]string, map[uuid.UUID]decimal.Decimal, error) {
+	ids := make([]string, 0, len(agents))
+	rates := map[uuid.UUID]decimal.Decimal{}
+	for _, a := range agents {
+		id := uuid.MustParse(a.PlatformID)
+		if _, twice := rates[id]; twice {
+			return nil, nil, fieldError("agents", "an agent is listed twice")
+		}
+		rate, err := parseRate("agents", a.CommissionRate)
+		if err != nil {
+			return nil, nil, fieldError("agents", "give each agent a rate from 0 to 100 (at most 4 decimals)")
+		}
+		ids, rates[id] = append(ids, a.PlatformID), rate
+	}
+	return ids, rates, nil
 }
 
 // GroupAgent is one of a group's agents now.
@@ -67,6 +88,7 @@ type GroupRow struct {
 type GroupFilter struct {
 	PlatformID *uuid.UUID
 	Status     string // all (default) | active | off
+	Search     string // words in the title
 }
 
 func groupTitle(raw string) (string, error) {
@@ -88,6 +110,9 @@ func (s *PlatformService) ListGroups(ctx context.Context, branchID uuid.UUID, f 
 		q = q.Where("is_active = ?", true)
 	case "off":
 		q = q.Where("is_active = ?", false)
+	}
+	if search := strings.TrimSpace(f.Search); search != "" {
+		q = q.Where("title LIKE ?", likePattern(search))
 	}
 	var list []models.AssignmentGroup
 	if err := q.Order("is_active DESC, title, created_at").Find(&list).Error; err != nil {
@@ -183,17 +208,21 @@ func lockGroup(tx *gorm.DB, id uuid.UUID, scope BranchScope) (*models.Assignment
 	return &g, nil
 }
 
-// CreateGroup makes a group in the person's own branch with its agents, each with the chosen
-// partners at their default %.
+// CreateGroup makes a group in the person's own branch with its agents, each at its rate.
 func (s *PlatformService) CreateGroup(ctx context.Context, in GroupInput, scope BranchScope, actor uuid.UUID) (*GroupRow, error) {
 	title, err := groupTitle(in.Title)
 	if err != nil {
 		return nil, err
 	}
-	plan, err := s.planAssign(ctx, AssignmentInput{PlatformIDs: in.PlatformIDs, PartnerIDs: in.PartnerIDs, Currency: in.Currency, StartsOn: in.StartsOn}, scope, actor)
+	platformIDs, rates, err := agentRates(in.Agents)
 	if err != nil {
 		return nil, err
 	}
+	plan, err := s.planAssign(ctx, AssignmentInput{PlatformIDs: platformIDs, Currency: in.Currency, StartsOn: in.StartsOn}, scope, actor)
+	if err != nil {
+		return nil, err
+	}
+	plan.rates = rates
 	g := models.AssignmentGroup{ID: uuid.New(), BranchID: plan.branchIDs[0], Title: title, Currency: plan.currency, StartsOn: plan.starts, IsActive: true, CreatedByID: actor}
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&g).Error; err != nil {
@@ -208,41 +237,32 @@ func (s *PlatformService) CreateGroup(ctx context.Context, in GroupInput, scope 
 	return s.groupRow(ctx, g.ID)
 }
 
-// UpdateGroup changes a group's title, agents, partners (and each one's %), own % and currency.
-// An agent taken out is ended if weeks were entered for it (history), else removed; one put in
-// starts today (or on the group's first day, if that is later). Weeks already saved keep what they
-// were worked out with.
+// GroupByID is one group (in scope) for its edit page.
+func (s *PlatformService) GroupByID(ctx context.Context, id uuid.UUID, scope BranchScope) (*GroupRow, error) {
+	g, err := s.groupRow(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if !scope.Has(g.BranchID) {
+		return nil, ErrGroupNotFound
+	}
+	return g, nil
+}
+
+// UpdateGroup changes a group's title, agents (each at its rate) and currency, and takes off any
+// partners it had. An agent taken out is ended if weeks were entered for it (history), else
+// removed; one put in starts today (or on the group's first day, if that is later). Weeks already
+// saved keep what they were worked out with.
 func (s *PlatformService) UpdateGroup(ctx context.Context, id uuid.UUID, in GroupUpdateInput, scope BranchScope, actor uuid.UUID) (before, after *GroupRow, err error) {
 	title, err := groupTitle(in.Title)
 	if err != nil {
 		return nil, nil, err
 	}
-	var ownRate *decimal.Decimal
-	if strings.TrimSpace(in.CommissionRate) != "" {
-		r, err := parseRate("commission_rate", in.CommissionRate)
-		if err != nil {
-			return nil, nil, err
-		}
-		ownRate = &r
-	}
-	shares := make([]models.AssignmentPartner, 0, len(in.Partners))
-	seen := map[uuid.UUID]bool{}
-	for _, p := range in.Partners {
-		partnerID := uuid.MustParse(p.PartnerID)
-		if seen[partnerID] {
-			return nil, nil, fieldError("partners", "a partner is listed twice")
-		}
-		seen[partnerID] = true
-		rate, err := parseRate("partners", p.CommissionRate)
-		if err != nil {
-			return nil, nil, err
-		}
-		shares = append(shares, models.AssignmentPartner{PartnerID: partnerID, CommissionRate: rate})
-	}
-	if err := checkShares("partners", shares); err != nil {
+	platformIDs, rates, err := agentRates(in.Agents)
+	if err != nil {
 		return nil, nil, err
 	}
-	platformIDs, err := uniqueIDs(in.PlatformIDs, nil)
+	ids, err := uniqueIDs(platformIDs, nil)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -258,24 +278,8 @@ func (s *PlatformService) UpdateGroup(ctx context.Context, id uuid.UUID, in Grou
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("group_id = ? AND is_active = ?", g.ID, true).Find(&current).Error; err != nil {
 			return err
 		}
-		// A partner new to the group must be on; one turned off since can stay.
-		had := map[uuid.UUID]bool{}
-		for _, p := range before.Partners {
-			had[p.PartnerID] = true
-		}
-		for _, p := range shares {
-			if !had[p.PartnerID] {
-				if _, err := s.activePartner(ctx, "partners", p.PartnerID); err != nil {
-					return err
-				}
-			}
-		}
-		wanted := map[uuid.UUID]bool{}
-		for _, pid := range platformIDs {
-			wanted[pid] = true
-		}
 		// Every agent wanted must be on; the currency is the one chosen, else each agent's default.
-		plan := &assignPlan{branchIDs: []uuid.UUID{g.BranchID}, platformIDs: platformIDs, shares: shares, starts: s.today()}
+		plan := &assignPlan{branchIDs: []uuid.UUID{g.BranchID}, platformIDs: ids, rates: rates, starts: s.today()}
 		if g.StartsOn.After(plan.starts) {
 			plan.starts = g.StartsOn
 		}
@@ -287,7 +291,8 @@ func (s *PlatformService) UpdateGroup(ctx context.Context, id uuid.UUID, in Grou
 		for i := range current {
 			a := &current[i]
 			have[a.PlatformID] = true
-			if !wanted[a.PlatformID] {
+			rate, wanted := rates[a.PlatformID]
+			if !wanted {
 				if err := takeOut(tx, a, s.today(), actor); err != nil {
 					return err
 				}
@@ -297,23 +302,16 @@ func (s *PlatformService) UpdateGroup(ctx context.Context, id uuid.UUID, in Grou
 			if currency == "" {
 				currency = plan.platforms[a.PlatformID].DefaultCurrency
 			}
-			updates := map[string]interface{}{"currency": currency, "updated_at": now}
-			if ownRate != nil {
-				updates["commission_rate"] = *ownRate
-			}
-			if err := tx.Model(a).Updates(updates).Error; err != nil {
+			if err := tx.Model(a).Updates(map[string]interface{}{"commission_rate": rate, "currency": currency, "updated_at": now}).Error; err != nil {
 				return err
 			}
 			if err := tx.Where("assignment_id = ?", a.ID).Delete(&models.AssignmentPartner{}).Error; err != nil {
 				return err
 			}
-			if _, err := createPartners(tx, a.ID, shares); err != nil {
-				return err
-			}
 		}
 		// The agents put in start today (or on the group's first day, if later).
 		var added []uuid.UUID
-		for _, pid := range platformIDs {
+		for _, pid := range ids {
 			if !have[pid] {
 				added = append(added, pid)
 			}
@@ -323,16 +321,8 @@ func (s *PlatformService) UpdateGroup(ctx context.Context, id uuid.UUID, in Grou
 			if plan.branches, err = s.branchesIn(ctx, plan.branchIDs); err != nil {
 				return err
 			}
-			made, err := s.applyAssign(tx, plan, actor, &g.ID)
-			if err != nil {
+			if _, err := s.applyAssign(tx, plan, actor, &g.ID); err != nil {
 				return err
-			}
-			if ownRate != nil {
-				for _, a := range made {
-					if err := tx.Model(&models.HQPlatformAssignment{}).Where("id = ?", a.ID).Update("commission_rate", *ownRate).Error; err != nil {
-						return err
-					}
-				}
 			}
 		}
 		return tx.Model(g).Updates(map[string]interface{}{"title": title, "currency": plan.currency, "updated_at": now}).Error

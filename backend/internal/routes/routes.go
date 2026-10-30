@@ -252,7 +252,9 @@ func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config, store storage.Store, 
 				api.PATCH("/partners/:id", need(permissions.PlatformsManage), platformCtrl.SavePartner)
 
 				// Groups: titled sets of agents in the person's own branch (the Group Agent Assignments page).
-				api.GET("/platform-groups", need(permissions.PlatformsView, permissions.PlatformAssignmentsManage), platformCtrl.ListGroups)
+				// Report viewers list them too (the reports filter by group).
+				api.GET("/platform-groups", need(permissions.PlatformsView, permissions.PlatformAssignmentsManage, permissions.WinLoseReportsView), platformCtrl.ListGroups)
+				api.GET("/platform-groups/:id", need(permissions.PlatformsView, permissions.PlatformAssignmentsManage), platformCtrl.GetGroup)
 				api.POST("/platform-groups", need(permissions.PlatformAssignmentsManage), platformCtrl.CreateGroup)
 				api.PATCH("/platform-groups/:id", need(permissions.PlatformAssignmentsManage), platformCtrl.UpdateGroup)
 				api.POST("/platform-groups/:id/active", need(permissions.PlatformAssignmentsManage), platformCtrl.SetGroupActive)
@@ -267,6 +269,8 @@ func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config, store storage.Store, 
 				wl.GET("/formula", need(permissions.WinLoseView, permissions.WinLoseCreate, permissions.WinLoseEdit, permissions.WinLoseReportsView), platformCtrl.Formula)
 				// New rows need winlose.create and changed saved rows winlose.edit (checked per row).
 				wl.GET("/entries", need(permissions.WinLoseView, permissions.WinLoseCreate, permissions.WinLoseEdit), platformCtrl.ListEntries)
+				// Deleting an entry removes saved amounts: Correct Win/Lose, with a reason.
+				wl.DELETE("/entries/:id", need(permissions.WinLoseEdit), platformCtrl.DeleteEntry)
 				// No branch_id: the person's own group (their default branch).
 				wl.GET("/entry", need(permissions.WinLoseView, permissions.WinLoseCreate, permissions.WinLoseEdit), platformCtrl.WeekSheet)
 				wl.POST("/entry/preview", need(permissions.WinLoseCreate, permissions.WinLoseEdit), platformCtrl.Preview)

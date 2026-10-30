@@ -14,7 +14,11 @@
         </div>
       </header>
 
-      <ListSearch v-model="search" placeholder="Search by title…" />
+      <div class="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        <ListSearch v-model="search" placeholder="Search by title…" />
+        <!-- The days the entries were created (empty: any day) -->
+        <WinloseDateFilter v-model="created" allow-all label="Created" />
+      </div>
 
       <div v-if="listLoading && !entries.length" class="text-sm text-muted">Loading entries…</div>
       <AppAlert v-else-if="listError" title="Couldn’t load entries" :message="listError"><template #action><button type="button" @click="loadEntries">Try again</button></template></AppAlert>
@@ -29,17 +33,18 @@
           </thead>
           <tbody class="divide-y divide-border">
             <tr v-for="e in entries" :key="e.id" class="text-navy">
-              <td class="whitespace-nowrap px-3 py-2.5 text-xs text-muted">{{ formatDocDateTime(e.created_at) }}</td>
+              <td class="whitespace-nowrap px-3 py-2.5 text-xs text-muted">{{ formatDocDate(e.created_at) }}<template v-if="e.created_by"> · <span class="font-medium text-navy">{{ e.created_by }}</span></template></td>
               <td class="px-3 py-2.5 font-semibold">{{ e.title }}</td>
               <td class="px-3 py-2">
                 <!-- A finalized week can only be viewed -->
                 <div class="flex justify-end gap-1.5">
                   <button type="button" class="action-chip" @click="openView(e)"><Eye :size="13" /> View</button>
                   <button v-if="!e.locked && (canCreate || canEdit)" type="button" class="action-chip action-edit" @click="openEdit(e)"><Pencil :size="13" /> Update</button>
+                  <button v-if="!e.locked && canEdit" type="button" class="action-chip action-danger" @click="deleting = e"><Trash2 :size="13" /> Delete</button>
                 </div>
               </td>
             </tr>
-            <tr v-if="!entries.length"><td colspan="3" class="px-3 py-8 text-center text-sm text-muted">{{ search ? `No entry matches “${search}”.` : 'No entries yet.' }}</td></tr>
+            <tr v-if="!entries.length"><td colspan="3" class="px-3 py-8 text-center text-sm text-muted">{{ search || created.from ? 'No entries match these filters.' : 'No entries yet.' }}</td></tr>
           </tbody>
         </table>
       </div>
@@ -52,23 +57,10 @@
         <h1 class="text-xl font-bold text-navy">{{ form.mode === 'new' && !sheet?.entry ? 'New entry' : canSave ? 'Update entry' : 'Entry' }}</h1>
       </header>
 
-      <div class="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        <div class="space-y-1 text-xs font-medium text-muted">
-          Week
-          <!-- A new entry picks its week; an entry being edited keeps its own -->
-          <div v-if="form.mode === 'new'" class="flex items-center gap-1.5">
-            <button type="button" class="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-border bg-white text-navy hover:bg-canvas" aria-label="Previous week" @click="shiftWeek(-7)"><ChevronLeft :size="17" /></button>
-            <div class="min-w-0 flex-1"><DatePicker :model-value="form.week_start" aria-label="Week" @update:model-value="(day) => pickWeek(mondayOf(day))" /></div>
-            <button type="button" class="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-border bg-white text-navy hover:bg-canvas disabled:opacity-40" aria-label="Next week" :disabled="form.week_start >= thisMonday" @click="shiftWeek(7)"><ChevronRight :size="17" /></button>
-          </div>
-          <p class="text-xs font-semibold text-navy" :class="form.mode === 'new' ? '' : 'flex h-10 items-center rounded-lg border border-border bg-canvas px-3'">
-            {{ formatDocDate(form.week_start) }} – {{ formatDocDate(plusDays(form.week_start, 6)) }}<span v-if="form.week_start === thisMonday" class="ml-1.5 rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-bold text-primary">This week</span>
-          </p>
-        </div>
-        <label class="block space-y-1 text-xs font-medium text-muted">Title
-          <input v-model="title" maxlength="128" :disabled="!canSave" :aria-invalid="titleMissing ? 'true' : undefined" class="h-10 w-full rounded-lg border border-border px-3 text-sm text-navy disabled:bg-canvas disabled:text-muted" placeholder="e.g. Week 44 Phnom Penh" />
-        </label>
-      </div>
+      <!-- A new entry is for this week; one being updated keeps its own -->
+      <label class="block space-y-1 text-xs font-medium text-muted">Title
+        <input v-model="title" maxlength="128" :disabled="!canSave" :aria-invalid="titleMissing ? 'true' : undefined" class="h-10 w-full rounded-lg border border-border px-3 text-sm text-navy disabled:bg-canvas disabled:text-muted" placeholder="e.g. Week 44 Phnom Penh" />
+      </label>
 
       <div v-if="loading" class="text-sm text-muted">Loading the week…</div>
       <AppAlert v-else-if="error" title="Couldn’t load the week" :message="error"><template #action><button type="button" @click="load">Try again</button></template></AppAlert>
@@ -117,7 +109,7 @@
     <AppModal :model-value="!!viewing" :title="viewing?.title || ''" eyebrow="ENTRY" :subtitle="viewing ? `Week of ${formatDocDate(viewing.week_start)} – ${formatDocDate(viewing.week_end)}` : ''" width="600px" @update:model-value="(open) => { if (!open) viewing = null }">
       <template #icon><NotebookPen :size="20" /></template>
       <dl v-if="viewing" class="grid grid-cols-2 gap-3 text-xs">
-        <div><dt class="text-muted">Created at</dt><dd class="font-semibold text-navy">{{ formatDocDateTime(viewing.created_at) }}</dd></div>
+        <div><dt class="text-muted">Created at</dt><dd class="font-semibold text-navy">{{ formatDocDate(viewing.created_at) }}</dd></div>
         <div><dt class="text-muted">Created by</dt><dd class="font-semibold text-navy">{{ viewing.created_by || '—' }}</dd></div>
         <div v-if="viewing.locked" class="col-span-2"><span class="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold uppercase text-emerald-700"><Lock :size="11" /> Finalized</span></div>
       </dl>
@@ -148,36 +140,42 @@
       </template>
     </AppModal>
 
+    <!-- Deleting removes the week's amounts too (kept in the audit log with the reason) -->
+    <InventoryReasonDialog :model-value="!!deleting" :title="deleting ? `Delete “${deleting.title}”?` : ''" eyebrow="DELETE ENTRY" subtitle="Its week’s amounts are removed too; the audit log keeps them with your reason." label="Reason for deleting" confirm-label="Delete entry" danger :busy="deleteBusy" :server-error="deleteError" @update:model-value="(open) => { if (!open) { deleting = null; deleteError = '' } }" @confirm="deleteEntry" />
+
     <InventoryReasonDialog v-model="reasonOpen" title="Change saved results?" eyebrow="CORRECTION" subtitle="The old and new figures and your reason go into the audit log." label="Reason for the change" confirm-label="Save changes" :busy="saving" :server-error="saveError" @confirm="(reason) => save(reason)" />
   </section>
 </template>
 
 <script setup lang="ts">
-import { ChevronLeft, ChevronRight, Eye, FileSpreadsheet, Lock, NotebookPen, Pencil, Plus } from 'lucide-vue-next'
+import { ChevronLeft, Eye, FileSpreadsheet, Lock, NotebookPen, Pencil, Plus, Trash2 } from 'lucide-vue-next'
 import type { WeekSheet, WeekSheetRow, WinLoseEntry } from '~/types/api'
 import { useToast } from '~/composables/useToast'
-import { formatDocDate, formatDocDateTime, todayISO } from '~/utils/inventory'
-import { formatAmount, mondayOf, plusDays } from '~/utils/winlose'
+import { formatDocDate, todayISO } from '~/utils/inventory'
+import { formatAmount, mondayOf } from '~/utils/winlose'
 
 const { api } = useApi()
 const { can } = usePermissions()
 const toast = useToast()
 const canCreate = computed(() => can('winlose.create'))
 const canEdit = computed(() => can('winlose.edit'))
-const thisMonday = mondayOf(todayISO())
+const today = todayISO()
 
 // --- the list ---
 const entries = ref<WinLoseEntry[]>([])
 const listLoading = ref(false)
 const listError = ref('')
 const search = ref('')
+const created = ref({ from: '', to: '' })
 let listRequest = 0
 async function loadEntries() {
   const request = ++listRequest
   listLoading.value = true
   listError.value = ''
   try {
-    const result = await api<{ items: WinLoseEntry[] }>('/winlose/entries', { query: { search: search.value.trim() || undefined } })
+    const result = await api<{ items: WinLoseEntry[] }>('/winlose/entries', {
+      query: { search: search.value.trim() || undefined, created_from: created.value.from || undefined, created_to: created.value.to || undefined },
+    })
     if (request === listRequest) entries.value = result.items || []
   } catch (e: any) {
     if (request === listRequest) listError.value = e?.data?.error || 'Could not load entries.'
@@ -190,6 +188,7 @@ watch(search, () => {
   if (searchTimer) clearTimeout(searchTimer)
   searchTimer = setTimeout(loadEntries, 300)
 })
+watch(created, loadEntries, { deep: true })
 onMounted(loadEntries)
 
 // --- an entry's details (View) ---
@@ -213,6 +212,27 @@ async function openView(e: WinLoseEntry) {
     if (viewing.value?.id === e.id) viewLoading.value = false
   }
 }
+// --- delete (Correct Win/Lose, with a reason) ---
+const deleting = ref<WinLoseEntry | null>(null)
+const deleteBusy = ref(false)
+const deleteError = ref('')
+async function deleteEntry(reason: string) {
+  const e = deleting.value
+  if (!e) return
+  deleteBusy.value = true
+  deleteError.value = ''
+  try {
+    await api(`/winlose/entries/${e.id}`, { method: 'DELETE', body: { reason } })
+    deleting.value = null
+    toast.success('Its week’s amounts are removed too.', { title: `“${e.title}” deleted` })
+    await loadEntries()
+  } catch (err: any) {
+    deleteError.value = err?.data?.error || 'Could not delete the entry.'
+  } finally {
+    deleteBusy.value = false
+  }
+}
+
 function updateViewed() {
   const e = viewing.value
   viewing.value = null
@@ -220,6 +240,7 @@ function updateViewed() {
 }
 
 // --- the form: a new entry goes in the person's own group (the API works it out) ---
+// A new entry is for this week (the person's own group: the API works it out).
 const form = ref<{ mode: 'new' | 'edit'; week_start: string; branch_id: string } | null>(null)
 const sheet = ref<WeekSheet | null>(null)
 const loading = ref(false)
@@ -228,7 +249,7 @@ const title = ref('')
 const edits = reactive<Record<string, { win_lose: string; commission: string }>>({})
 
 function openNew() {
-  form.value = { mode: 'new', week_start: thisMonday, branch_id: '' }
+  form.value = { mode: 'new', week_start: mondayOf(today), branch_id: '' }
   load()
 }
 function openEdit(e: WinLoseEntry) {
@@ -240,17 +261,6 @@ function closeForm() {
   form.value = null
   sheet.value = null
   saveError.value = ''
-}
-
-// A new entry's week: changing it with unsaved figures asks first.
-function pickWeek(day: string) {
-  if (!form.value || day === form.value.week_start) return
-  if (dirty.value && !window.confirm('Leave this week without saving your changes?')) return
-  form.value.week_start = day
-  load()
-}
-function shiftWeek(days: number) {
-  if (form.value) pickWeek(plusDays(form.value.week_start, days))
 }
 
 // The inputs only let numbers through (with the currency's decimals); "1500." while typing is fine.

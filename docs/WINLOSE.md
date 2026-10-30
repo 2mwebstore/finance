@@ -59,10 +59,12 @@ This is enforced in the API, not just the UI. In the code and database an assign
   `utf8mb4_0900_ai_ci`), since a foreign key needs the same collation on both sides.
 - `LCMMJB` and `12K_YMLLJB_V1` are added when the `platforms` table is first created; add the other
   12K_YMLLJB agents on the Agents page.
-- **Titled groups:** Assign agents makes a group: a title, its agents, partners (at their default %),
-  currency and first day; all its agents get the same partners. An agent can be in one group at a
-  time. **Update** changes the title, agents (one taken out is ended if weeks were entered for it,
-  else removed; one put in starts today), partners and their %, and currency. **Active** off takes
+- **Titled groups:** Assign agents (its own page) makes a group: a title, its agents each with its
+  own **rate** (the Total is worked out at it), and its first day. There is no currency choice:
+  each agent's amounts are in its own currency (Agents page). An agent can be in one
+  group at a time. **Update** (its own page) changes the title, agents (one taken out is ended if
+  weeks were entered for it, else removed; one put in starts today) and their rates,
+  and takes off any partners a group had from before (weeks already saved keep their shares). **Active** off takes
   the group's agents off Data Entry (weeks already saved stay; they stay in the group). **Delete**
   works only while no week has been entered for the group (its assignments go for good); after
   that, turn it off. When `assignment_groups` is first created, every active assignment becomes a
@@ -130,16 +132,17 @@ enter, reports), viewer (view, reports). Give other roles access on Roles & perm
 |---|---|
 | `GET /platforms` · `POST /platforms` · `PATCH /platforms/:id` | view / manage |
 | `GET /partners` · `POST /partners` · `PATCH /partners/:id` `{name, phone?, note?, default_rate, is_active?}` | view (also assignments, reports) / `platforms.manage` |
-| `GET /platform-groups?branch_id?&platform_id&status=all\|active\|off` (no `branch_id` = your own branch) · `POST /platform-groups` `{title, platform_ids[], partner_ids[]?, currency?, starts_on?}` · `PATCH /platform-groups/:id` `{title, platform_ids[], partners: [{partner_id, commission_rate}], commission_rate?, currency?}` · `POST /platform-groups/:id/active` `{is_active}` · `DELETE /platform-groups/:id` (only with no weeks entered) | `platforms.view` or assignments / assignments |
+| `GET /platform-groups?branch_id?&search&platform_id&status=all\|active\|off` (no `branch_id` = your own branch; `search` = words in the title) · `GET /platform-groups/:id` · `POST /platform-groups` `{title, agents: [{platform_id, commission_rate}], currency?, starts_on?}` · `PATCH /platform-groups/:id` `{title, agents: [{platform_id, commission_rate}], currency?}` · `POST /platform-groups/:id/active` `{is_active}` · `DELETE /platform-groups/:id` (only with no weeks entered) | `platforms.view` or assignments / assignments |
 | `GET /platform-assignments?branch_id?&platform_id&status=active\|ended\|all` (no `branch_id` = your own group) | `platforms.view` or assignments |
 | `POST /platform-assignments` `{platform_ids[], branch_ids[]?, partner_ids[]?, currency?, starts_on?}` — every platform to every branch (none = your own group) with the same partners (each at their default %), all or nothing; empty currency = each platform's default | assignments |
 | `PATCH /platform-assignments/:id` `{partners: [{partner_id, commission_rate}], commission_rate?, currency}` — replaces the partners; `commission_rate` is the assignment's own % (used with no partners; empty keeps it) | assignments |
 | `POST /platform-assignments/:id/end` `{ends_on?, reason?}` · `/:id/move` `{branch_id, on?, reason?}` (the app no longer moves) | assignments |
 | `GET /winlose/formula` | any win/lose permission |
-| `GET /winlose/entries?search` — the entries of your groups, newest first (title, week, created at) | view / create / edit |
+| `DELETE /winlose/entries/:id` `{reason}` — the entry and its week's amounts, for good (the audit log keeps them); not in a finalized week | `winlose.edit` |
+| `GET /winlose/entries?search&created_from&created_to` — the entries of your groups, newest first (title, week, created at and by); the created days are the business's days | view / create / edit |
 | `GET /winlose/entry?week_start&branch_id?` (any day of the week; no `branch_id` = your own group) — includes the week's `entry` | view / create / edit |
 | `POST /winlose/entry/preview` · `PUT /winlose/entry` `{week_start, branch_id?, title, rows[], reason?}` | create / edit |
-| `GET /winlose/reports?date_from&date_to&branch_id?&partner_id?&by_week?` — weeks starting in the range (from the Monday of `date_from`); lines per agent and currency across the groups covered, with each partner's share (`partners`), totals per agent, partner and currency; with `partner_id` only that partner's weeks, the Total being their share; `by_week=true` gives a line per week (partner statement) | reports (no `branch_id` = every group in scope with consolidated, else your own group) |
+| `GET /winlose/reports?date_from&date_to&branch_id?&group_id?&partner_id?&by_week?` — `group_id`: only that titled group's agents; `groups`: totals per group (no group last) — weeks starting in the range (from the Monday of `date_from`); lines per agent and currency across the groups covered, with each partner's share (`partners`), totals per agent, partner and currency; with `partner_id` only that partner's weeks, the Total being their share; `by_week=true` gives a line per week (partner statement) | reports (no `branch_id` = every group in scope with consolidated, else your own group) |
 | `GET /winlose/settlements?week_start&branch_id?` · `POST /winlose/settlements` `{week_start, branch_id?}` · `POST /winlose/settlements/:id/reopen` (no `branch_id` = your own group) | reports / finalize |
 
 Rules the API enforces: a week that hasn't started can't be entered; a finalized week can't be
@@ -147,18 +150,26 @@ changed; a week can be finalized from its Sunday; ends and moves can't hide week
 
 ## Pages
 
-- PLATFORMS → **Data Entry** (`/winlose/entry`: a list of entries with Created at, Title and the
-  actions **View** (a window with the entry's details and saved amounts) and **Update**; **New
-  entry** / Update opens the week, a title and every agent's Win/Lose and Commission),
-  **Weekly Report** (by agent, with the own group's weekly settlement), **Group Summary**
-  (`/winlose/reports/branch-summary`; totals, by agent and by partner), **Partner Statement** (one
-  partner's weeks across agents), **Agents** (`/admin/platforms`), **Partners**, **Group Agent
-  Assignments** (`/admin/platform-assignments`: your branch's titled groups of agents, each with
-  an **Active** switch, **Update** and **Delete**; **Assign agents** makes a new group).
+- PLATFORMS → **Data Entry** (`/winlose/entry`: a list of entries with Created at (the day and who
+  made it), Title and the actions **View** (a window with the entry's details and saved amounts),
+  **Update** and **Delete** (with a reason; needs Correct Win/Lose), searchable by title and
+  filtered by the days they were created; **New entry** is for this week (Monday to Sunday): a
+  title and every agent's Win/Lose and Commission),
+  **Weekly Report** (by agent with the rate used, by group, and the own branch's weekly
+  settlement), **Group Summary** (`/winlose/reports/branch-summary`; totals, by agent and by group),
+  **Agents** (`/admin/platforms`), **Group Agent
+  Assignments** (`/admin/platform-assignments`: your branch's titled groups of agents with their
+  rates, searchable by title, each with an **Active** switch, **Update** and **Delete**; **Assign
+  agents** (`/admin/platform-assignments/new`) and Update (`/admin/platform-assignments/:id`) are
+  pages).
   The amounts are formatted money inputs (a minus for a loss); a new title or new amounts need
   Enter Win/Lose, changing a saved entry's title or amounts Correct Win/Lose (amounts also a
-  reason). The Weekly Report shows each line's Total and partner shares, and it
-  and the Group Summary filter by partner and total by partner.
+  reason). The Weekly Report and the Group Summary filter by group (Group Agent Assignments) and
+  by date: Today, Yesterday, This week, Last week, This month, Last month or a custom range (weeks
+  run Monday to Sunday); Data Entry's list has the same date choices plus All dates.
+- **Partners** (and the Partner Statement) are no longer in the app: a group's agents each have a
+  rate instead. The partner tables, their data and the `/partners` API stay, and weeks saved with
+  partner shares keep them.
 - Manage → **Branches** manages the branches themselves. New branches get their code automatically
   (`BR-001`, `BR-002`…, one more than the highest BR-number ever used); codes can't be typed or
   changed in the app. Codes made before (e.g. `PP-01`) stay.

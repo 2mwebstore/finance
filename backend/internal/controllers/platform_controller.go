@@ -59,7 +59,7 @@ func (pc *PlatformController) ownGroupUnless(c *gin.Context, scope services.Bran
 func writePlatformError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, services.ErrPlatformNotFound), errors.Is(err, services.ErrPartnerNotFound), errors.Is(err, services.ErrAssignmentNotFound), errors.Is(err, services.ErrSettlementNotFound),
-		errors.Is(err, services.ErrGroupNotFound):
+		errors.Is(err, services.ErrGroupNotFound), errors.Is(err, services.ErrEntryNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 	case errors.Is(err, services.ErrBranchAccessDenied):
 		c.JSON(http.StatusForbidden, gin.H{"error": "you can only work in your own groups"})
@@ -332,7 +332,7 @@ func (pc *PlatformController) ListGroups(c *gin.Context) {
 	if !ok {
 		return
 	}
-	rows, err := pc.svc.ListGroups(c.Request.Context(), *branchID, services.GroupFilter{PlatformID: platformID, Status: c.Query("status")}, scope)
+	rows, err := pc.svc.ListGroups(c.Request.Context(), *branchID, services.GroupFilter{PlatformID: platformID, Status: c.Query("status"), Search: c.Query("search")}, scope)
 	if err != nil {
 		writePlatformError(c, err)
 		return
@@ -504,13 +504,63 @@ func (pc *PlatformController) SaveWeek(c *gin.Context) {
 	c.JSON(http.StatusOK, sheet)
 }
 
+type entryDeleteInput struct {
+	Reason string `json:"reason" binding:"max=512"`
+}
+
+// DeleteEntry removes an entry and its week's amounts; the audit log keeps them and the reason.
+func (pc *PlatformController) DeleteEntry(c *gin.Context) {
+	_, scope, ok := pc.scope(c)
+	if !ok {
+		return
+	}
+	id, ok := paramID(c)
+	if !ok {
+		return
+	}
+	var in entryDeleteInput
+	if !bindJSON(c, &in) {
+		return
+	}
+	entry, removed, err := pc.svc.DeleteEntry(c.Request.Context(), id, in.Reason, scope)
+	if err != nil {
+		writePlatformError(c, err)
+		return
+	}
+	amounts := make([]map[string]string, len(removed))
+	for i, r := range removed {
+		amounts[i] = map[string]string{"platform_id": r.PlatformID.String(), "currency": r.Currency, "win_lose": r.WinLose.String(), "commission": r.Commission.String(), "total": r.JamePS.String()}
+	}
+	pc.record(c, actorOf(c), "winlose.entry.delete", "weekly_entry", id.String(), &entry.BranchID, map[string]interface{}{
+		"title": entry.Title, "week_start": entry.WeekStart.Format("2006-01-02"), "amounts": amounts, "reason": in.Reason,
+	})
+	c.JSON(http.StatusOK, gin.H{"deleted": true})
+}
+
+func (pc *PlatformController) GetGroup(c *gin.Context) {
+	_, scope, ok := pc.scope(c)
+	if !ok {
+		return
+	}
+	id, ok := paramID(c)
+	if !ok {
+		return
+	}
+	g, err := pc.svc.GroupByID(c.Request.Context(), id, scope)
+	if err != nil {
+		writePlatformError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, g)
+}
+
 // ListEntries is Data Entry's list: the saved weeks of the person's groups, newest first.
 func (pc *PlatformController) ListEntries(c *gin.Context) {
 	_, scope, ok := pc.scope(c)
 	if !ok {
 		return
 	}
-	rows, err := pc.svc.ListEntries(c.Request.Context(), c.Query("search"), scope)
+	rows, err := pc.svc.ListEntries(c.Request.Context(), services.EntryFilter{Search: c.Query("search"), CreatedFrom: c.Query("created_from"), CreatedTo: c.Query("created_to")}, scope)
 	if err != nil {
 		writePlatformError(c, err)
 		return
@@ -601,8 +651,12 @@ func (pc *PlatformController) Report(c *gin.Context) {
 	if !ok {
 		return
 	}
+	groupID, ok := queryID(c, "group_id")
+	if !ok {
+		return
+	}
 	report, err := pc.svc.Report(c.Request.Context(), services.ReportFilter{DateFrom: c.Query("date_from"), DateTo: c.Query("date_to"), BranchID: branchID,
-		PartnerID: partnerID, ByWeek: c.Query("by_week") == "true"},
+		PartnerID: partnerID, GroupID: groupID, ByWeek: c.Query("by_week") == "true"},
 		scope, access.Can(permissions.WinLoseReportsConsolidated), actorOf(c))
 	if err != nil {
 		writePlatformError(c, err)
