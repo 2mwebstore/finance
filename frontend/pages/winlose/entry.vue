@@ -33,11 +33,11 @@
           </thead>
           <tbody class="divide-y divide-border">
             <tr v-for="e in entries" :key="e.id" class="text-navy">
-              <td class="whitespace-nowrap px-3 py-2.5 text-xs text-muted">{{ formatDocDate(e.created_at) }}<template v-if="e.created_by"> · <span class="font-medium text-navy">{{ e.created_by }}</span></template></td>
+              <td class="px-3 py-2.5 text-xs text-muted sm:whitespace-nowrap">{{ formatDocDate(e.created_at) }}<template v-if="e.created_by"> · <span class="font-medium text-navy">{{ e.created_by }}</span></template></td>
               <td class="px-3 py-2.5 font-semibold">{{ e.title }}</td>
               <td class="px-3 py-2">
                 <!-- A finalized week can only be viewed -->
-                <div class="flex justify-end gap-1.5">
+                <div class="flex flex-wrap justify-end gap-1.5">
                   <button type="button" class="action-chip" @click="openView(e)"><Eye :size="13" /> View</button>
                   <button v-if="!e.locked && (canCreate || canEdit)" type="button" class="action-chip action-edit" @click="openEdit(e)"><Pencil :size="13" /> Update</button>
                   <button v-if="!e.locked && canEdit" type="button" class="action-chip action-danger" @click="deleting = e"><Trash2 :size="13" /> Delete</button>
@@ -71,16 +71,18 @@
           <table class="wl-table w-full text-left text-sm">
             <thead class="bg-canvas text-[10px] uppercase tracking-wide text-slate-500">
               <tr>
+                <th class="w-12 px-3 py-2 text-center font-bold">No</th>
                 <th class="px-3 py-2 font-bold">Agent</th>
                 <th class="w-56 px-2 py-2 font-bold">Win/Lose</th>
                 <th class="w-56 px-2 py-2 font-bold">Commission</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-border">
-              <tr v-for="row in sheet.rows" :key="row.platform_id" :class="changed(row) ? 'bg-amber-50/40' : ''">
+              <tr v-for="(row, i) in sheet.rows" :key="row.platform_id" :class="changed(row) ? 'bg-amber-50/40' : ''">
+                <td class="row-no px-3 py-2.5 text-center text-sm tabular-nums text-muted">{{ i + 1 }}</td>
                 <td class="px-3 py-2.5">
-                  <!-- The currency the amounts are entered in -->
-                  <p class="font-mono text-sm font-semibold text-navy">{{ row.platform_code }} <span class="font-sans text-xs font-normal text-muted">· {{ row.currency }}</span></p>
+                  <!-- The currency the amounts are entered in (on phones the row's number comes first) -->
+                  <p class="font-mono text-sm font-semibold text-navy"><span class="row-no-inline font-sans text-muted">{{ i + 1 }}. </span>{{ row.platform_code }} <span class="font-sans text-xs font-normal text-muted">· {{ row.currency }}</span></p>
                   <p class="text-[11px]" :class="changed(row) ? 'font-semibold text-amber-700' : 'text-muted'">{{ statusOf(row) }}</p>
                 </td>
                 <td class="px-2 py-2" data-label="Win/Lose">
@@ -90,7 +92,7 @@
                   <MoneyInput v-model="edits[row.platform_id]!.commission" :currency="row.currency" signed class="w-full rounded-lg border border-border px-2.5 py-1.5 text-right text-sm tabular-nums disabled:bg-canvas disabled:text-muted" :class="Number(edits[row.platform_id]!.commission) < 0 ? 'text-expense' : 'text-navy'" :aria-invalid="invalid(edits[row.platform_id]!.commission) ? 'true' : undefined" :disabled="!editable(row)" :aria-label="`Commission for ${row.platform_code}`" />
                 </td>
               </tr>
-              <tr v-if="!sheet.rows.length" class="empty-row"><td colspan="3" class="px-3 py-8 text-center text-sm text-muted">No agents are assigned to your group in this week.<NuxtLink v-if="can('platform-assignments.manage')" to="/admin/platform-assignments" class="ml-1 font-semibold text-primary">Assign agents</NuxtLink></td></tr>
+              <tr v-if="!sheet.rows.length" class="empty-row"><td colspan="4" class="px-3 py-8 text-center text-sm text-muted">No agents are assigned to your group in this week.<NuxtLink v-if="can('platform-assignments.manage')" to="/admin/platform-assignments" class="ml-1 font-semibold text-primary">Assign agents</NuxtLink></td></tr>
             </tbody>
           </table>
         </div>
@@ -370,13 +372,18 @@ async function save(reason: string) {
 </script>
 
 <style scoped>
-/* Phones: each agent becomes a card: its name, then the two amounts side by side. */
+/* The row's number shows in its own column, or before the agent on phones. */
+.row-no-inline { display: none; }
+
+/* Phones: each agent becomes a card: its number and name, then the two amounts side by side. */
 @media (max-width: 639px) {
+  .row-no-inline { display: inline; }
   .wl-table thead { display: none; }
   .wl-table, .wl-table tbody, .wl-table tr, .wl-table td { display: block; width: 100%; }
   .wl-table tbody tr:not(.empty-row) { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; padding: 12px; }
   .wl-table tbody tr:not(.empty-row) td { padding: 0; text-align: left; }
-  .wl-table tbody tr:not(.empty-row) td:first-child { grid-column: 1 / -1; }
+  .wl-table tbody tr:not(.empty-row) td.row-no { display: none; }
+  .wl-table tbody tr:not(.empty-row) td:nth-child(2) { grid-column: 1 / -1; }
   .wl-table td[data-label]::before { content: attr(data-label); display: block; margin-bottom: 3px; color: #64748b; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
 }
 </style>
