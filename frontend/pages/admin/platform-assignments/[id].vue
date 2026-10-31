@@ -3,7 +3,6 @@
     <header>
       <NuxtLink to="/admin/platform-assignments" class="inline-flex items-center gap-1 text-[11px] font-bold tracking-[0.14em] text-slate-400 hover:text-primary"><ChevronLeft :size="13" /> GROUP AGENT ASSIGNMENTS</NuxtLink>
       <h1 class="text-xl font-bold text-navy">{{ isNew ? 'Assign agents' : 'Update group' }}</h1>
-      <p class="mt-1 text-xs text-muted">{{ isNew ? 'Give the group a title, pick its agents and set each agent’s rate. The Total is worked out at each agent’s rate.' : 'New weeks use these agents and rates; weeks already saved keep what they were worked out with.' }}</p>
     </header>
 
     <AppAlert v-if="!canManage" type="warning" title="You can’t change groups" message="It needs Manage Group Agent Assignments." />
@@ -55,7 +54,7 @@
 
       <p v-if="!isNew" class="text-[11px] text-muted">An agent taken out is ended if weeks were entered for it (they stay), else removed. An agent put in starts today.</p>
       <AppAlert v-if="group?.partners.length" type="warning" title="This group still has partners" :message="`${group.partners.map(p => `${p.partner_name} ${formatRate(p.commission_rate)}`).join(', ')}. Saving takes them off: from then on each agent’s rate above is used. Weeks already saved keep their partner shares.`" />
-      <p v-else-if="isNew" class="text-[11px] text-muted">An agent can be in one group at a time. Results are entered once a week; the first day can be in the past to enter earlier weeks.</p>
+      <p v-else-if="isNew" class="text-[11px] text-muted">An agent can be in more than one group, at its own rate in each. Results are entered once a week; the first day can be in the past to enter earlier weeks.</p>
 
       <AppAlert v-if="formError" title="Couldn’t save the group" :message="formError" dismissible @dismiss="formError = ''" />
       <div class="flex flex-wrap items-center justify-end gap-2 border-t border-border pt-4">
@@ -71,7 +70,7 @@ import { ChevronLeft, X } from 'lucide-vue-next'
 import type { AssignmentGroup, Platform } from '~/types/api'
 import { useToast } from '~/composables/useToast'
 import { todayISO } from '~/utils/inventory'
-import { formatRate } from '~/utils/winlose'
+import { byAgentCode, formatRate } from '~/utils/winlose'
 
 const route = useRoute()
 const { api } = useApi()
@@ -96,11 +95,12 @@ const snapshot = () => JSON.stringify([title.value.trim(), agentIds.value, agent
 const agentOptions = computed(() => platforms.value
   .filter(p => p.is_active || group.value?.agents.some(a => a.platform_id === p.id))
   .map(p => ({ value: p.id, label: p.is_active ? p.code : `${p.code} (off)` })))
+// Agents A to Z, whatever order they were picked in.
 const rows = computed(() => agentIds.value.map((id) => {
   const p = platforms.value.find(x => x.id === id)
   const saved = group.value?.agents.find(a => a.platform_id === id)
   return { id, code: p?.code || saved?.platform_code || '?', weeks: saved?.weeks || 0 }
-}))
+}).sort((a, b) => byAgentCode(a.code, b.code)))
 
 // An agent picked gets an empty rate (its own default, when it has one); one taken out loses it.
 watch(agentIds, (ids) => {

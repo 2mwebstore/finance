@@ -162,8 +162,8 @@ func (s *PlatformService) groupRows(ctx context.Context, list []models.Assignmen
 		GroupID uuid.UUID
 		N       int64
 	}
-	if err := s.db.WithContext(ctx).Table("weekly_platform_results r").Joins("JOIN hq_platform_assignments a ON a.id = r.assignment_id").
-		Select("a.group_id, COUNT(*) AS n").Where("a.group_id IN ? AND r.deleted_at IS NULL", ids).Group("a.group_id").Scan(&counts).Error; err != nil {
+	if err := s.db.WithContext(ctx).Table("weekly_group_results g").Joins("JOIN weekly_platform_results r ON r.id = g.result_id").
+		Select("g.group_id, COUNT(*) AS n").Where("g.group_id IN ? AND r.deleted_at IS NULL", ids).Group("g.group_id").Scan(&counts).Error; err != nil {
 		return nil, err
 	}
 	weeks := map[uuid.UUID]int64{}
@@ -174,7 +174,7 @@ func (s *PlatformService) groupRows(ctx context.Context, list []models.Assignmen
 	for i, g := range list {
 		row := GroupRow{AssignmentGroup: g, Agents: []GroupAgent{}, Partners: []AssignmentPartnerRow{}, Weeks: weeks[g.ID], CreatedBy: names[g.CreatedByID]}
 		mine := agents[g.ID]
-		sort.Slice(mine, func(a, b int) bool { return mine[a].PlatformCode < mine[b].PlatformCode })
+		sort.Slice(mine, func(a, b int) bool { return agentBefore(mine[a].PlatformCode, mine[b].PlatformCode) })
 		for _, a := range mine {
 			row.Agents = append(row.Agents, GroupAgent{AssignmentID: a.ID, PlatformID: a.PlatformID, PlatformCode: a.PlatformCode, Currency: a.Currency,
 				CommissionRate: a.CommissionRate, StartsOn: dayString(a.StartsOn), Weeks: a.Weeks})
@@ -338,7 +338,7 @@ func (s *PlatformService) UpdateGroup(ctx context.Context, id uuid.UUID, in Grou
 // (they stay), else deleted with its partners.
 func takeOut(tx *gorm.DB, a *models.HQPlatformAssignment, day time.Time, actor uuid.UUID) error {
 	var weeks int64
-	if err := tx.Model(&models.WeeklyPlatformResult{}).Where("assignment_id = ?", a.ID).Count(&weeks).Error; err != nil {
+	if err := tx.Model(&models.WeeklyGroupResult{}).Where("assignment_id = ?", a.ID).Count(&weeks).Error; err != nil {
 		return err
 	}
 	if weeks == 0 {
@@ -347,8 +347,8 @@ func takeOut(tx *gorm.DB, a *models.HQPlatformAssignment, day time.Time, actor u
 	return endOn(tx, a, day, "taken out of the group", actor)
 }
 
-// SetGroupActive switches a group on or off. Off, its agents leave Data Entry; they stay in the
-// group, so they can't be put in another group until taken out.
+// SetGroupActive switches a group on or off. Off, its agents leave Data Entry (they stay in the
+// group).
 func (s *PlatformService) SetGroupActive(ctx context.Context, id uuid.UUID, active bool, scope BranchScope) (*GroupRow, error) {
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		g, err := lockGroup(tx, id, scope)
@@ -376,14 +376,13 @@ func (s *PlatformService) DeleteGroup(ctx context.Context, id uuid.UUID, scope B
 			return err
 		}
 		var weeks int64
-		if err := tx.Table("weekly_platform_results r").Joins("JOIN hq_platform_assignments a ON a.id = r.assignment_id").
-			Where("a.group_id = ?", g.ID).Count(&weeks).Error; err != nil {
+		if err := tx.Model(&models.WeeklyGroupResult{}).Where("group_id = ?", g.ID).Count(&weeks).Error; err != nil {
 			return err
 		}
 		if weeks > 0 {
 			return errors.New("weeks are already entered for this group, so it can't be deleted; turn it off instead")
 		}
-		// Assignments go for good (their partners with them), so the agents can be put in another group.
+		// Assignments go for good (their partners with them).
 		if err := tx.Unscoped().Where("group_id = ?", g.ID).Delete(&models.HQPlatformAssignment{}).Error; err != nil {
 			return err
 		}

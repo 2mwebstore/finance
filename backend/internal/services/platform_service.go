@@ -176,8 +176,19 @@ func (s *PlatformService) ListPlatforms(ctx context.Context, includeInactive boo
 		q = q.Where("is_active = ?", true)
 	}
 	var rows []PlatformRow
-	err := q.Order("code").Scan(&rows).Error
-	return rows, err
+	if err := q.Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	sort.Slice(rows, func(i, j int) bool { return agentBefore(rows[i].Code, rows[j].Code) })
+	return rows, nil
+}
+
+// agentBefore orders agents A to Z by code, ignoring case (the same order on every page).
+func agentBefore(a, b string) bool {
+	if x, y := strings.ToLower(a), strings.ToLower(b); x != y {
+		return x < y
+	}
+	return a < b
 }
 
 func (s *PlatformService) SavePlatform(ctx context.Context, id *uuid.UUID, in PlatformInput) (*models.Platform, error) {
@@ -392,7 +403,7 @@ func (s *PlatformService) assignmentRows(ctx context.Context, list []models.HQPl
 			AssignmentID uuid.UUID
 			N            int64
 		}
-		if err := s.db.WithContext(ctx).Model(&models.WeeklyPlatformResult{}).Select("assignment_id, COUNT(*) AS n").
+		if err := s.db.WithContext(ctx).Model(&models.WeeklyGroupResult{}).Select("assignment_id, COUNT(*) AS n").
 			Where("assignment_id IN ?", ids).Group("assignment_id").Scan(&counts).Error; err != nil {
 			return nil, err
 		}
@@ -419,12 +430,15 @@ func (s *PlatformService) assignmentRows(ctx context.Context, list []models.HQPl
 	return out, nil
 }
 
-// overlapping finds the HQ's other assignment of the platform that is open on or after day:
-// one HQ can't have the same platform twice on a day.
-func overlapping(tx *gorm.DB, branchID, platformID uuid.UUID, day time.Time, except *uuid.UUID) (*models.HQPlatformAssignment, error) {
-	q := tx.Where("branch_id = ? AND platform_id = ? AND (ends_on IS NULL OR ends_on >= ?)", branchID, platformID, dayString(day))
-	if except != nil {
-		q = q.Where("id <> ?", *except)
+// overlapping finds the group's other assignment of the platform that is open on or after day: a
+// group can't have the same agent twice on a day (an agent can be in several groups). With no
+// group, the HQ's.
+func overlapping(tx *gorm.DB, branchID, platformID uuid.UUID, groupID *uuid.UUID, day time.Time) (*models.HQPlatformAssignment, error) {
+	q := tx.Where("platform_id = ? AND (ends_on IS NULL OR ends_on >= ?)", platformID, dayString(day))
+	if groupID != nil {
+		q = q.Where("group_id = ?", *groupID)
+	} else {
+		q = q.Where("branch_id = ?", branchID)
 	}
 	var a models.HQPlatformAssignment
 	err := q.Clauses(clause.Locking{Strength: "UPDATE"}).First(&a).Error
@@ -571,7 +585,7 @@ func (s *PlatformService) applyAssign(tx *gorm.DB, plan *assignPlan, actor uuid.
 		}
 		for _, platformID := range plan.platformIDs {
 			platform := plan.platforms[platformID]
-			clash, err := overlapping(tx, branchID, platformID, plan.starts, nil)
+			clash, err := overlapping(tx, branchID, platformID, groupID, plan.starts)
 			if err != nil {
 				return nil, err
 			}
@@ -604,8 +618,8 @@ func (s *PlatformService) applyAssign(tx *gorm.DB, plan *assignPlan, actor uuid.
 	return out, nil
 }
 
-// clashError explains why a platform can't be assigned from that day: it's in another group (or
-// assignment) now, or its last one ended later than that day.
+// clashError explains why a platform can't be assigned from that day: it's in the group (or, with
+// no group, the HQ) now, or its last one there ended later than that day.
 func clashError(tx *gorm.DB, code string, clash *models.HQPlatformAssignment) error {
 	if !clash.IsActive {
 		return fieldError("starts_on", fmt.Sprintf("%s was assigned until %s; start the new assignment after that day", code, dayString(*clash.EndsOn)))
@@ -748,7 +762,8 @@ func endOn(tx *gorm.DB, a *models.HQPlatformAssignment, last time.Time, reason s
 		return fieldError("ends_on", "the last day can't be before the assignment started ("+dayString(a.StartsOn)+")")
 	}
 	var later models.WeeklyPlatformResult
-	err := tx.Where("assignment_id = ? AND week_start > ?", a.ID, dayString(last)).Order("week_start").First(&later).Error
+	err := tx.Joins("JOIN weekly_group_results g ON g.result_id = weekly_platform_results.id").
+		Where("g.assignment_id = ? AND weekly_platform_results.week_start > ?", a.ID, dayString(last)).Order("weekly_platform_results.week_start").First(&later).Error
 	if err == nil {
 		return fieldError("ends_on", "results are already entered for the week of "+dayString(later.WeekStart)+"; end it on or after that day")
 	}
@@ -828,7 +843,7 @@ func (s *PlatformService) MoveAssignment(ctx context.Context, id uuid.UUID, in A
 			}
 			return err
 		}
-		clash, err := overlapping(tx, target, a.PlatformID, on, nil)
+		clash, err := overlapping(tx, target, a.PlatformID, nil, on)
 		if err != nil {
 			return err
 		}

@@ -26,6 +26,26 @@ func TestPlatformMigrationMatchesStartupSQL(t *testing.T) {
 			t.Errorf("migration 000013 is missing the %s.%s column", c.table, c.column)
 		}
 	}
+	for _, c := range platformNullable {
+		if !strings.Contains(migration, squash(c.ddl)) {
+			t.Errorf("migration 000013 doesn't let %s.%s be empty", c.table, c.column)
+		}
+	}
+	for _, fill := range []string{fillResultEntries, fillGroupResults} {
+		if !strings.Contains(migration, squash(fill)) {
+			t.Errorf("migration 000013 is missing:\n%s", fill)
+		}
+	}
+	for _, k := range platformKeys {
+		if !strings.Contains(migration, squash(k.ddl)) {
+			t.Errorf("migration 000013 is missing key %s", k.name)
+		}
+	}
+	for _, k := range oldPlatformKeys {
+		if !strings.Contains(migration, squash(k.sql())) {
+			t.Errorf("migration 000013 doesn't drop the old key %s", k.name)
+		}
+	}
 	for _, fk := range platformForeignKeys {
 		if !strings.Contains(migration, squash(fk.sql())) {
 			t.Errorf("migration 000013 is missing foreign key %s", fk.name)

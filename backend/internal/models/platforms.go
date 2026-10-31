@@ -35,7 +35,8 @@ type Partner struct {
 
 // HQPlatformAssignment gives an HQ a platform with its own rate and currency. Ending or moving it
 // keeps the row (EndsOn set) so the history stays; ActiveKey is 1 while active and NULL after, and
-// a unique key on (branch, platform, active_key) allows one active assignment per pair.
+// a unique key on (group, platform, active_key) allows one active assignment per agent in a group
+// (an agent can be in several groups).
 type HQPlatformAssignment struct {
 	Base
 	BranchID   uuid.UUID `gorm:"type:char(36);not null" json:"branch_id"`
@@ -87,8 +88,8 @@ type AssignmentPartner struct {
 
 func (WeeklyPlatformResult) TableName() string { return "weekly_platform_results" }
 
-// WeeklyPartnerResult is one partner's share of a saved week: Total at their % (kept as it was
-// when the week was entered). The week's own JamePS is the sum of its partners' shares.
+// WeeklyPartnerResult is one partner's share of a week saved before entries could hold any agent:
+// Total at their % (kept as it was when the week was entered).
 type WeeklyPartnerResult struct {
 	ID             uuid.UUID       `gorm:"type:char(36);primaryKey" json:"-"`
 	ResultID       uuid.UUID       `gorm:"type:char(36);not null" json:"result_id"`
@@ -99,17 +100,20 @@ type WeeklyPartnerResult struct {
 	UpdatedAt      time.Time       `json:"-"`
 }
 
-// WeeklyPlatformResult is one branch's week (Monday to Sunday) on one platform, entered once a
-// week. The rate, currency and formula version used are kept with it, so a later change to the
-// assignment or the formula leaves it as it was. JamePS is what the app shows as "Total": with
-// partners it is the sum of their shares (WeeklyPartnerResult), and CommissionRate their % added up.
+// WeeklyPlatformResult is one agent (platform) on one entry: a branch's week (Monday to Sunday).
+// Its Total is worked out in each group the agent was in that week, at the group's rate
+// (WeeklyGroupResult); JamePS, shown as "Total", is their sum and CommissionRate their rates
+// added up (both 0 for an agent in no group). The rates, currency and formula version used are
+// kept, so a later change to a group or the formula leaves it as it was. AssignmentID is only set
+// on weeks saved before entries could hold any agent.
 type WeeklyPlatformResult struct {
 	Base
+	EntryID        *uuid.UUID      `gorm:"type:char(36)" json:"entry_id"`
 	WeekStart      time.Time       `gorm:"type:date;not null" json:"week_start"`
 	WeekEnd        time.Time       `gorm:"type:date;not null" json:"week_end"`
 	BranchID       uuid.UUID       `gorm:"type:char(36);not null" json:"branch_id"`
 	PlatformID     uuid.UUID       `gorm:"type:char(36);not null" json:"platform_id"`
-	AssignmentID   uuid.UUID       `gorm:"type:char(36);not null" json:"assignment_id"`
+	AssignmentID   *uuid.UUID      `gorm:"type:char(36)" json:"assignment_id"`
 	WinLose        decimal.Decimal `gorm:"type:decimal(19,4);not null" json:"win_lose"`
 	Commission     decimal.Decimal `gorm:"type:decimal(19,4);not null" json:"commission"`
 	CommissionRate decimal.Decimal `gorm:"type:decimal(7,4);not null" json:"commission_rate"`
@@ -120,6 +124,22 @@ type WeeklyPlatformResult struct {
 	CreatedByID    uuid.UUID       `gorm:"type:char(36);not null" json:"created_by_id"`
 	UpdatedByID    *uuid.UUID      `gorm:"type:char(36)" json:"updated_by_id,omitempty"`
 }
+
+// WeeklyGroupResult is a result's part in one group: the agent's Total at the group's rate for it
+// (kept as it was when the week was entered). An agent in two groups counts in both. GroupID nil:
+// an assignment made before groups.
+type WeeklyGroupResult struct {
+	ID             uuid.UUID       `gorm:"type:char(36);primaryKey" json:"-"`
+	ResultID       uuid.UUID       `gorm:"type:char(36);not null" json:"result_id"`
+	GroupID        *uuid.UUID      `gorm:"type:char(36)" json:"group_id"`
+	AssignmentID   uuid.UUID       `gorm:"type:char(36);not null" json:"assignment_id"`
+	CommissionRate decimal.Decimal `gorm:"type:decimal(7,4);not null" json:"commission_rate"`
+	JamePS         decimal.Decimal `gorm:"column:jame_ps;type:decimal(19,4);not null" json:"jame_ps"`
+	CreatedAt      time.Time       `json:"-"`
+	UpdatedAt      time.Time       `json:"-"`
+}
+
+func (WeeklyGroupResult) TableName() string { return "weekly_group_results" }
 
 // Weekly settlement statuses.
 const (
@@ -142,8 +162,8 @@ type WeeklySettlement struct {
 	ReopenReason  string     `gorm:"size:512" json:"reopen_reason"`
 }
 
-// WeeklyEntry is a group's (branch's) week as people see it on Data Entry: a title, and the week's
-// results (weekly_platform_results) for the group. One per group and week.
+// WeeklyEntry is a titled set of agents' results (weekly_platform_results) for a group's
+// (branch's) week, as people see it on Data Entry. A week can have several entries.
 type WeeklyEntry struct {
 	ID          uuid.UUID  `gorm:"type:char(36);primaryKey" json:"id"`
 	BranchID    uuid.UUID  `gorm:"type:char(36);not null" json:"branch_id"`

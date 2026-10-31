@@ -1,7 +1,7 @@
 // Package winlose works out Jame-PS (shown in the app as "Total") from a platform's weekly
-// win/lose. The formula lives only here. Each formula is a version: a saved week keeps the
-// version, rate and currency it was worked out with, so changing the formula (or a rate) never
-// changes weeks already saved.
+// win/lose. The formula lives only here. Each formula is a version: a saved week keeps the rate
+// and currency it was worked out with; a finalized week also keeps its version, while weeks not
+// finalized follow the current one (see PlatformService.RecalculateOpenWeeks).
 package winlose
 
 import (
@@ -43,8 +43,16 @@ type Formula struct {
 // ROUND is half away from zero, like Excel's (2.5 → 3, -2.5 → -3).
 const V1 = "v1"
 
-// Default is the version new weeks use unless the winlose.formula setting picks another.
-const Default = V1
+// V2 takes the commission away from the win/lose (the business's rule):
+//
+//	adjusted = win_lose − commission
+//	jame_ps  = ROUND(adjusted × rate, 0)
+//
+// e.g. (1,000 − 100) × 10% = 90.
+const V2 = "v2"
+
+// Default is the version weeks use unless the winlose.formula setting picks another.
+const Default = V2
 
 var hundred = decimal.NewFromInt(100)
 
@@ -54,6 +62,15 @@ var formulas = map[string]Formula{
 		Description: "Total = ROUND((Win/Lose + Commission) × Partner %, 0)",
 		calc: func(in Input) (decimal.Decimal, decimal.Decimal) {
 			adjusted := in.WinLose.Add(in.Commission)
+			return adjusted, adjusted.Mul(in.RatePct).Div(hundred).Round(0)
+		},
+	},
+	V2: {
+		Version:     V2,
+		Description: "Total = ROUND((Win/Lose − Commission) × rate, 0)",
+		Confirmed:   true,
+		calc: func(in Input) (decimal.Decimal, decimal.Decimal) {
+			adjusted := in.WinLose.Sub(in.Commission)
 			return adjusted, adjusted.Mul(in.RatePct).Div(hundred).Round(0)
 		},
 	},

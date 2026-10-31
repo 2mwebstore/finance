@@ -271,7 +271,7 @@ func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config, store storage.Store, 
 				wl.GET("/entries", need(permissions.WinLoseView, permissions.WinLoseCreate, permissions.WinLoseEdit), platformCtrl.ListEntries)
 				// Deleting an entry removes saved amounts: Correct Win/Lose, with a reason.
 				wl.DELETE("/entries/:id", need(permissions.WinLoseEdit), platformCtrl.DeleteEntry)
-				// No branch_id: the person's own group (their default branch).
+				// An entry by entry_id; without one, a new entry for this week in the person's own group.
 				wl.GET("/entry", need(permissions.WinLoseView, permissions.WinLoseCreate, permissions.WinLoseEdit), platformCtrl.WeekSheet)
 				wl.POST("/entry/preview", need(permissions.WinLoseCreate, permissions.WinLoseEdit), platformCtrl.Preview)
 				wl.PUT("/entry", need(permissions.WinLoseCreate, permissions.WinLoseEdit), platformCtrl.SaveWeek)

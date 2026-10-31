@@ -5,9 +5,10 @@ export function formatRate(value: string | number | null | undefined) {
   return `${new Intl.NumberFormat('en-US', { maximumFractionDigits: 4 }).format(Number(value || 0))}%`
 }
 
-/** The rates a report line used: "35%", or "35%–50%" when the rate changed in the range. */
-export function rateRange(min: string, max: string) {
-  return Number(min) === Number(max) ? formatRate(min) : `${formatRate(min)}–${formatRate(max)}`
+/** Agents A to Z by code, ignoring case (the API orders them the same way). */
+export function byAgentCode(a: string, b: string) {
+  const x = a.toLowerCase(), y = b.toLowerCase()
+  return x < y ? -1 : x > y ? 1 : a < b ? -1 : a > b ? 1 : 0
 }
 
 /** An amount in its currency; losses show with a minus. */

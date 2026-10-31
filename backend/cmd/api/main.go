@@ -10,6 +10,7 @@ import (
 	"github.com/cambodia-finance/income-expense/internal/database"
 	"github.com/cambodia-finance/income-expense/internal/middleware"
 	"github.com/cambodia-finance/income-expense/internal/routes"
+	"github.com/cambodia-finance/income-expense/internal/services"
 	"github.com/cambodia-finance/income-expense/internal/storage"
 	"github.com/gin-gonic/gin"
 )
@@ -59,6 +60,14 @@ func main() {
 				log.Fatalf("seed demo: %v", err)
 			}
 		}
+	}
+
+	// Saved win/lose weeks that aren't finalized follow the current formula. A failure is logged and
+	// the server still starts (the weeks keep what they were worked out with).
+	if n, err := services.NewPlatformService(db, cfg.Timezone).RecalculateOpenWeeks(context.Background()); err != nil {
+		log.Printf("win/lose: could not work saved weeks out with the current formula: %v", err)
+	} else if n > 0 {
+		log.Printf("win/lose: %d saved results worked out again with the current formula", n)
 	}
 
 	if cfg.AppEnv == "production" {

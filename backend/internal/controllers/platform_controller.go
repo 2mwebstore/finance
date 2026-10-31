@@ -448,9 +448,10 @@ func (pc *PlatformController) WeekSheet(c *gin.Context) {
 	if !ok {
 		return
 	}
-	// No branch_id: the person's own group.
+	// An entry by entry_id; without one, a new entry for the week of week_start (no branch_id: in the
+	// person's own group).
 	actor, _ := getActorID(c)
-	sheet, err := pc.svc.WeekSheet(c.Request.Context(), c.Query("week_start"), c.Query("branch_id"), scope, actor)
+	sheet, err := pc.svc.EntrySheet(c.Request.Context(), c.Query("entry_id"), c.Query("week_start"), c.Query("branch_id"), scope, actor)
 	if err != nil {
 		writePlatformError(c, err)
 		return

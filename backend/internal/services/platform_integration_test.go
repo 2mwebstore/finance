@@ -35,6 +35,8 @@ type wlFixture struct {
 	p1    models.Platform // USD, 35%
 	p2    models.Platform // KHR, 10%
 	week  time.Time       // the Monday two weeks ago
+	// entries: each HQ's entry for a week once saved (by HQ and Monday), as Data Entry keeps it.
+	entries map[string]string
 }
 
 func newWLFixture(t *testing.T) *wlFixture {
@@ -54,11 +56,15 @@ func newWLFixture(t *testing.T) *wlFixture {
 	if err := database.AutoMigrate(db); err != nil {
 		t.Fatal(err)
 	}
-	f := &wlFixture{db: db, svc: NewPlatformService(db, "Asia/Phnom_Penh"), ctx: context.Background()}
-	for _, table := range []string{"weekly_settlement_totals", "weekly_settlements", "weekly_entries", "weekly_partner_results", "weekly_platform_results", "assignment_partners", "hq_platform_assignments", "assignment_groups"} {
+	f := &wlFixture{db: db, svc: NewPlatformService(db, "Asia/Phnom_Penh"), ctx: context.Background(), entries: map[string]string{}}
+	for _, table := range []string{"weekly_settlement_totals", "weekly_settlements", "weekly_group_results", "weekly_partner_results", "weekly_platform_results", "weekly_entries", "assignment_partners", "hq_platform_assignments", "assignment_groups"} {
 		db.Exec("DELETE FROM " + table)
 	}
 	db.Exec("DELETE FROM platforms WHERE code LIKE 'TWL%'")
+	// The amounts in these tests are worked out with v1 (W/L + commission); TestFormulaChange has v2.
+	if err := db.Save(&models.AppSetting{Key: FormulaSettingKey, Value: "v1"}).Error; err != nil {
+		t.Fatal(err)
+	}
 	user := models.User{Username: "twl_tester", Email: "twl_tester@example.test", PasswordHash: "x", FullName: "TWL Tester", IsActive: true}
 	if err := db.Where(models.User{Username: user.Username}).FirstOrCreate(&user).Error; err != nil {
 		t.Fatal(err)
@@ -121,8 +127,29 @@ func (f *wlFixture) assign(t *testing.T, platforms []models.Platform, hqs ...int
 	return list
 }
 
+func (f *wlFixture) entryKey(week time.Time, hq int) string {
+	return f.hq[hq].ID.String() + dayString(weekStart(week))
+}
+
+// save saves an HQ's week on its entry: the first save makes the entry and the ones after change
+// it, as Data Entry keeps the entry it is on.
 func (f *wlFixture) save(week time.Time, hq int, can func(string) bool, reason string, rows ...WeekEntryRow) (*WeekSheet, []Correction, error) {
-	return f.svc.SaveWeek(f.ctx, WeekEntryInput{WeekStart: dayString(week), BranchID: f.hq[hq].ID.String(), Title: "TWL week", Rows: rows, Reason: reason}, all, can, f.actor)
+	key := f.entryKey(week, hq)
+	sheet, corrections, err := f.svc.SaveWeek(f.ctx, WeekEntryInput{EntryID: f.entries[key], WeekStart: dayString(week), BranchID: f.hq[hq].ID.String(), Title: "TWL week", Rows: rows, Reason: reason}, all, can, f.actor)
+	if err == nil && sheet.Entry != nil {
+		f.entries[key] = sheet.Entry.ID.String()
+	}
+	return sheet, corrections, err
+}
+
+// sheet is an HQ's entry for the week, or a new one when none was saved.
+func (f *wlFixture) sheet(t *testing.T, week time.Time, hq int) *WeekSheet {
+	t.Helper()
+	s, err := f.svc.EntrySheet(f.ctx, f.entries[f.entryKey(week, hq)], dayString(week), f.hq[hq].ID.String(), all, f.actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
 }
 
 func row(p models.Platform, winLose, commission string) WeekEntryRow {
@@ -147,12 +174,12 @@ func TestPlatformAssignmentsManyToMany(t *testing.T) {
 		t.Fatalf("%d assignments, want 4 (2 platforms × 2 HQs)", got)
 	}
 	f.assign(t, []models.Platform{f.p1}, 2)
-	sheet, err := f.svc.WeekSheet(f.ctx, dayString(f.week.AddDate(0, 0, 3)), f.hq[0].ID.String(), all, f.actor)
+	sheet, err := f.svc.EntrySheet(f.ctx, "", dayString(f.week.AddDate(0, 0, 3)), f.hq[0].ID.String(), all, f.actor)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sheet.Rows) != 2 || sheet.WeekStart != dayString(f.week) {
-		t.Errorf("HQ1's week (from any day of it) has %d platforms from %s, want 2 from %s", len(sheet.Rows), sheet.WeekStart, dayString(f.week))
+	if sheet.WeekStart != dayString(f.week) || sheet.Entry != nil || len(sheetRow(t, sheet, f.p1).Groups) != 1 {
+		t.Errorf("a new entry for HQ1's week (from any day of it) from %s, want %s, with the agent's assignment", sheet.WeekStart, dayString(f.week))
 	}
 	if r := sheetRow(t, sheet, f.p2); r.Currency != "KHR" || !r.CommissionRate.Equal(decimal.NewFromInt(10)) {
 		t.Errorf("each platform takes its own default rate and currency, got %s %s", r.CommissionRate, r.Currency)
@@ -168,11 +195,23 @@ func TestPlatformAssignmentsManyToMany(t *testing.T) {
 	if n != 0 {
 		t.Error("a refused request must not assign any HQ")
 	}
+	// The unique key stops a second active assignment of an agent in a group.
 	one := int8(1)
-	dup := models.HQPlatformAssignment{Base: models.Base{ID: uuid.New()}, BranchID: f.hq[0].ID, PlatformID: f.p1.ID, CommissionRate: decimal.Zero, Currency: "USD", IsActive: true, ActiveKey: &one, StartsOn: f.week, CreatedByID: f.actor}
-	if err := f.db.Create(&dup).Error; !isDuplicate(err) {
-		t.Errorf("the unique key must stop a second active assignment, got %v", err)
+	grp := models.AssignmentGroup{ID: uuid.New(), BranchID: f.hq[0].ID, Title: "TWL key", StartsOn: f.week, IsActive: true, CreatedByID: f.actor}
+	if err := f.db.Create(&grp).Error; err != nil {
+		t.Fatal(err)
 	}
+	first := models.HQPlatformAssignment{Base: models.Base{ID: uuid.New()}, BranchID: f.hq[0].ID, PlatformID: f.p1.ID, GroupID: &grp.ID, CommissionRate: decimal.Zero, Currency: "USD", IsActive: true, ActiveKey: &one, StartsOn: f.week, CreatedByID: f.actor}
+	dup := first
+	dup.ID = uuid.New()
+	if err := f.db.Create(&first).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := f.db.Create(&dup).Error; !isDuplicate(err) {
+		t.Errorf("the unique key must stop a second active assignment in a group, got %v", err)
+	}
+	f.db.Unscoped().Delete(&first)
+	f.db.Delete(&grp)
 	// A currency chosen applies to every platform assigned with it; each keeps its own default %.
 	list, err := f.svc.Assign(f.ctx, AssignmentInput{PlatformIDs: []string{f.p1.ID.String(), f.p2.ID.String()}, BranchIDs: f.ids(3), Currency: "USD"}, all, f.actor)
 	if err != nil || len(list) != 2 || list[0].Currency != "USD" || list[1].Currency != "USD" ||
@@ -208,13 +247,11 @@ func TestAssignmentHistoryKept(t *testing.T) {
 	if len(rows) != 2 {
 		t.Errorf("history: %d assignments, want 2", len(rows))
 	}
-	sheet, _ := f.svc.WeekSheet(f.ctx, dayString(f.week), f.hq[2].ID.String(), all, f.actor)
-	if !sheetRow(t, sheet, f.p1).Saved {
+	if !sheetRow(t, f.sheet(t, f.week, 2), f.p1).Saved {
 		t.Error("the old HQ's saved week stays")
 	}
-	later, _ := f.svc.WeekSheet(f.ctx, dayString(next), f.hq[2].ID.String(), all, f.actor)
-	if len(later.Rows) != 0 {
-		t.Error("after the move the old HQ no longer has the platform")
+	if r := sheetRow(t, f.sheet(t, next, 2), f.p1); len(r.Groups) != 0 || !r.CommissionRate.IsZero() {
+		t.Error("after the move the agent no longer counts at the old HQ")
 	}
 	if _, err = f.svc.Assign(f.ctx, AssignmentInput{PlatformIDs: []string{f.p1.ID.String()}, BranchIDs: f.ids(2), StartsOn: dayString(f.week)}, all, f.actor); err == nil {
 		t.Error("a new assignment overlapping an ended one must be refused")
@@ -248,10 +285,11 @@ func TestWeeklyEntryCalculationAndRateHistory(t *testing.T) {
 	if n != 2 {
 		t.Fatalf("%d rows for the week, want 2", n)
 	}
-	dup := models.WeeklyPlatformResult{Base: models.Base{ID: uuid.New()}, WeekStart: f.week, WeekEnd: f.week.AddDate(0, 0, 6), BranchID: f.hq[0].ID, PlatformID: f.p1.ID, AssignmentID: a.ID,
+	entryID := uuid.MustParse(f.entries[f.entryKey(f.week, 0)])
+	dup := models.WeeklyPlatformResult{Base: models.Base{ID: uuid.New()}, EntryID: &entryID, WeekStart: f.week, WeekEnd: f.week.AddDate(0, 0, 6), BranchID: f.hq[0].ID, PlatformID: f.p1.ID,
 		Currency: "USD", FormulaVersion: "v1", CreatedByID: f.actor}
 	if err := f.db.Create(&dup).Error; !isDuplicate(err) {
-		t.Errorf("the unique key must stop a second row for the week, got %v", err)
+		t.Errorf("the unique key must stop a second row for the agent on the entry, got %v", err)
 	}
 
 	// A new rate applies to new weeks only; the saved week keeps 35%.
@@ -290,12 +328,16 @@ func TestWeeklyEntryCalculationAndRateHistory(t *testing.T) {
 	if _, err := f.svc.Assign(f.ctx, AssignmentInput{PlatformIDs: []string{f.p1.ID.String()}, BranchIDs: f.ids(3), StartsOn: dayString(mid)}, all, f.actor); err != nil {
 		t.Fatal(err)
 	}
-	if s, _ := f.svc.WeekSheet(f.ctx, dayString(f.week), f.hq[3].ID.String(), all, f.actor); len(s.Rows) != 1 {
-		t.Error("a platform assigned on the Wednesday is part of that week")
+	if r := sheetRow(t, f.sheet(t, f.week, 3), f.p1); len(r.Groups) != 1 {
+		t.Error("an agent assigned on the Wednesday counts in that week")
 	}
-	// Not assigned, or a week that hasn't started: refused.
-	if _, _, err := f.save(f.week, 1, canAll, "", row(f.p1, "1", "1")); err == nil {
-		t.Error("a platform not assigned to the HQ must be refused")
+	// An agent in no group can be entered (its Total is 0); a week that hasn't started can't.
+	free, _, err := f.save(f.week, 1, canAll, "", row(f.p1, "1", "1"))
+	if err != nil {
+		t.Fatalf("an agent in no group can be entered: %v", err)
+	}
+	if r := sheetRow(t, free, f.p1); !r.JamePS.IsZero() || len(r.Groups) != 0 {
+		t.Errorf("an agent in no group has no Total: %s in %d groups", r.JamePS, len(r.Groups))
 	}
 	if _, _, err := f.save(weekStart(f.svc.today()).AddDate(0, 0, 7), 0, canAll, "", row(f.p1, "1", "1")); err == nil {
 		t.Error("a future week must be refused")
@@ -306,7 +348,7 @@ func TestWinLoseHQAccess(t *testing.T) {
 	f := newWLFixture(t)
 	f.assign(t, []models.Platform{f.p1}, 0, 1)
 	only2 := f.scope(1)
-	if _, err := f.svc.WeekSheet(f.ctx, dayString(f.week), f.hq[0].ID.String(), only2, f.actor); !errors.Is(err, ErrBranchAccessDenied) {
+	if _, err := f.svc.EntrySheet(f.ctx, "", dayString(f.week), f.hq[0].ID.String(), only2, f.actor); !errors.Is(err, ErrBranchAccessDenied) {
 		t.Errorf("another HQ's week must be refused, got %v", err)
 	}
 	if _, _, err := f.svc.SaveWeek(f.ctx, WeekEntryInput{WeekStart: dayString(f.week), BranchID: f.hq[0].ID.String(), Title: "TWL week", Rows: []WeekEntryRow{row(f.p1, "1", "1")}}, only2, canAll, f.actor); !errors.Is(err, ErrBranchAccessDenied) {
@@ -599,17 +641,17 @@ func TestWeeklyEntries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sheet.BranchID != f.hq[1].ID || sheet.Entry == nil || sheet.Entry.Title != "Week 1 TWL2" || !sheet.Rows[0].Saved {
+	if sheet.BranchID != f.hq[1].ID || sheet.Entry == nil || sheet.Entry.Title != "Week 1 TWL2" || !sheetRow(t, sheet, f.p1).Saved {
 		t.Fatalf("saved under the default branch with its title: %s %+v", sheet.BranchCode, sheet.Entry)
 	}
 	// Without a default branch and with several branches there is no group to use.
 	f.db.Model(&models.User{}).Where("id = ?", f.actor).Update("default_branch_id", nil)
 	f.db.Exec("DELETE FROM user_branches WHERE user_id = ?", f.actor)
-	if _, err := f.svc.WeekSheet(f.ctx, dayString(f.week), "", all, f.actor); err == nil {
+	if _, err := f.svc.EntrySheet(f.ctx, "", dayString(f.week), "", all, f.actor); err == nil {
 		t.Error("no default branch and no single branch: the own group can't be worked out")
 	}
 	// Renaming needs Correct Win/Lose; the amounts can be left as they are.
-	in.BranchID, in.Title = f.hq[1].ID.String(), "Week 1 (checked)"
+	in.EntryID, in.Title = sheet.Entry.ID.String(), "Week 1 (checked)"
 	onlyCreate := func(code string) bool { return code == permissions.WinLoseCreate }
 	if _, _, err := f.svc.SaveWeek(f.ctx, in, all, onlyCreate, f.actor); err == nil {
 		t.Error("changing the title of a saved entry needs Correct Win/Lose")
@@ -641,7 +683,7 @@ func TestWeeklyEntries(t *testing.T) {
 		t.Errorf("none were made by yesterday, got %d", len(found))
 	}
 
-	// Deleting an entry (with a reason) removes its week's amounts for good: it can be entered again.
+	// Deleting an entry (with a reason) removes its amounts for good: the week can be entered again.
 	newest := list[0]
 	if _, _, err := f.svc.DeleteEntry(f.ctx, newest.ID, "", all); err == nil {
 		t.Error("deleting an entry needs a reason")
@@ -655,8 +697,24 @@ func TestWeeklyEntries(t *testing.T) {
 	if left != 0 {
 		t.Errorf("its amounts are gone, %d left", left)
 	}
+	delete(f.entries, f.entryKey(f.week.AddDate(0, 0, 7), 0))
 	if _, _, err := f.save(f.week.AddDate(0, 0, 7), 0, canAll, "", row(f.p1, "7", "0")); err != nil {
 		t.Errorf("the week can be entered again: %v", err)
+	}
+	// New entry is always a new entry, even for a week that has one; the saves after change only it.
+	second, _, err := f.svc.SaveWeek(f.ctx, WeekEntryInput{WeekStart: dayString(f.week), BranchID: f.hq[1].ID.String(), Title: "Week 1 again", Rows: []WeekEntryRow{row(f.p1, "300", "0")}}, all, canAll, f.actor)
+	if err != nil || second.Entry == nil || second.Entry.ID == list[1].ID || !sheetRow(t, second, f.p1).WinLose.Equal(decimal.NewFromInt(300)) {
+		t.Fatalf("a second entry for the week: %v", err)
+	}
+	if _, _, err := f.svc.SaveWeek(f.ctx, WeekEntryInput{EntryID: second.Entry.ID.String(), Title: "Week 1 again", Rows: []WeekEntryRow{row(f.p2, "5", "0")}}, all, canAll, f.actor); err != nil {
+		t.Fatal(err)
+	}
+	first, err := f.svc.EntrySheet(f.ctx, list[1].ID.String(), "", "", all, f.actor)
+	if err != nil || !sheetRow(t, first, f.p1).WinLose.Equal(decimal.NewFromInt(1000)) || sheetRow(t, first, f.p2).Saved {
+		t.Errorf("the first entry is left as it was: %v", err)
+	}
+	if found, _ := f.svc.ListEntries(f.ctx, EntryFilter{Search: "Week 1"}, all); len(found) != 2 {
+		t.Errorf("both entries of the week are listed, got %d", len(found))
 	}
 	// A finalized week's entry can't be deleted.
 	if _, err := f.svc.FinalizeWeek(f.ctx, FinalizeInput{BranchID: f.hq[1].ID.String(), WeekStart: dayString(f.week)}, all, f.actor); err != nil {
@@ -696,8 +754,20 @@ func TestAssignmentGroups(t *testing.T) {
 	if err != nil || g.Title != "V-series" || g.BranchID != f.hq[0].ID || len(g.Agents) != 2 || len(g.Partners) != 0 || rateOf(g, f.p1) != "20" || rateOf(g, f.p2) != "10" {
 		t.Fatalf("group: %v %+v", err, g)
 	}
-	if _, err := f.svc.CreateGroup(f.ctx, GroupInput{Title: "Other", Agents: []GroupAgentInput{agent(f.p1, "5")}}, all, f.actor); err == nil || !strings.Contains(err.Error(), "V-series") {
-		t.Errorf("an agent is in one group at a time, got %v", err)
+	// An agent can be in several groups: on Data Entry it is one row, counting in each.
+	second, err := f.svc.CreateGroup(f.ctx, GroupInput{Title: "Other", Agents: []GroupAgentInput{agent(f.p1, "5")}, StartsOn: start}, all, f.actor)
+	if err != nil {
+		t.Fatalf("an agent can be in a second group: %v", err)
+	}
+	var titles []string
+	for _, g := range sheetRow(t, f.sheet(t, f.week, 0), f.p1).Groups {
+		titles = append(titles, g.GroupTitle)
+	}
+	if len(titles) != 2 || titles[0] != "Other" || titles[1] != "V-series" {
+		t.Errorf("one row in both groups, by title: %v", titles)
+	}
+	if _, err := f.svc.DeleteGroup(f.ctx, second.ID, all); err != nil {
+		t.Fatal(err)
 	}
 	// The Total is at the agent's rate.
 	sheet, _, err := f.save(f.week, 0, canAll, "", row(f.p1, "1000", "0"))
@@ -726,11 +796,11 @@ func TestAssignmentGroups(t *testing.T) {
 	if _, err := f.svc.SetGroupActive(f.ctx, g.ID, false, all); err != nil {
 		t.Fatal(err)
 	}
-	if sheet, _ := f.svc.WeekSheet(f.ctx, dayString(f.week), f.hq[0].ID.String(), all, f.actor); len(sheet.Rows) != 1 || !sheet.Rows[0].Saved {
-		t.Errorf("off: only the saved agent stays on its week, got %d rows", len(sheet.Rows))
+	if r := sheetRow(t, f.sheet(t, f.week, 0), f.p1); !r.Saved || len(r.Groups) != 1 {
+		t.Errorf("off: the saved week stays as it was: %+v", r)
 	}
-	if next, _ := f.svc.WeekSheet(f.ctx, dayString(f.week.AddDate(0, 0, 7)), f.hq[0].ID.String(), all, f.actor); len(next.Rows) != 0 {
-		t.Errorf("off: no agents on a new week, got %d", len(next.Rows))
+	if r := sheetRow(t, f.sheet(t, f.week.AddDate(0, 0, 7), 0), f.p2); len(r.Groups) != 0 {
+		t.Errorf("off: its agents count in no group on a new week, got %d", len(r.Groups))
 	}
 	agents, _ := f.svc.ListPlatforms(f.ctx, true)
 	for _, a := range agents {
@@ -747,8 +817,8 @@ func TestAssignmentGroups(t *testing.T) {
 			t.Errorf("a switched-on group counts for the agent, got %d", a.ActiveHQs)
 		}
 	}
-	if next, _ := f.svc.WeekSheet(f.ctx, dayString(f.week.AddDate(0, 0, 7)), f.hq[0].ID.String(), all, f.actor); len(next.Rows) != 2 {
-		t.Errorf("on again: both agents, got %d", len(next.Rows))
+	if r := sheetRow(t, f.sheet(t, f.week.AddDate(0, 0, 7), 0), f.p2); len(r.Groups) != 1 {
+		t.Errorf("on again: its agents count in it, got %d", len(r.Groups))
 	}
 
 	// Update: rename, take out the agent without weeks (removed), a new rate; partners from before go.
@@ -799,5 +869,138 @@ func TestAssignmentGroups(t *testing.T) {
 	}
 	if found, _ := f.svc.ListGroups(f.ctx, f.hq[0].ID, GroupFilter{Search: "nothing like it"}, all); len(found) != 0 {
 		t.Errorf("a search with no match: %d", len(found))
+	}
+}
+
+func TestAgentInSeveralGroups(t *testing.T) {
+	f := newWLFixture(t)
+	f.db.Model(&models.User{}).Where("id = ?", f.actor).Update("default_branch_id", f.hq[0].ID)
+	defer f.db.Model(&models.User{}).Where("id = ?", f.actor).Update("default_branch_id", nil)
+	start := dayString(f.week.AddDate(0, 0, -21))
+	n := func(v int64) decimal.Decimal { return decimal.NewFromInt(v) }
+	// The agent's assignment from before groups, ended mid-week, gives way to its groups.
+	old := f.assign(t, []models.Platform{f.p1}, 0)[0]
+	if _, err := f.svc.EndAssignment(f.ctx, old.ID, AssignmentEndInput{EndsOn: dayString(f.week.AddDate(0, 0, 2)), Reason: "into groups"}, all, f.actor); err != nil {
+		t.Fatal(err)
+	}
+	group := func(title, rate string) *GroupRow {
+		t.Helper()
+		g, err := f.svc.CreateGroup(f.ctx, GroupInput{Title: title, Agents: []GroupAgentInput{{PlatformID: f.p1.ID.String(), CommissionRate: rate}}, StartsOn: start}, all, f.actor)
+		if err != nil {
+			t.Fatalf("group %s: %v", title, err)
+		}
+		return g
+	}
+	a, b := group("A", "10"), group("B", "20")
+
+	// One row for the agent: its Total in each group at the group's rate, and their sum. An agent
+	// in no group (p2 here) can be entered too, with no Total.
+	sheet, _, err := f.save(f.week, 0, canAll, "", row(f.p1, "1000", "0"), row(f.p2, "500", "0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := sheetRow(t, sheet, f.p1)
+	if len(r.Groups) != 2 || r.Groups[0].GroupTitle != "A" || !r.Groups[0].JamePS.Equal(n(100)) || !r.Groups[1].JamePS.Equal(n(200)) ||
+		!r.JamePS.Equal(n(300)) || !r.CommissionRate.Equal(n(30)) {
+		t.Fatalf("100 in A and 200 in B, 300 in all: %+v", r)
+	}
+	if r := sheetRow(t, sheet, f.p2); !r.Saved || len(r.Groups) != 0 || !r.JamePS.IsZero() {
+		t.Errorf("an agent in no group: %+v", r)
+	}
+	// A correction works out each group again at the rate saved.
+	if _, _, err := f.svc.UpdateGroup(f.ctx, a.ID, GroupUpdateInput{Title: "A", Agents: []GroupAgentInput{{PlatformID: f.p1.ID.String(), CommissionRate: "50"}}}, all, f.actor); err != nil {
+		t.Fatal(err)
+	}
+	sheet, _, err = f.save(f.week, 0, canAll, "fix", row(f.p1, "500", "0"), row(f.p2, "500", "0"))
+	if r := sheetRow(t, sheet, f.p1); err != nil || !r.Groups[0].JamePS.Equal(n(50)) || !r.Groups[1].JamePS.Equal(n(100)) || !r.JamePS.Equal(n(150)) {
+		t.Errorf("corrected at 10%% and 20%%: %v %+v", err, r)
+	}
+
+	// A second entry for the same week adds up with the first in the reports.
+	if _, _, err := f.svc.SaveWeek(f.ctx, WeekEntryInput{WeekStart: dayString(f.week), Title: "Late", Rows: []WeekEntryRow{row(f.p1, "100", "0")}}, all, canAll, f.actor); err != nil {
+		t.Fatal(err)
+	}
+	week := ReportFilter{DateFrom: dayString(f.week), DateTo: dayString(f.week.AddDate(0, 0, 6))}
+	rep, err := f.svc.Report(f.ctx, week, all, true, f.actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	totals := map[string]string{}
+	for _, g := range rep.Groups {
+		totals[g.Title] = g.Totals[0].JamePS.String() + " " + g.Totals[0].WinLose.String()
+	}
+	// A: 50 (500 at 10%) + 50 (100 at 50%); B: 100 + 20; no group: p2's 500 with no Total.
+	if totals["A"] != "100 600" || totals["B"] != "120 600" || totals[""] != "0 500" {
+		t.Errorf("by group, the agent in both: %v", totals)
+	}
+	for _, l := range rep.Lines {
+		if l.PlatformID == f.p1.ID && (!l.WinLose.Equal(n(600)) || !l.JamePS.Equal(n(220)) || l.Entries != 2) {
+			t.Errorf("by agent, both entries and both groups: %+v", l)
+		}
+	}
+	week.GroupID = &b.ID
+	if one, err := f.svc.Report(f.ctx, week, all, true, f.actor); err != nil || len(one.Lines) != 1 || !one.Lines[0].JamePS.Equal(n(120)) {
+		t.Errorf("one group's report has its part of the Total: %v %+v", err, one)
+	}
+	if g, _ := f.svc.GroupByID(f.ctx, a.ID, all); g.Weeks != 2 {
+		t.Errorf("A has the agent's two results, got %d", g.Weeks)
+	}
+}
+
+func TestFormulaChange(t *testing.T) {
+	f := newWLFixture(t) // v1
+	n := func(v int64) decimal.Decimal { return decimal.NewFromInt(v) }
+	a := f.assign(t, []models.Platform{f.p1}, 0)[0] // 35%
+	// Two weeks saved with v1, (1000 + 200) × 35% = 420; the earlier one is finalized.
+	open, finalized := f.week, f.week.AddDate(0, 0, -7)
+	for _, w := range []time.Time{open, finalized} {
+		if _, _, err := f.save(w, 0, canAll, "", row(f.p1, "1000", "200")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	st, err := f.svc.FinalizeWeek(f.ctx, FinalizeInput{BranchID: f.hq[0].ID.String(), WeekStart: dayString(finalized)}, all, f.actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The business's rule, v2: the commission is taken away. Weeks not finalized follow it.
+	f.db.Where("`key` = ?", FormulaSettingKey).Delete(&models.AppSetting{})
+	changed, err := f.svc.RecalculateOpenWeeks(f.ctx)
+	if err != nil || changed != 1 {
+		t.Fatalf("only the open week is worked out again: %v %d", err, changed)
+	}
+	if r := sheetRow(t, f.sheet(t, open, 0), f.p1); !r.JamePS.Equal(n(280)) || r.FormulaVersion != "v2" || !r.Groups[0].JamePS.Equal(n(280)) {
+		t.Errorf("(1000 − 200) × 35%% = 280: %s %s", r.JamePS, r.FormulaVersion)
+	}
+	if r := sheetRow(t, f.sheet(t, finalized, 0), f.p1); !r.JamePS.Equal(n(420)) || r.FormulaVersion != "v1" {
+		t.Errorf("the finalized week stays as settled: %s %s", r.JamePS, r.FormulaVersion)
+	}
+	if again, _ := f.svc.RecalculateOpenWeeks(f.ctx); again != 0 {
+		t.Errorf("nothing left to work out, got %d", again)
+	}
+	both := ReportFilter{DateFrom: dayString(finalized), DateTo: dayString(open.AddDate(0, 0, 6))}
+	if r, err := f.svc.Report(f.ctx, both, all, true, f.actor); err != nil || len(r.Lines) != 1 || r.Lines[0].Formula != "" {
+		t.Errorf("a line over weeks with two formulas names none: %v %+v", err, r)
+	}
+	// Reopened, the week follows the current formula too.
+	if _, err := f.svc.ReopenWeek(f.ctx, st.ID, "late result", all, f.actor); err != nil {
+		t.Fatal(err)
+	}
+	if r := sheetRow(t, f.sheet(t, finalized, 0), f.p1); !r.JamePS.Equal(n(280)) || r.FormulaVersion != "v2" {
+		t.Errorf("reopened: %s %s", r.JamePS, r.FormulaVersion)
+	}
+	if r, _ := f.svc.Report(f.ctx, both, all, true, f.actor); r.Lines[0].Formula != "v2" {
+		t.Errorf("the line names its formula, got %q", r.Lines[0].Formula)
+	}
+	// A new week: (1,000 − 100) × 10% = 90.
+	if _, _, err := f.svc.UpdateAssignment(f.ctx, a.ID, AssignmentUpdateInput{CommissionRate: "10", Currency: "USD"}, all); err != nil {
+		t.Fatal(err)
+	}
+	next, _, err := f.save(open.AddDate(0, 0, 7), 0, canAll, "", row(f.p1, "1000", "100"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := sheetRow(t, next, f.p1); !r.JamePS.Equal(n(90)) {
+		t.Errorf("(1,000 − 100) × 10%% = 90, got %s", r.JamePS)
 	}
 }

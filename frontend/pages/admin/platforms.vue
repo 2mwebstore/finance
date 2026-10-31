@@ -4,7 +4,6 @@
       <div>
         <p class="text-[10px] font-bold tracking-[0.14em] text-slate-400">PLATFORMS</p>
         <h1 class="text-xl font-bold text-navy">Agents</h1>
-        <p class="mt-1 text-xs text-muted">The agents groups report weekly win/lose for. Each agent’s currency fills in new group assignments; partners and their % are set on the assignments.</p>
       </div>
       <div class="flex gap-2">
         <NuxtLink v-if="can('platforms.view', 'platform-assignments.manage')" to="/admin/platform-assignments" class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-white px-3 py-2 text-sm font-medium text-navy hover:bg-canvas"><Network :size="16" /> Group assignments</NuxtLink>

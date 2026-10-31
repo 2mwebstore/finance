@@ -6,7 +6,6 @@
         <div>
           <p class="text-[10px] font-bold tracking-[0.14em] text-slate-400">PLATFORMS</p>
           <h1 class="text-xl font-bold text-navy">Data entry</h1>
-          <p class="mt-1 text-xs text-muted">Each entry is one week (Monday to Sunday) of every agent’s win/lose and commission.</p>
         </div>
         <div class="flex gap-2">
           <NuxtLink v-if="can('winlose-reports.view')" to="/winlose/reports/weekly" class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-white px-3 py-2 text-sm font-medium text-navy hover:bg-canvas"><FileSpreadsheet :size="16" /> Weekly report</NuxtLink>
@@ -66,7 +65,6 @@
       <AppAlert v-else-if="error" title="Couldn’t load the week" :message="error"><template #action><button type="button" @click="load">Try again</button></template></AppAlert>
       <template v-else-if="sheet">
         <AppAlert v-if="sheet.locked" type="warning" title="This week is finalized" :message="`The week of ${formatDocDate(sheet.week_start)} – ${formatDocDate(sheet.week_end)} is settled. Reopen it on the weekly report to change it.`" />
-        <p v-else-if="form.mode === 'new' && sheet.entry" class="rounded-lg bg-blue-50 px-3 py-2 text-xs text-navy">This week already has the entry “{{ sheet.entry.title }}”; saving updates it.</p>
         <div class="overflow-hidden rounded-xl border border-border bg-white">
           <table class="wl-table w-full text-left text-sm">
             <thead class="bg-canvas text-[10px] uppercase tracking-wide text-slate-500">
@@ -75,6 +73,7 @@
                 <th class="px-3 py-2 font-bold">Agent</th>
                 <th class="w-56 px-2 py-2 font-bold">Win/Lose</th>
                 <th class="w-56 px-2 py-2 font-bold">Commission</th>
+                <th v-if="canSave" class="w-24 px-2 py-2"><span class="sr-only">Save</span></th>
               </tr>
             </thead>
             <tbody class="divide-y divide-border">
@@ -91,8 +90,12 @@
                 <td class="px-2 py-2" data-label="Commission">
                   <MoneyInput v-model="edits[row.platform_id]!.commission" :currency="row.currency" signed class="w-full rounded-lg border border-border px-2.5 py-1.5 text-right text-sm tabular-nums disabled:bg-canvas disabled:text-muted" :class="Number(edits[row.platform_id]!.commission) < 0 ? 'text-expense' : 'text-navy'" :aria-invalid="invalid(edits[row.platform_id]!.commission) ? 'true' : undefined" :disabled="!editable(row)" :aria-label="`Commission for ${row.platform_code}`" />
                 </td>
+                <!-- Saves just this agent: the others keep what was typed -->
+                <td v-if="canSave" class="row-save px-2 py-2 text-right">
+                  <button v-if="editable(row)" type="button" class="action-chip action-success" :disabled="!changed(row) || rowInvalid(row) || saving" :aria-label="`Save ${row.platform_code}`" @click="trySave(row)"><Save :size="13" /> {{ saving && only?.platform_id === row.platform_id ? 'Saving…' : 'Save' }}</button>
+                </td>
               </tr>
-              <tr v-if="!sheet.rows.length" class="empty-row"><td colspan="4" class="px-3 py-8 text-center text-sm text-muted">No agents are assigned to your group in this week.<NuxtLink v-if="can('platform-assignments.manage')" to="/admin/platform-assignments" class="ml-1 font-semibold text-primary">Assign agents</NuxtLink></td></tr>
+              <tr v-if="!sheet.rows.length" class="empty-row"><td :colspan="canSave ? 5 : 4"class="px-3 py-8 text-center text-sm text-muted">No agents are assigned to your group in this week.<NuxtLink v-if="can('platform-assignments.manage')" to="/admin/platform-assignments" class="ml-1 font-semibold text-primary">Assign agents</NuxtLink></td></tr>
             </tbody>
           </table>
         </div>
@@ -102,7 +105,7 @@
         <div class="flex flex-wrap items-center justify-end gap-2">
           <span v-if="dirty" class="mr-auto text-xs text-amber-700">Unsaved changes</span>
           <button type="button" class="rounded-lg border border-border bg-white px-4 py-2 text-sm font-semibold text-muted disabled:opacity-50" :disabled="saving" @click="closeForm">{{ canSave ? 'Cancel' : 'Back' }}</button>
-          <button v-if="canSave" type="button" class="rounded-lg bg-primary px-5 py-2 text-sm font-semibold text-white disabled:opacity-50" :disabled="!dirty || saving || hasInvalid" @click="trySave">{{ saving ? 'Saving…' : 'Save' }}</button>
+          <button v-if="canSave" type="button" class="rounded-lg bg-primary px-5 py-2 text-sm font-semibold text-white disabled:opacity-50" :disabled="!dirty || saving || hasInvalid" @click="trySave()">{{ saving && !only ? 'Saving…' : 'Save all' }}</button>
         </div>
       </template>
     </template>
@@ -136,10 +139,6 @@
           </tbody>
         </table>
       </div>
-      <template #footer>
-        <button type="button" class="border border-border bg-white text-muted" @click="viewing = null">Close</button>
-        <button v-if="viewing && !viewing.locked && (canCreate || canEdit)" type="button" class="inline-flex items-center justify-center gap-1.5 bg-primary text-white" @click="updateViewed"><Pencil :size="14" /> Update</button>
-      </template>
     </AppModal>
 
     <!-- Deleting removes the week's amounts too (kept in the audit log with the reason) -->
@@ -150,7 +149,7 @@
 </template>
 
 <script setup lang="ts">
-import { ChevronLeft, Eye, FileSpreadsheet, Lock, NotebookPen, Pencil, Plus, Trash2 } from 'lucide-vue-next'
+import { ChevronLeft, Eye, FileSpreadsheet, Lock, NotebookPen, Pencil, Plus, Save, Trash2 } from 'lucide-vue-next'
 import type { WeekSheet, WeekSheetRow, WinLoseEntry } from '~/types/api'
 import { useToast } from '~/composables/useToast'
 import { formatDocDate, todayISO } from '~/utils/inventory'
@@ -206,7 +205,7 @@ async function openView(e: WinLoseEntry) {
   viewError.value = ''
   viewLoading.value = true
   try {
-    const result = await api<WeekSheet>('/winlose/entry', { query: { week_start: e.week_start, branch_id: e.branch_id } })
+    const result = await api<WeekSheet>('/winlose/entry', { query: { entry_id: e.id } })
     if (viewing.value?.id === e.id) viewSheet.value = result
   } catch (err: any) {
     if (viewing.value?.id === e.id) viewError.value = err?.data?.error || 'Could not load the entry.'
@@ -235,15 +234,9 @@ async function deleteEntry(reason: string) {
   }
 }
 
-function updateViewed() {
-  const e = viewing.value
-  viewing.value = null
-  if (e) openEdit(e)
-}
-
-// --- the form: a new entry goes in the person's own group (the API works it out) ---
-// A new entry is for this week (the person's own group: the API works it out).
-const form = ref<{ mode: 'new' | 'edit'; week_start: string; branch_id: string } | null>(null)
+// --- the form: a new entry is for this week, in the person's own group (the API works it out) ---
+// A new entry has no id until its first save; the saves after change only that entry.
+const form = ref<{ mode: 'new' | 'edit'; week_start: string; entry_id: string } | null>(null)
 const sheet = ref<WeekSheet | null>(null)
 const loading = ref(false)
 const error = ref('')
@@ -251,11 +244,11 @@ const title = ref('')
 const edits = reactive<Record<string, { win_lose: string; commission: string }>>({})
 
 function openNew() {
-  form.value = { mode: 'new', week_start: mondayOf(today), branch_id: '' }
+  form.value = { mode: 'new', week_start: mondayOf(today), entry_id: '' }
   load()
 }
 function openEdit(e: WinLoseEntry) {
-  form.value = { mode: 'edit', week_start: e.week_start, branch_id: e.branch_id }
+  form.value = { mode: 'edit', week_start: e.week_start, entry_id: e.id }
   load()
 }
 function closeForm() {
@@ -288,7 +281,7 @@ async function load() {
   error.value = ''
   saveError.value = ''
   try {
-    const result = await api<WeekSheet>('/winlose/entry', { query: { week_start: form.value.week_start, branch_id: form.value.branch_id || undefined } })
+    const result = await api<WeekSheet>('/winlose/entry', { query: form.value.entry_id ? { entry_id: form.value.entry_id } : { week_start: form.value.week_start } })
     if (request !== loadRequest) return
     sheet.value = result
     resetEdits()
@@ -323,26 +316,38 @@ function statusOf(row: WeekSheetRow) {
   return 'Not entered'
 }
 
-function filledRows() {
-  const clean = (value: string) => value.replace(/\.$/, '')
-  return (sheet.value?.rows || [])
-    .map(row => ({ platform_id: row.platform_id, win_lose: clean(edits[row.platform_id]!.win_lose), commission: clean(edits[row.platform_id]!.commission) }))
-    .filter(row => row.win_lose || row.commission)
+function rowInvalid(row: WeekSheetRow) {
+  const e = edits[row.platform_id]
+  return !!e && (invalid(e.win_lose) || invalid(e.commission))
 }
 
-// --- saving ---
+// A saved agent's empty box is saved as 0 (an unsaved agent left empty isn't sent).
+function rowBody(row: WeekSheetRow) {
+  const clean = (value: string) => value.replace(/\.$/, '') || (row.saved ? '0' : '')
+  const e = edits[row.platform_id]!
+  return { platform_id: row.platform_id, win_lose: clean(e.win_lose), commission: clean(e.commission) }
+}
+
+function filledRows() {
+  return (sheet.value?.rows || []).map(rowBody).filter(row => row.win_lose || row.commission)
+}
+
+// --- saving: every agent (Save all) or one at a time ---
 const saving = ref(false)
 const saveError = ref('')
 const reasonOpen = ref(false)
+// The agent being saved alone (null: Save all).
+const only = ref<WeekSheetRow | null>(null)
 const NEED_TITLE = 'Give the entry a title.'
 watch(title, (value) => { if (value.trim() && saveError.value === NEED_TITLE) saveError.value = '' })
 
-function trySave() {
+function trySave(row?: WeekSheetRow) {
   saveError.value = ''
-  if (hasInvalid.value) return
+  if (row ? rowInvalid(row) : hasInvalid.value) return
   if (!title.value.trim()) { saveError.value = NEED_TITLE; return }
+  only.value = row || null
   // Changing a saved week needs a reason (audit log).
-  if (sheet.value?.rows.some(row => row.saved && changed(row))) {
+  if ((row ? [row] : sheet.value?.rows || []).some(r => r.saved && changed(r))) {
     reasonOpen.value = true
     return
   }
@@ -351,14 +356,26 @@ function trySave() {
 
 async function save(reason: string) {
   if (!sheet.value || !form.value) return
+  const row = only.value
   saving.value = true
   saveError.value = ''
   try {
     const saved = await api<WeekSheet>('/winlose/entry', {
       method: 'PUT',
-      body: { week_start: form.value.week_start, branch_id: sheet.value.branch_id, title: title.value.trim(), rows: filledRows(), reason },
+      body: { entry_id: form.value.entry_id || undefined, week_start: form.value.week_start, title: title.value.trim(), rows: row ? [rowBody(row)] : filledRows(), reason },
     })
     reasonOpen.value = false
+    if (row) {
+      // Stay on the week: this agent shows what was saved, the others keep what was typed.
+      sheet.value = saved
+      form.value = { mode: 'edit', week_start: saved.week_start, entry_id: saved.entry?.id || form.value.entry_id }
+      for (const r of saved.rows) {
+        if (r.platform_id === row.platform_id || !edits[r.platform_id]) edits[r.platform_id] = { win_lose: asText(r.win_lose), commission: asText(r.commission) }
+      }
+      toast.success(`Week of ${formatDocDate(saved.week_start)}`, { title: `${row.platform_code} saved` })
+      loadEntries()
+      return
+    }
     toast.success(`Week of ${formatDocDate(saved.week_start)}`, { title: `“${saved.entry?.title || title.value.trim()}” saved` })
     form.value = null
     sheet.value = null
@@ -384,6 +401,8 @@ async function save(reason: string) {
   .wl-table tbody tr:not(.empty-row) td { padding: 0; text-align: left; }
   .wl-table tbody tr:not(.empty-row) td.row-no { display: none; }
   .wl-table tbody tr:not(.empty-row) td:nth-child(2) { grid-column: 1 / -1; }
+  .wl-table tbody tr:not(.empty-row) td.row-save { grid-column: 1 / -1; text-align: right; }
+  .wl-table tbody tr:not(.empty-row) td.row-save:empty { display: none; }
   .wl-table td[data-label]::before { content: attr(data-label); display: block; margin-bottom: 3px; color: #64748b; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
 }
 </style>

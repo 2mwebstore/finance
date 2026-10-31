@@ -610,14 +610,26 @@ export interface PartnerShare {
   jame_ps: string | null
 }
 
+/** An agent's part in one group: its Total at the group's rate for it. */
+export interface GroupShare {
+  /** Null for an assignment made before groups. */
+  group_id: string | null
+  group_title: string
+  commission_rate: string
+  /** Null until saved. */
+  jame_ps: string | null
+}
+
+/** One agent on an entry (every agent that is on is listed, whatever its groups). */
 export interface WeekSheetRow {
   platform_id: string
   platform_code: string
   platform_name: string
-  assignment_id: string
-  /** Partners share the Total, each at their own %; none: the Total is at commission_rate. */
+  /** Its Total in each group it is in that week (none: no Total). */
+  groups: GroupShare[]
+  /** Partners share the Total (only on assignments from before groups had their own rates). */
   partners: PartnerShare[]
-  /** "Partner %": with partners, their % added up. */
+  /** The groups' rates added up. */
   commission_rate: string
   currency: Currency
   saved: boolean
@@ -630,8 +642,7 @@ export interface WeekSheetRow {
   updated_at: string | null
 }
 
-/** An HQ's week (Monday to Sunday): every platform it had that week. */
-/** A group's saved week on Data Entry: its title (one per group and week). */
+/** An entry on Data Entry: a titled set of agents' results for a group's week (a week can have several). */
 export interface WinLoseEntry {
   id: string
   title: string
@@ -645,6 +656,7 @@ export interface WinLoseEntry {
   locked: boolean
 }
 
+/** An entry (or a new one) with every agent that can be entered. */
 export interface WeekSheet {
   week_start: string
   week_end: string
@@ -652,7 +664,7 @@ export interface WeekSheet {
   branch_id: string
   branch_code: string
   branch_name: string
-  /** Null until the week is saved. */
+  /** Null for a new entry until its first save. */
   entry: { id: string; title: string; created_at: string; created_by: string } | null
   formula: WinLoseFormula
   settlement: { id: string; status: 'finalized' | 'reopened'; week_start: string; week_end: string } | null
@@ -689,6 +701,8 @@ export interface WinLoseReportLine extends WinLoseSums {
   platform_name: string
   rate_min: string
   rate_max: string
+  /** The formula version every week of the line was worked out with ('' when they differ): v1 adds the commission, v2 takes it away. */
+  formula: string
   /** Who shared the Total, by name (partner_id null: weeks with no partner); empty when no week had partners. */
   partners: { partner_id: string | null; partner_name: string; rate_min: string; rate_max: string; jame_ps: string; entries: number }[]
 }

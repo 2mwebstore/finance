@@ -21,11 +21,12 @@ This is enforced in the API, not just the UI. In the code and database an assign
 | `platforms` | An agent: code (shown as **User**; unique and required, e.g. `LCMMJB`, `12K_YMLLJB_V1`), name (optional), default currency, active. `default_rate` is still the % for assignments without partners, but the app no longer shows or sets it (new agents get 0). |
 | `partners` | Name (unique), phone, note, default partner % (`default_rate`), active. |
 | `hq_platform_assignments` | A platform given to a branch with its own partner % (`commission_rate`, used when it has no partners), currency, first and last day. Many platforms per branch and many branches per platform. |
-| `assignment_groups` | A **titled group** of agents (the Group Agent Assignments page) in one branch: title, currency (empty = each agent's default), first day, active (on/off). Its agents are the `hq_platform_assignments` with its `group_id`. |
+| `assignment_groups` | A **titled group** of agents (the Group Agent Assignments page) in one branch: title, currency (empty = each agent's default), first day, active (on/off). Its agents are the `hq_platform_assignments` with its `group_id`; an agent can be in several groups, at its own rate in each. |
 | `assignment_partners` | An assignment's partners, each with their own % (`commission_rate`). Any number per assignment; a partner at most once. |
-| `weekly_platform_results` | One row per week (Monday–Sunday), branch and platform: win/lose, commission, Total (`jame_ps`), **plus the partner %, currency and formula version used**. |
+| `weekly_platform_results` | One row per entry and agent (`entry_id`, `platform_id`): win/lose, commission, Total (`jame_ps`: its groups' Totals added up, 0 for an agent in no group), **plus the rates, currency and formula version used**. `assignment_id` is only set on weeks saved before entries could hold any agent. |
+| `weekly_group_results` | A result's part in each group the agent was in that week: the group, the assignment, its rate and the Total at it. An agent in two groups counts in both. |
 | `weekly_partner_results` | Each partner's share of a saved week: their % and their Total (`jame_ps`), as they were when the week was entered. |
-| `weekly_entries` | Data Entry's entries: a title for one group's (branch's) week, who made it and when. One per group and week; its amounts are that group's `weekly_platform_results` for the week. |
+| `weekly_entries` | Data Entry's entries: a title for one branch's week, who made it and when. A week can have several entries; each one's amounts are the `weekly_platform_results` with its `entry_id`. |
 | `weekly_settlements` | A finalized (or reopened) week for one branch. |
 | `weekly_settlement_totals` | The finalized week's totals per currency. |
 
@@ -43,13 +44,19 @@ This is enforced in the API, not just the UI. In the code and database an assign
   `hq_platform_assignments` and `weekly_platform_results`. When the API creates the two new tables it
   copies those partners into them once (with their %); the old columns are then no longer used and
   are left in place.
-- **One active assignment per branch and platform:** `active_key` is 1 while active and NULL once
-  ended, with a unique key on `(branch_id, platform_id, active_key)`. The service also refuses an
-  assignment whose days would overlap an earlier one for the same branch and platform.
-- **One entry per week:** unique key on `(week_start, branch_id, platform_id)`. Picking any day of
-  a week opens that week (its Monday).
-- A platform the branch had on any day of a week is on that week's sheet (assigned on a Wednesday,
-  or moved mid-week: the week is on both branches' sheets).
+- **One active assignment per group and agent:** `active_key` is 1 while active and NULL once
+  ended, with a unique key on `(group_id, platform_id, active_key)`; an agent can be in several
+  groups of a branch. The service also refuses an assignment whose days would overlap an earlier
+  one for the same group and agent (with no group: branch and agent).
+- **One result per entry and agent:** unique key on `(entry_id, platform_id)`. **New entry** always
+  makes a new entry (its first save creates it, the saves after change only it), so a week can
+  have several entries; reports add them all up. Picking any day of a week opens that week (its
+  Monday). Databases built before this get the new keys (and lose the old `uq_hq_platform_active`,
+  `uq_weekly_platform_result` and `uq_weekly_entry`) on the next start; each saved result is put on
+  its week's entry and gets its group's share in `weekly_group_results`.
+- Data Entry lists **every agent that is on**, once, whatever its groups. A result counts in every
+  group (switched on) the agent was in on any day of the week, at that group's rate; an assignment
+  made before groups counts only when the agent is in no group that week.
 - **History is kept:** ending or moving an assignment sets its last day and keeps the row (a move
   takes the partners and % along); weeks already entered keep their own partners, %, currency and
   formula version when the partners, a % or the formula change.
@@ -61,11 +68,11 @@ This is enforced in the API, not just the UI. In the code and database an assign
   12K_YMLLJB agents on the Agents page.
 - **Titled groups:** Assign agents (its own page) makes a group: a title, its agents each with its
   own **rate** (the Total is worked out at it), and its first day. There is no currency choice:
-  each agent's amounts are in its own currency (Agents page). An agent can be in one
-  group at a time. **Update** (its own page) changes the title, agents (one taken out is ended if
+  each agent's amounts are in its own currency (Agents page). An agent can be in
+  several groups, at its own rate in each. **Update** (its own page) changes the title, agents (one taken out is ended if
   weeks were entered for it, else removed; one put in starts today) and their rates,
-  and takes off any partners a group had from before (weeks already saved keep their shares). **Active** off takes
-  the group's agents off Data Entry (weeks already saved stay; they stay in the group). **Delete**
+  and takes off any partners a group had from before (weeks already saved keep their shares). **Active** off: new
+  results no longer count in the group (weeks already saved stay; its agents stay in it). **Delete**
   works only while no week has been entered for the group (its assignments go for good); after
   that, turn it off. When `assignment_groups` is first created, every active assignment becomes a
   group of its own titled with its agent's code (once); ended ones stay without a group.
@@ -92,11 +99,17 @@ All of it is in `backend/internal/winlose` (one place, on the server). The entry
 Win/Lose and Commission; the Total and each partner's share are worked out when the week is saved
 and shown in the reports. (`POST /winlose/entry/preview` still returns them without saving.)
 
-Formula **v1** — read from the spreadsheet, **still to be confirmed by the business**:
+Formula **v2** (the default, the business's rule) takes the commission away, at each group's rate
+for the agent:
 
 ```
-Total = ROUND((win_lose + commission) × partner %, 0)     -- half away from zero, like Excel's ROUND
+Total = ROUND((win_lose − commission) × rate, 0)     -- half away from zero, like Excel's ROUND
+e.g.    (1,000 − 100) × 10% = 90
 ```
+
+An agent in two groups has a Total in each (at each group's rate); its own Total is their sum.
+Formula **v1** (`win_lose + commission`) was the first one, read from the spreadsheet; only
+finalized weeks saved with it keep it.
 
 With several partners, each partner's share is worked out at their own %, and the platform's Total
 is the sum of the shares (each share is rounded on its own). Example: win/lose 1,000 and commission
@@ -104,9 +117,13 @@ is the sum of the shares (each share is rounded on its own). Example: win/lose 1
 
 To change it: add a new version in `internal/winlose/calc.go` (keep the old one), then set the app
 setting `winlose.formula` to the new version (`PUT /api/v1/settings`, needs `settings.manage`).
-New weeks use the new version; saved weeks keep theirs (and a correction to a saved week is worked
-out with that week's own version, partners and %). `GET /winlose/formula` reports a version as not
-`confirmed` until it is marked `Confirmed`.
+Weeks that aren't finalized follow the current version: the API works them out again with it when
+it starts (`RecalculateOpenWeeks`, at the rates they were saved with) and when a week is reopened,
+and a correction uses it. Finalized weeks keep the version they were settled with.
+`GET /winlose/formula` reports a version as not `confirmed` until it is marked `Confirmed`.
+
+On the Weekly Report, tapping a group in **By group** shows only that group: each agent with its
+rate in the group and its Total worked out, e.g. `($1,000.00 − $100.00) × 10% = $90.00`.
 
 ## Permissions
 
@@ -153,10 +170,10 @@ changed; a week can be finalized from its Sunday; ends and moves can't hide week
 - PLATFORMS → **Data Entry** (`/winlose/entry`: a list of entries with Created at (the day and who
   made it), Title and the actions **View** (a window with the entry's details and saved amounts),
   **Update** and **Delete** (with a reason; needs Correct Win/Lose), searchable by title and
-  filtered by the days they were created; **New entry** is for this week (Monday to Sunday): a
-  title and every agent's Win/Lose and Commission),
-  **Weekly Report** (by agent with the rate used, by group, and the own branch's weekly
-  settlement), **Group Summary** (`/winlose/reports/branch-summary`; totals, by agent and by group),
+  filtered by the days they were created; **New entry** is a new entry for this week (Monday to
+  Sunday): a title and every agent's Win/Lose and Comm, each agent saved on its own or all at once),
+  **Weekly Report** (by group, then by agent, and the own branch's weekly settlement),
+  **Group Summary** (`/winlose/reports/branch-summary`; totals, by group, then by agent),
   **Agents** (`/admin/platforms`), **Group Agent
   Assignments** (`/admin/platform-assignments`: your branch's titled groups of agents with their
   rates, searchable by title, each with an **Active** switch, **Update** and **Delete**; **Assign
