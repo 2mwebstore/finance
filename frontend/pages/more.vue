@@ -34,13 +34,13 @@
       <NuxtLink v-if="canViewInventoryReports" to="/inventory/reports"><span>Inventory reports</span><small>Stock value, sales and profit</small><ChevronRight :size="17" /></NuxtLink>
     </section>
 
-    <section v-if="can('winlose.view', 'winlose.create', 'winlose.edit', 'winlose-reports.view', 'platforms.view', 'platforms.manage', 'platform-assignments.manage')" class="link-card">
-      <div class="section-label">PLATFORMS</div>
-      <Can :any="['winlose.view', 'winlose.create', 'winlose.edit']"><NuxtLink to="/winlose/entry"><span>Data entry</span><small>Titled weeks of each agent’s win/lose</small><ChevronRight :size="17" /></NuxtLink></Can>
-      <Can perm="winlose-reports.view"><NuxtLink to="/winlose/reports/weekly"><span>Weekly report</span><small>Weeks by group and agent, and settlements</small><ChevronRight :size="17" /></NuxtLink></Can>
+    <section v-if="can('winlose.view', 'winlose.create', 'winlose.edit', 'winlose.delete', 'winlose-reports.view', 'platforms.view', 'platforms.create', 'platforms.edit', 'platforms.delete', 'platform-assignments.view', 'platform-assignments.create', 'platform-assignments.edit', 'platform-assignments.delete')" class="link-card">
+      <div class="section-label">RP</div>
+      <Can :any="['winlose.view', 'winlose.create', 'winlose.edit', 'winlose.delete']"><NuxtLink to="/winlose/entry"><span>Data entry</span><small>Titled weeks of each agent’s win/lose</small><ChevronRight :size="17" /></NuxtLink></Can>
+      <Can perm="winlose-reports.view"><NuxtLink to="/winlose/reports/weekly"><span>Report</span><small>Weeks by group and agent, and settlements</small><ChevronRight :size="17" /></NuxtLink></Can>
       <Can perm="winlose-reports.view"><NuxtLink to="/winlose/reports/branch-summary"><span>Group summary</span><small>Totals per group, USD and KHR apart</small><ChevronRight :size="17" /></NuxtLink></Can>
-      <Can :any="['platforms.view', 'platforms.manage']"><NuxtLink to="/admin/platforms"><span>Agents</span><small>Agents and their currencies</small><ChevronRight :size="17" /></NuxtLink></Can>
-      <Can :any="['platforms.view', 'platform-assignments.manage']"><NuxtLink to="/admin/platform-assignments"><span>Group agent assignments</span><small>Which agents each group reports</small><ChevronRight :size="17" /></NuxtLink></Can>
+      <Can :any="['platforms.view', 'platforms.create', 'platforms.edit', 'platforms.delete']"><NuxtLink to="/admin/platforms"><span>Agents</span><small>Agents and their currencies</small><ChevronRight :size="17" /></NuxtLink></Can>
+      <Can :any="['platform-assignments.view', 'platform-assignments.create', 'platform-assignments.edit', 'platform-assignments.delete']"><NuxtLink to="/admin/platform-assignments"><span>Group agent assignments</span><small>Which agents each group reports</small><ChevronRight :size="17" /></NuxtLink></Can>
     </section>
 
     <section v-if="showAdmin" class="link-card">

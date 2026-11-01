@@ -55,13 +55,20 @@ Server-side authorization is enforced on every protected API. The UI uses the sa
 | `inventory-expenses.view` | View Inventory Expenses | Inventory Expenses | See inventory expenses of your branches |
 | `inventory-expenses.create` | Create Inventory Expenses | Inventory Expenses | Record inventory expenses (shipping, packaging, storage…) |
 | `inventory-expenses.void` | Void Inventory Expenses | Inventory Expenses | Void an inventory expense |
-| `platforms.view` | View Agents | Platforms | See agents and the groups they are in |
-| `platforms.manage` | Manage Agents | Platforms | Add and edit agents and their currency |
-| `platform-assignments.manage` | Manage Group Agent Assignments | Platforms | Make titled groups of agents with their rates; update, turn off or delete them |
-| `winlose.view` | View Win/Lose | Win/Lose | See the weekly win/lose entered for your groups |
-| `winlose.create` | Enter Win/Lose | Win/Lose | Enter a week's win/lose and commission for your groups (once a week) |
-| `winlose.edit` | Correct Win/Lose | Win/Lose | Change a week already saved, with a reason (kept in the audit log) |
-| `winlose-reports.view` | View Win/Lose Reports | Win/Lose Reports | The weekly report and the group summary for your groups, one group at a time |
+| `platforms.view` | View Agents | Platforms | See the agents, their currency and how many groups have them |
+| `platforms.create` | Add Agents | Platforms | Add agents with their currency |
+| `platforms.edit` | Update Agents | Platforms | Edit agents; turn them off (with a reason) or on |
+| `platforms.delete` | Delete Agents | Platforms | Delete an agent that was never in a group or entered (a used one can only be turned off) |
+| `platform-assignments.view` | View Group Agent Assignments | Platforms | See the titled groups with their agents and rates |
+| `platform-assignments.create` | Add Group Agent Assignments | Platforms | Make a titled group of agents with their rates (Assign agents) |
+| `platform-assignments.edit` | Update Group Agent Assignments | Platforms | Change a group's title, agents and rates; turn it off or on |
+| `platform-assignments.delete` | Delete Group Agent Assignments | Platforms | Delete a group no week was entered for (a used one can only be turned off) |
+| `winlose.view` | View Data Entry | Win/Lose | See the entries and the W/L and COMM entered for your groups |
+| `winlose.create` | Add Data Entry | Win/Lose | Make new entries and enter agents' W/L and COMM for your groups |
+| `winlose.edit` | Update Data Entry | Win/Lose | Change an entry's title and amounts already saved, with a reason (kept in the audit log) |
+| `winlose.delete` | Delete Data Entry | Win/Lose | Delete an entry and its amounts, with a reason (kept in the audit log) |
+| `winlose.react` | React to Data Entry | Win/Lose | Give an entry, or an agent in it, ✅ or ❌, on Data entry and the Report |
+| `winlose-reports.view` | View Report | Win/Lose Reports | The Report and the group summary for your groups, one group at a time |
 | `winlose-reports.consolidated` | View Consolidated Win/Lose | Win/Lose Reports | Combined totals across all your groups |
 | `winlose-settlements.finalize` | Finalize Weekly Settlements | Win/Lose Reports | Finalize or reopen a group's week; a finalized week can't be changed |
 
@@ -159,21 +166,36 @@ Inventory is separate from income/expense. Products are shared by every branch; 
 Inventory expenses use their own categories (type `inv_expense`, managed with `inventory.manage` on Inventory → Expense categories) and come off the sales profit as net profit. Inventory reports (stock value, sales and profit, purchases, expenses, low stock) need both `reports.view` and `inventory.view`. Nobody approves a purchase they created; people with `purchases.approve` record their own purchases as approved unless they send them for approval.
 
 ### Platforms & weekly win/lose
-In the PLATFORMS menu a platform is called an **agent** and a branch a **group** (the codes keep the old names). Win/lose is entered per group: people enter and see it only for their own groups (owner/admin see every group). An agent can be assigned to many groups and a group can have many agents, each assignment with its own partners (each at their own %) and currency.
+In the RP menu (once called PLATFORMS) a platform is called an **agent** and a branch a **group** (the codes keep the old names). Win/lose is entered per group: people enter and see it only for their own groups (owner/admin see every group). An agent can be assigned to many groups and a group can have many agents, each assignment with its own partners (each at their own %) and currency.
 
 | Code | Description |
 |------|-------------|
-| `platforms.view` | See agents and the groups they are in |
-| `platforms.manage` | Add and edit agents and their currency |
-| `platform-assignments.manage` | Make titled groups of agents with their rates; update, turn off or delete them |
-| `winlose.view` | See the weekly win/lose entered for your groups |
-| `winlose.create` | Enter a week's win/lose and commission for your groups (once a week) |
-| `winlose.edit` | Change a week already saved, with a reason (kept in the audit log) |
-| `winlose-reports.view` | The weekly report and the group summary for your groups, one group at a time |
+| `platforms.view` | See the agents, their currency and how many groups have them |
+| `platforms.create` | Add agents with their currency |
+| `platforms.edit` | Edit agents; turn them off (with a reason) or on |
+| `platforms.delete` | Delete an agent that was never in a group or entered (a used one can only be turned off) |
+| `platform-assignments.view` | See the titled groups with their agents and rates |
+| `platform-assignments.create` | Make a titled group of agents with their rates (Assign agents) |
+| `platform-assignments.edit` | Change a group's title, agents and rates; turn it off or on |
+| `platform-assignments.delete` | Delete a group no week was entered for (a used one can only be turned off) |
+| `winlose.view` | See the entries and the W/L and COMM entered for your groups |
+| `winlose.create` | Make new entries and enter agents' W/L and COMM for your groups |
+| `winlose.edit` | Change an entry's title and amounts already saved, with a reason (kept in the audit log) |
+| `winlose.delete` | Delete an entry and its amounts, with a reason (kept in the audit log) |
+| `winlose.react` | Give an entry, or an agent in it, ✅ or ❌, on Data entry and the Report |
+| `winlose-reports.view` | The Report and the group summary for your groups, one group at a time |
 | `winlose-reports.consolidated` | Combined totals across all your groups |
 | `winlose-settlements.finalize` | Finalize or reopen a group's week; a finalized week can't be changed |
 
 Win/lose is entered once a week (Monday to Sunday) per branch and platform. A saved week keeps the partners, partner %, currency and formula version it was worked out with; changing it needs `winlose.edit` and a reason (audit log). A finalized week can't be changed until someone with `winlose-settlements.finalize` reopens it. Reports without one branch chosen (all your branches together) need `winlose-reports.consolidated`. Owner/admin (Manage Branches) get these permissions automatically when they first ship.
+
+Each RP page has its own **view, add, update and delete** (Data entry also **react**). They took
+over from Manage Agents (`platforms.manage`) and Manage Group Agent Assignments
+(`platform-assignments.manage`), which are gone: when the API first starts with them, every role
+that had an old permission gets the ones that replace it (Manage Agents → add, update and delete
+agents; Manage Group Agent Assignments → add, update and delete groups; View Agents → view groups;
+Correct Win/Lose → delete entries; any Data entry or Report permission → react), and then the old
+ones are removed. Nobody loses what they could do; take permissions off on Roles & permissions.
 
 ## Default system roles (summary)
 

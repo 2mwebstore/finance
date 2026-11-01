@@ -12,7 +12,7 @@ import (
 )
 
 // Partners: who shares in branch-platform assignments, each at their own %. Managed with the
-// platforms (platforms.manage); their default % is used when they're given an assignment.
+// platforms (platforms.create / platforms.edit); their default % is used when they're given an assignment.
 
 var ErrPartnerNotFound = errors.New("partner not found")
 

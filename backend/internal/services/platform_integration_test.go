@@ -11,6 +11,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -57,11 +58,11 @@ func newWLFixture(t *testing.T) *wlFixture {
 		t.Fatal(err)
 	}
 	f := &wlFixture{db: db, svc: NewPlatformService(db, "Asia/Phnom_Penh"), ctx: context.Background(), entries: map[string]string{}}
-	for _, table := range []string{"weekly_settlement_totals", "weekly_settlements", "weekly_group_results", "weekly_partner_results", "weekly_platform_results", "weekly_entries", "assignment_partners", "hq_platform_assignments", "assignment_groups"} {
+	for _, table := range []string{"weekly_settlement_totals", "weekly_settlements", "weekly_group_results", "weekly_partner_results", "weekly_result_reactions", "weekly_platform_results", "weekly_entry_reactions", "weekly_entries", "assignment_partners", "hq_platform_assignments", "assignment_groups"} {
 		db.Exec("DELETE FROM " + table)
 	}
 	db.Exec("DELETE FROM platforms WHERE code LIKE 'TWL%'")
-	// The amounts in these tests are worked out with v1 (W/L + commission); TestFormulaChange has v2.
+	// The amounts in these tests are worked out with v1 (W/L + commission); TestFormulaChange has v2 and v3.
 	if err := db.Save(&models.AppSetting{Key: FormulaSettingKey, Value: "v1"}).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -165,6 +166,208 @@ func sheetRow(t *testing.T, s *WeekSheet, p models.Platform) WeekSheetRow {
 	}
 	t.Fatalf("%s is not on the sheet", p.Code)
 	return WeekSheetRow{}
+}
+
+func TestEntryReactions(t *testing.T) {
+	f := newWLFixture(t)
+	f.assign(t, []models.Platform{f.p1}, 0)
+	sheet, _, err := f.save(f.week, 0, canAll, "", row(f.p1, "1000", "200"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := sheet.Entry.ID
+	other := models.User{Username: "twl_other", Email: "twl_other@example.test", PasswordHash: "x", FullName: "TWL Other", IsActive: true}
+	if err := f.db.Where(models.User{Username: other.Username}).FirstOrCreate(&other).Error; err != nil {
+		t.Fatal(err)
+	}
+	react := func(who uuid.UUID, reaction, want string, wantList ...string) {
+		t.Helper()
+		_, now, list, err := f.svc.ReactToEntry(f.ctx, entry, reaction, all, who)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := []string{}
+		for _, r := range list {
+			got = append(got, r.UserName+" "+r.Reaction)
+		}
+		// (Two given in the same millisecond can come in either order.)
+		sort.Strings(got)
+		sort.Strings(wantList)
+		if now != want || strings.Join(got, ", ") != strings.Join(wantList, ", ") {
+			t.Errorf("%s: now %q with %v, want %q with %v", reaction, now, got, want, wantList)
+		}
+	}
+	react(f.actor, "yes", "yes", "TWL Tester yes")
+	react(other.ID, "no", "no", "TWL Tester yes", "TWL Other no")
+	react(f.actor, "no", "no", "TWL Other no", "TWL Tester no") // changed: one each
+	react(f.actor, "no", "", "TWL Other no")                    // the same again takes it back
+	if _, _, _, err := f.svc.ReactToEntry(f.ctx, entry, "maybe", all, f.actor); err == nil {
+		t.Error("only yes or no")
+	}
+	if _, _, _, err := f.svc.ReactToEntry(f.ctx, entry, "yes", f.scope(1), f.actor); err == nil {
+		t.Error("an entry of another group can't be reacted to")
+	}
+	// Data entry's list has them too.
+	if list, err := f.svc.ListEntries(f.ctx, EntryFilter{}, all); err != nil || len(list) != 1 || len(list[0].Reactions) != 1 || list[0].Reactions[0].Reaction != "no" {
+		t.Errorf("reactions on the list: %v %+v", err, list)
+	}
+	// The report by entry has them; deleting the entry removes them.
+	r, err := f.svc.Report(f.ctx, ReportFilter{DateFrom: dayString(f.week), DateTo: dayString(f.week.AddDate(0, 0, 6)), ByEntry: true}, all, true, f.actor)
+	if err != nil || len(r.Entries) != 1 || len(r.Entries[0].Reactions) != 1 || r.Entries[0].Reactions[0].UserName != "TWL Other" {
+		t.Fatalf("reactions in the report: %v %+v", err, r)
+	}
+	if _, _, err := f.svc.DeleteEntry(f.ctx, entry, "wrong week", all); err != nil {
+		t.Fatal(err)
+	}
+	var left int64
+	f.db.Model(&models.WeeklyEntryReaction{}).Where("entry_id = ?", entry).Count(&left)
+	if left != 0 {
+		t.Errorf("%d reactions left after deleting the entry", left)
+	}
+}
+
+func TestAgentReactions(t *testing.T) {
+	f := newWLFixture(t)
+	f.assign(t, []models.Platform{f.p1, f.p2}, 0)
+	sheet, _, err := f.save(f.week, 0, canAll, "", row(f.p1, "1000", "200"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r1, r2 := sheetRow(t, sheet, f.p1), sheetRow(t, sheet, f.p2)
+	if r1.ResultID == nil || r2.ResultID != nil || len(r1.Reactions) != 0 {
+		t.Fatalf("a saved agent has its result (and no reactions yet), one not entered none: %+v %+v", r1, r2)
+	}
+	other := models.User{Username: "twl_other", Email: "twl_other@example.test", PasswordHash: "x", FullName: "TWL Other", IsActive: true}
+	if err := f.db.Where(models.User{Username: other.Username}).FirstOrCreate(&other).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, now, list, err := f.svc.ReactToResult(f.ctx, *r1.ResultID, "yes", all, f.actor); err != nil || now != "yes" || len(list) != 1 {
+		t.Fatalf("✅ on the agent: %v %q %v", err, now, list)
+	}
+	if _, now, _, err := f.svc.ReactToResult(f.ctx, *r1.ResultID, "no", all, other.ID); err != nil || now != "no" {
+		t.Fatalf("❌ from someone else: %v %q", err, now)
+	}
+	if _, _, _, err := f.svc.ReactToResult(f.ctx, *r1.ResultID, "yes", f.scope(1), f.actor); err == nil {
+		t.Error("a result of another group can't be reacted to")
+	}
+	// The entry shows them on the agent's row, apart from the entry's own.
+	got := []string{}
+	for _, r := range sheetRow(t, f.sheet(t, f.week, 0), f.p1).Reactions {
+		got = append(got, r.UserName+" "+r.Reaction)
+	}
+	sort.Strings(got)
+	if strings.Join(got, ", ") != "TWL Other no, TWL Tester yes" {
+		t.Errorf("the agent's reactions: %v", got)
+	}
+	if list, _ := f.svc.ListEntries(f.ctx, EntryFilter{}, all); len(list) != 1 || len(list[0].Reactions) != 0 {
+		t.Errorf("the entry itself has none: %+v", list)
+	}
+	// A correction keeps them; deleting the entry removes them.
+	if _, _, err := f.save(f.week, 0, canAll, "typo", row(f.p1, "1100", "200")); err != nil {
+		t.Fatal(err)
+	}
+	if len(sheetRow(t, f.sheet(t, f.week, 0), f.p1).Reactions) != 2 {
+		t.Error("a corrected agent keeps its reactions")
+	}
+	if _, _, err := f.svc.DeleteEntry(f.ctx, sheet.Entry.ID, "wrong week", all); err != nil {
+		t.Fatal(err)
+	}
+	var left int64
+	f.db.Model(&models.WeeklyResultReaction{}).Where("result_id = ?", *r1.ResultID).Count(&left)
+	if left != 0 {
+		t.Errorf("%d agent reactions left after deleting the entry", left)
+	}
+}
+
+func TestDeletingAnAgent(t *testing.T) {
+	f := newWLFixture(t)
+	f.assign(t, []models.Platform{f.p1}, 0)
+	if _, err := f.svc.DeletePlatform(f.ctx, f.p1.ID); err == nil || !strings.Contains(err.Error(), "turn it off") {
+		t.Errorf("an agent in a group can't be deleted, got %v", err)
+	}
+	unused := f.platform(t, "TWL_UNUSED", "0", "USD")
+	if p, err := f.svc.DeletePlatform(f.ctx, unused.ID); err != nil || p.Code != "TWL_UNUSED" {
+		t.Fatalf("an unused agent is deleted: %v", err)
+	}
+	var left int64
+	f.db.Unscoped().Model(&models.Platform{}).Where("id = ?", unused.ID).Count(&left)
+	if left != 0 {
+		t.Error("the deleted agent is gone for good, so its user can be used again")
+	}
+	if _, err := f.svc.DeletePlatform(f.ctx, unused.ID); !errors.Is(err, ErrPlatformNotFound) {
+		t.Errorf("deleting it again: %v", err)
+	}
+}
+
+// The RP permissions that took over from the two "manage" ones (and from Correct Win/Lose for
+// deleting) are given to the roles that had those, and the old ones are removed.
+func TestRPPermissionsTakeOver(t *testing.T) {
+	f := newWLFixture(t)
+	perm := func(code string) models.Permission {
+		var p models.Permission
+		if err := f.db.Where(models.Permission{Code: code}).Attrs(models.Permission{Base: models.Base{ID: uuid.New()}, Name: code, Module: "test"}).FirstOrCreate(&p).Error; err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	// A role from before: it could manage agents and groups, correct and see Data entry.
+	role := models.Role{Base: models.Base{ID: uuid.New()}, Code: "twl_rp_role", Name: "TWL RP"}
+	f.db.Unscoped().Where("code = ?", role.Code).Delete(&models.Role{})
+	if err := f.db.Create(&role).Error; err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		f.db.Exec("DELETE FROM role_permissions WHERE role_id = ?", role.ID)
+		f.db.Unscoped().Delete(&role)
+	})
+	old := []models.Permission{perm("platforms.manage"), perm("platform-assignments.manage"), perm(permissions.WinLoseEdit), perm(permissions.WinLoseView)}
+	if err := f.db.Model(&role).Association("Permissions").Replace(old); err != nil {
+		t.Fatal(err)
+	}
+	// The new ones aren't there yet (an upgrade).
+	added := []string{permissions.PlatformsCreate, permissions.PlatformsEdit, permissions.PlatformsDelete, permissions.PlatformAssignmentsView,
+		permissions.PlatformAssignmentsCreate, permissions.PlatformAssignmentsEdit, permissions.PlatformAssignmentsDelete, permissions.WinLoseDelete, permissions.WinLoseReact}
+	for _, code := range added {
+		f.db.Exec("DELETE rp FROM role_permissions rp JOIN permissions p ON p.id = rp.permission_id WHERE p.code = ?", code)
+		f.db.Unscoped().Where("code = ?", code).Delete(&models.Permission{})
+	}
+	if err := database.EnsureRequiredPermissions(f.db); err != nil {
+		t.Fatal(err)
+	}
+	var codes []string
+	f.db.Table("role_permissions").Joins("JOIN permissions ON permissions.id = role_permissions.permission_id").
+		Where("role_permissions.role_id = ?", role.ID).Pluck("permissions.code", &codes)
+	have := map[string]bool{}
+	for _, c := range codes {
+		have[c] = true
+	}
+	for _, code := range append(added, permissions.WinLoseEdit, permissions.WinLoseView) {
+		if !have[code] {
+			t.Errorf("the role lost %s (has %v)", code, codes)
+		}
+	}
+	var retired int64
+	f.db.Unscoped().Model(&models.Permission{}).Where("code IN ?", []string{"platforms.manage", "platform-assignments.manage"}).Count(&retired)
+	if retired != 0 || have["platforms.manage"] || have["platform-assignments.manage"] {
+		t.Errorf("the manage permissions are removed: %d left, role has %v", retired, codes)
+	}
+}
+
+func TestTurningAnAgentOffNeedsAReason(t *testing.T) {
+	f := newWLFixture(t)
+	on, off := true, false
+	in := PlatformInput{Code: f.p1.Code, Name: f.p1.Name, DefaultCurrency: f.p1.DefaultCurrency, IsActive: &off}
+	if _, err := f.svc.SavePlatform(f.ctx, &f.p1.ID, in); err == nil || !strings.Contains(err.Error(), "reason") {
+		t.Errorf("turning off without a reason must be refused, got %v", err)
+	}
+	in.Reason = "closed"
+	if p, err := f.svc.SavePlatform(f.ctx, &f.p1.ID, in); err != nil || p.IsActive {
+		t.Fatalf("turned off with a reason: %v", err)
+	}
+	in.IsActive, in.Reason = &on, ""
+	if p, err := f.svc.SavePlatform(f.ctx, &f.p1.ID, in); err != nil || !p.IsActive {
+		t.Errorf("turning on needs no reason: %v", err)
+	}
 }
 
 func TestPlatformAssignmentsManyToMany(t *testing.T) {
@@ -433,6 +636,54 @@ func TestWinLoseReportsByCurrencyAndWeek(t *testing.T) {
 			t.Errorf("two weeks of HQ1 USD: %d weeks, total %s; want 2 weeks, 455", l.Entries, l.JamePS)
 		}
 	}
+	// Each week's totals, earliest first: 420 USD and -38950 KHR, then 35 USD.
+	weeks := []string{}
+	for _, w := range two.Weeks {
+		for _, s := range w.Totals {
+			weeks = append(weeks, w.WeekStart+" "+w.WeekEnd[8:]+" "+s.Currency+" "+s.JamePS.String())
+		}
+	}
+	if want := []string{
+		dayString(f.week) + " " + dayString(f.week.AddDate(0, 0, 6))[8:] + " KHR -38950",
+		dayString(f.week) + " " + dayString(f.week.AddDate(0, 0, 6))[8:] + " USD 420",
+		dayString(f.week.AddDate(0, 0, 7)) + " " + dayString(f.week.AddDate(0, 0, 13))[8:] + " USD 35",
+	}; strings.Join(weeks, ", ") != strings.Join(want, ", ") {
+		t.Errorf("by week: %v, want %v", weeks, want)
+	}
+	// By data entry: the week's two entries (one per HQ), each with its agents and totals.
+	byEntry, err := f.svc.Report(f.ctx, ReportFilter{DateFrom: dayString(f.week), DateTo: dayString(f.week.AddDate(0, 0, 6)), ByEntry: true}, all, true, f.actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hq1, hq2 := f.entries[f.entryKey(f.week, 0)], f.entries[f.entryKey(f.week, 1)]
+	entryOf := map[string]string{hq1: "HQ1", hq2: "HQ2"}
+	got := map[string]bool{}
+	lines := 0
+	for _, e := range byEntry.Entries {
+		for _, l := range e.Lines {
+			got[entryOf[e.ID.String()]+" "+l.PlatformCode+" "+l.JamePS.String()] = true
+			lines++
+		}
+		for _, s := range e.Totals {
+			got[entryOf[e.ID.String()]+" "+e.Title+" "+e.CreatedBy+" "+s.Currency+" "+s.JamePS.String()] = true
+		}
+	}
+	for _, w := range []string{"HQ1 " + f.p1.Code + " 420", "HQ1 " + f.p2.Code + " -38950", "HQ2 " + f.p1.Code + " -140",
+		"HQ1 TWL week TWL Tester USD 420", "HQ1 TWL week TWL Tester KHR -38950", "HQ2 TWL week TWL Tester USD -140"} {
+		if !got[w] {
+			t.Errorf("by entry: %q missing from %v", w, got)
+		}
+	}
+	// The report's own lines stay by agent (across both entries).
+	if lines != 3 || len(byEntry.Entries) != 2 || len(byEntry.Lines) != 2 {
+		t.Errorf("by entry: %d entry lines in %d entries and %d lines, want 3 in 2 and 2", lines, len(byEntry.Entries), len(byEntry.Lines))
+	}
+	// One entry only.
+	id := uuid.MustParse(hq2)
+	one, err := f.svc.Report(f.ctx, ReportFilter{DateFrom: dayString(f.week), DateTo: dayString(f.week.AddDate(0, 0, 6)), EntryID: &id, ByEntry: true}, all, true, f.actor)
+	if err != nil || len(one.Lines) != 1 || !one.Lines[0].JamePS.Equal(decimal.NewFromInt(-140)) || len(one.Entries) != 1 || one.Entries[0].ID.String() != hq2 {
+		t.Errorf("one entry: %v %+v", err, one)
+	}
 }
 
 func TestWeeklySettlementLocksTheWeek(t *testing.T) {
@@ -444,8 +695,9 @@ func TestWeeklySettlementLocksTheWeek(t *testing.T) {
 	if _, err := f.svc.FinalizeWeek(f.ctx, FinalizeInput{BranchID: f.hq[0].ID.String(), WeekStart: dayString(f.week.AddDate(0, 0, 1))}, all, f.actor); err == nil {
 		t.Error("a week starts on a Monday")
 	}
-	if _, err := f.svc.FinalizeWeek(f.ctx, FinalizeInput{BranchID: f.hq[0].ID.String(), WeekStart: dayString(weekStart(f.svc.today()))}, all, f.actor); err == nil {
-		t.Error("the current week can't be finalized before its Sunday")
+	// (Next week: this week's Sunday may be today, and a week can be finalized from its Sunday.)
+	if _, err := f.svc.FinalizeWeek(f.ctx, FinalizeInput{BranchID: f.hq[0].ID.String(), WeekStart: dayString(weekStart(f.svc.today()).AddDate(0, 0, 7))}, all, f.actor); err == nil {
+		t.Error("a week can't be finalized before its Sunday")
 	}
 	st, err := f.svc.FinalizeWeek(f.ctx, FinalizeInput{BranchID: f.hq[0].ID.String(), WeekStart: dayString(f.week)}, all, f.actor)
 	if err != nil {
@@ -942,6 +1194,16 @@ func TestAgentInSeveralGroups(t *testing.T) {
 	if one, err := f.svc.Report(f.ctx, week, all, true, f.actor); err != nil || len(one.Lines) != 1 || !one.Lines[0].JamePS.Equal(n(120)) {
 		t.Errorf("one group's report has its part of the Total: %v %+v", err, one)
 	}
+	// One agent: its part in each group, with its rate there (A's went from 10% to 50% in the week).
+	week.GroupID, week.PlatformID = nil, &f.p1.ID
+	mine, err := f.svc.Report(f.ctx, week, all, true, f.actor)
+	parts := map[string]string{}
+	for _, g := range mine.Groups {
+		parts[g.Title] = g.RateMin.String() + "-" + g.RateMax.String() + " " + g.Totals[0].JamePS.String() + " " + g.Formula
+	}
+	if err != nil || len(mine.Lines) != 1 || len(mine.Groups) != 2 || parts["A"] != "10-50 100 v1" || parts["B"] != "20-20 120 v1" {
+		t.Errorf("one agent's groups: %v %v", err, parts)
+	}
 	if g, _ := f.svc.GroupByID(f.ctx, a.ID, all); g.Weeks != 2 {
 		t.Errorf("A has the agent's two results, got %d", g.Weeks)
 	}
@@ -963,8 +1225,10 @@ func TestFormulaChange(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The business's rule, v2: the commission is taken away. Weeks not finalized follow it.
-	f.db.Where("`key` = ?", FormulaSettingKey).Delete(&models.AppSetting{})
+	// v2: the commission is taken away. Weeks not finalized follow it.
+	if err := f.db.Save(&models.AppSetting{Key: FormulaSettingKey, Value: "v2"}).Error; err != nil {
+		t.Fatal(err)
+	}
 	changed, err := f.svc.RecalculateOpenWeeks(f.ctx)
 	if err != nil || changed != 1 {
 		t.Fatalf("only the open week is worked out again: %v %d", err, changed)
@@ -1002,5 +1266,37 @@ func TestFormulaChange(t *testing.T) {
 	}
 	if r := sheetRow(t, next, f.p1); !r.JamePS.Equal(n(90)) {
 		t.Errorf("(1,000 − 100) × 10%% = 90, got %s", r.JamePS)
+	}
+
+	// The business's rule, v3: the rate is the agent's share, the Total at what is left.
+	f.db.Where("`key` = ?", FormulaSettingKey).Delete(&models.AppSetting{})
+	if changed, err := f.svc.RecalculateOpenWeeks(f.ctx); err != nil || changed != 3 {
+		t.Fatalf("the three open weeks are worked out again: %v %d", err, changed)
+	}
+	if r := sheetRow(t, f.sheet(t, open, 0), f.p1); !r.JamePS.Equal(n(520)) || r.FormulaVersion != "v3" || !r.Groups[0].JamePS.Equal(n(520)) {
+		t.Errorf("(1000 − 200) × (100%% − 35%%) = 520: %s %s", r.JamePS, r.FormulaVersion)
+	}
+	if r := sheetRow(t, f.sheet(t, open.AddDate(0, 0, 7), 0), f.p1); !r.JamePS.Equal(n(810)) || !r.CommissionRate.Equal(n(10)) {
+		t.Errorf("(1,000 − 100) × (100%% − 10%%) = 810, got %s", r.JamePS)
+	}
+	// The agent at 60%: (1,000 − 100) × (100% − 60%) = 360.
+	if _, _, err := f.svc.UpdateAssignment(f.ctx, a.ID, AssignmentUpdateInput{CommissionRate: "60", Currency: "USD"}, all); err != nil {
+		t.Fatal(err)
+	}
+	later, _, err := f.save(open.AddDate(0, 0, 14), 0, canAll, "", row(f.p1, "1000", "100"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := sheetRow(t, later, f.p1); !r.JamePS.Equal(n(360)) || r.FormulaVersion != "v3" {
+		t.Errorf("(1,000 − 100) × (100%% − 60%%) = 360, got %s %s", r.JamePS, r.FormulaVersion)
+	}
+}
+
+func TestRestWithPartners(t *testing.T) {
+	// v3, partners at 40% and 10% of 1,000: shares 400 and 100, the Total what is left (500).
+	shares := []PartnerShare{{CommissionRate: decimal.NewFromInt(40)}, {CommissionRate: decimal.NewFromInt(10)}}
+	r, err := workOut("v3", decimal.NewFromInt(1000), decimal.Zero, decimal.Zero, shares)
+	if err != nil || !r.JamePS.Equal(decimal.NewFromInt(500)) || !shares[0].JamePS.Equal(decimal.NewFromInt(400)) || !shares[1].JamePS.Equal(decimal.NewFromInt(100)) {
+		t.Errorf("total %s, shares %v %v: %v", r.JamePS, shares[0].JamePS, shares[1].JamePS, err)
 	}
 }

@@ -54,8 +54,33 @@ func TestV2(t *testing.T) {
 			t.Errorf("%s: got adjusted=%s jame=%s (%s), want %s and %s", c.name, got.Adjusted, got.JamePS, got.Version, c.wantAdjusted, c.wantJamePS)
 		}
 	}
-	if Default != V2 {
-		t.Error("new weeks use V2")
+}
+
+func TestV3(t *testing.T) {
+	cases := []struct {
+		name                      string
+		winLose, commission, rate string
+		wantAdjusted, wantJamePS  string
+	}{
+		{"the agent's 60% leaves 40%", "1000", "100", "60", "900", "360"},
+		{"rate 10% leaves 90%", "1000", "100", "10", "900", "810"},
+		{"rate 0 leaves it all", "1000", "100", "0", "900", "900"},
+		{"rate 100% leaves nothing", "1000", "100", "100", "900", "0"},
+		{"a loss", "-1500", "100", "35", "-1600", "-1040"},
+		{"rounds half away from zero", "5", "0", "50", "5", "3"},          // 2.5 → 3
+		{"riel amounts", "-410000", "20500", "87.5", "-430500", "-53813"}, // -53812.5 → -53813
+	}
+	for _, c := range cases {
+		got, err := Calculate(V3, Input{WinLose: d(c.winLose), Commission: d(c.commission), RatePct: d(c.rate)})
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if !got.Adjusted.Equal(d(c.wantAdjusted)) || !got.JamePS.Equal(d(c.wantJamePS)) || got.Version != V3 {
+			t.Errorf("%s: got adjusted=%s jame=%s (%s), want %s and %s", c.name, got.Adjusted, got.JamePS, got.Version, c.wantAdjusted, c.wantJamePS)
+		}
+	}
+	if f, _ := Lookup(V3); Default != V3 || !f.Rest {
+		t.Error("new weeks use V3, where the rate is the agent's share")
 	}
 }
 

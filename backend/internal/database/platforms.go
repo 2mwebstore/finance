@@ -177,6 +177,28 @@ var platformTables = []string{
 	KEY idx_weekly_entries_branch_week (branch_id, week_start),
 	KEY idx_weekly_entries_created_at (created_at)
 )`,
+	`CREATE TABLE IF NOT EXISTS weekly_entry_reactions (
+	id CHAR(36) NOT NULL,
+	entry_id CHAR(36) NOT NULL,
+	user_id CHAR(36) NOT NULL,
+	reaction VARCHAR(8) NOT NULL,
+	created_at DATETIME(3) NULL,
+	updated_at DATETIME(3) NULL,
+	PRIMARY KEY (id),
+	UNIQUE KEY uq_weekly_entry_reaction (entry_id, user_id),
+	KEY idx_weekly_entry_reactions_user (user_id)
+)`,
+	`CREATE TABLE IF NOT EXISTS weekly_result_reactions (
+	id CHAR(36) NOT NULL,
+	result_id CHAR(36) NOT NULL,
+	user_id CHAR(36) NOT NULL,
+	reaction VARCHAR(8) NOT NULL,
+	created_at DATETIME(3) NULL,
+	updated_at DATETIME(3) NULL,
+	PRIMARY KEY (id),
+	UNIQUE KEY uq_weekly_result_reaction (result_id, user_id),
+	KEY idx_weekly_result_reactions_user (user_id)
+)`,
 	`CREATE TABLE IF NOT EXISTS weekly_settlements (
 	id CHAR(36) NOT NULL,
 	branch_id CHAR(36) NOT NULL,
@@ -286,6 +308,10 @@ var platformForeignKeys = []foreignKey{
 	{"weekly_group_results", "fk_weekly_group_results_assignment", "assignment_id", "hq_platform_assignments(id)"},
 	{"weekly_entries", "fk_weekly_entries_branch", "branch_id", "branches(id)"},
 	{"weekly_entries", "fk_weekly_entries_created_by", "created_by_id", "users(id)"},
+	{"weekly_entry_reactions", "fk_weekly_entry_reactions_entry", "entry_id", "weekly_entries(id) ON DELETE CASCADE"},
+	{"weekly_entry_reactions", "fk_weekly_entry_reactions_user", "user_id", "users(id)"},
+	{"weekly_result_reactions", "fk_weekly_result_reactions_result", "result_id", "weekly_platform_results(id) ON DELETE CASCADE"},
+	{"weekly_result_reactions", "fk_weekly_result_reactions_user", "user_id", "users(id)"},
 	{"weekly_settlements", "fk_weekly_settlements_branch", "branch_id", "branches(id)"},
 	{"weekly_settlements", "fk_weekly_settlements_finalized_by", "finalized_by_id", "users(id)"},
 	{"weekly_settlement_totals", "fk_weekly_settlement_totals_settlement", "settlement_id", "weekly_settlements(id) ON DELETE CASCADE"},

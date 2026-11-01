@@ -12,7 +12,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// Win/lose reports: the weekly report, the group summary and the partner statement all come from
+// Win/lose reports: the Report (weekly), the group summary and the partner statement all come from
 // the weekly results added up by agent (platform) and currency (and week, for the statement), with
 // each partner's share of the Total. They cover the person's own group (branch), or every group in
 // their scope for people who may see consolidated totals; groups aren't shown apart. A week is in the range when its Monday is (the range's first
@@ -26,8 +26,14 @@ type ReportFilter struct {
 	PartnerID *uuid.UUID
 	// GroupID: only the agents of one titled group (Group Agent Assignments).
 	GroupID *uuid.UUID
+	// PlatformID: only one agent (its part in each of its groups is in Groups).
+	PlatformID *uuid.UUID
 	// ByWeek gives one line per week as well (the partner statement).
 	ByWeek bool
+	// ByEntry adds the data entries (Entries), each with its own lines.
+	ByEntry bool
+	// EntryID: only one data entry's results.
+	EntryID *uuid.UUID
 }
 
 // Sums are totals in one currency.
@@ -60,10 +66,12 @@ type LineShare struct {
 // ReportLine is one agent (platform) in one currency over the range (or one week), across the
 // groups covered.
 type ReportLine struct {
-	WeekStart    string    `json:"week_start,omitempty"`
-	PlatformID   uuid.UUID `json:"platform_id"`
-	PlatformCode string    `json:"platform_code"`
-	PlatformName string    `json:"platform_name"`
+	WeekStart string `json:"week_start,omitempty"`
+	// EntryID: the data entry of an entry's line (nil for results saved before entries).
+	EntryID      *uuid.UUID `json:"entry_id,omitempty"`
+	PlatformID   uuid.UUID  `json:"platform_id"`
+	PlatformCode string     `json:"platform_code"`
+	PlatformName string     `json:"platform_name"`
 	// The Partner % used (the same unless it changed during the range).
 	RateMin decimal.Decimal `json:"rate_min"`
 	RateMax decimal.Decimal `json:"rate_max"`
@@ -89,11 +97,37 @@ type PartnerTotals struct {
 	Totals      []Sums     `json:"totals"`
 }
 
-// GroupTotalsRow is one titled group's totals (nil: weeks of agents not in a group).
+// GroupTotalsRow is one titled group's totals (nil: weeks of agents not in a group). For one agent
+// (PlatformID), RateMin and RateMax are its rate in the group (the same unless it changed in the
+// range) and Formula the version its weeks were worked out with ("" when they differ).
 type GroupTotalsRow struct {
-	GroupID *uuid.UUID `json:"group_id"`
-	Title   string     `json:"title"`
-	Totals  []Sums     `json:"totals"`
+	GroupID *uuid.UUID      `json:"group_id"`
+	Title   string          `json:"title"`
+	RateMin decimal.Decimal `json:"rate_min"`
+	RateMax decimal.Decimal `json:"rate_max"`
+	Formula string          `json:"formula"`
+	Totals  []Sums          `json:"totals"`
+}
+
+// ReportEntry is a data entry of a report by entry (nil ID: results saved before entries), with
+// its agents' lines and its totals per currency.
+type ReportEntry struct {
+	ID        *uuid.UUID   `json:"id"`
+	Title     string       `json:"title"`
+	WeekStart string       `json:"week_start"`
+	CreatedAt *time.Time   `json:"created_at"`
+	CreatedBy string       `json:"created_by"`
+	Totals    []Sums       `json:"totals"`
+	Lines     []ReportLine `json:"lines"`
+	// Reactions: people's ✅ and ❌ on the entry.
+	Reactions []EntryReaction `json:"reactions"`
+}
+
+// WeekTotals is one week's totals (Monday to Sunday), per currency.
+type WeekTotals struct {
+	WeekStart string `json:"week_start"`
+	WeekEnd   string `json:"week_end"`
+	Totals    []Sums `json:"totals"`
 }
 
 type WinLoseReport struct {
@@ -105,11 +139,16 @@ type WinLoseReport struct {
 	Platforms    []PlatformTotals `json:"platforms"`
 	Partners     []PartnerTotals  `json:"partners"`
 	Groups       []GroupTotalsRow `json:"groups"`
-	Totals       []Sums           `json:"totals"`
+	// Weeks: the totals of each week in the range that has results, earliest first.
+	Weeks []WeekTotals `json:"weeks"`
+	// Entries (ByEntry): the data entries in the range, by week and then as they were created.
+	Entries []ReportEntry `json:"entries,omitempty"`
+	Totals  []Sums        `json:"totals"`
 }
 
 type reportRow struct {
 	WeekStart                                                     *time.Time
+	EntryID                                                       *uuid.UUID
 	PlatformID                                                    uuid.UUID
 	PartnerID                                                     *uuid.UUID
 	Currency                                                      string
@@ -119,11 +158,14 @@ type reportRow struct {
 }
 
 func (r reportRow) key() string {
-	week := ""
+	week, entry := "", ""
 	if r.WeekStart != nil {
 		week = r.WeekStart.Format("2006-01-02")
 	}
-	return strings.Join([]string{week, r.PlatformID.String(), r.Currency}, "|")
+	if r.EntryID != nil {
+		entry = r.EntryID.String()
+	}
+	return strings.Join([]string{week, entry, r.PlatformID.String(), r.Currency}, "|")
 }
 
 func (r reportRow) sums() Sums {
@@ -172,6 +214,12 @@ func (s *PlatformService) Report(ctx context.Context, f ReportFilter, scope Bran
 		if f.GroupID != nil {
 			q = q.Joins("JOIN weekly_group_results gf ON gf.result_id = r.id AND gf.group_id = ?", *f.GroupID)
 		}
+		if f.PlatformID != nil {
+			q = q.Where("r.platform_id = ?", *f.PlatformID)
+		}
+		if f.EntryID != nil {
+			q = q.Where("r.entry_id = ?", *f.EntryID)
+		}
 		return q
 	}
 	// A result's Total is its groups' added up; for one group, its part in that group.
@@ -179,90 +227,10 @@ func (s *PlatformService) Report(ctx context.Context, f ReportFilter, scope Bran
 	if f.GroupID != nil {
 		rate, jame = "gf.commission_rate", "gf.jame_ps"
 	}
-	// Each platform's weeks, and each partner's share of them (no partner: weeks entered without
-	// partners, at the platform's own %).
-	var lineRows, shareRows []reportRow
-	if f.PartnerID == nil {
-		if err := results().Select(group + ", MIN(" + rate + ") AS rate_min, MAX(" + rate + ") AS rate_max, MIN(r.formula_version) AS formula_min, MAX(r.formula_version) AS formula_max, " +
-			"SUM(r.win_lose) AS win_lose, SUM(r.commission) AS commission, SUM(r.adjusted_amount) AS adjusted_amount, SUM(" + jame + ") AS jame_ps, COUNT(*) AS entries").
-			Group(group).Scan(&lineRows).Error; err != nil {
-			return nil, err
-		}
-	}
-	shares := results().Joins("LEFT JOIN weekly_partner_results s ON s.result_id = r.id")
-	if f.PartnerID != nil {
-		shares = shares.Where("s.partner_id = ?", *f.PartnerID)
-	}
-	if err := shares.Select(group + ", s.partner_id, MIN(COALESCE(s.commission_rate, " + rate + ")) AS rate_min, MAX(COALESCE(s.commission_rate, " + rate + ")) AS rate_max, " +
-		"SUM(r.win_lose) AS win_lose, SUM(r.commission) AS commission, SUM(r.adjusted_amount) AS adjusted_amount, SUM(COALESCE(s.jame_ps, " + jame + ")) AS jame_ps, COUNT(*) AS entries").
-		Group(group + ", s.partner_id").Scan(&shareRows).Error; err != nil {
-		return nil, err
-	}
-	if f.PartnerID != nil {
-		// The partner's statement: their share is the line.
-		lineRows = shareRows
-	}
-
-	var platformIDs, partnerIDs []uuid.UUID
-	for _, r := range lineRows {
-		platformIDs = append(platformIDs, r.PlatformID)
-	}
-	for _, r := range shareRows {
-		if r.PartnerID != nil {
-			partnerIDs = append(partnerIDs, *r.PartnerID)
-		}
-	}
-	platforms, err := s.platformsIn(ctx, platformIDs)
+	lines, shareRows, nameOf, err := s.reportLines(ctx, results, group, rate, jame, f.PartnerID)
 	if err != nil {
 		return nil, err
 	}
-	partners, err := s.partnersIn(ctx, partnerIDs)
-	if err != nil {
-		return nil, err
-	}
-	nameOf := func(id *uuid.UUID) string {
-		if id == nil {
-			return ""
-		}
-		return partners[*id].Name
-	}
-	lineShares := map[string][]LineShare{}
-	for _, r := range shareRows {
-		lineShares[r.key()] = append(lineShares[r.key()], LineShare{PartnerID: r.PartnerID, PartnerName: nameOf(r.PartnerID), RateMin: r.RateMin, RateMax: r.RateMax, JamePS: r.JamePS, Entries: r.Entries})
-	}
-	lines := make([]ReportLine, len(lineRows))
-	for i, r := range lineRows {
-		p := platforms[r.PlatformID]
-		l := ReportLine{PlatformID: r.PlatformID, PlatformCode: p.Code, PlatformName: p.Name,
-			RateMin: r.RateMin, RateMax: r.RateMax, Partners: []LineShare{}, Sums: r.sums()}
-		if r.FormulaMin == r.FormulaMax {
-			l.Formula = r.FormulaMin
-		}
-		if r.WeekStart != nil {
-			l.WeekStart = r.WeekStart.Format("2006-01-02")
-		}
-		// Partners only when some week had them; then weeks without any show as "no partner".
-		if list := lineShares[r.key()]; len(list) > 1 || (len(list) == 1 && list[0].PartnerID != nil) {
-			sort.Slice(list, func(i, j int) bool {
-				if (list[i].PartnerID == nil) != (list[j].PartnerID == nil) {
-					return list[j].PartnerID == nil
-				}
-				return list[i].PartnerName < list[j].PartnerName
-			})
-			l.Partners = list
-		}
-		lines[i] = l
-	}
-	sort.Slice(lines, func(i, j int) bool {
-		a, b := lines[i], lines[j]
-		if a.WeekStart != b.WeekStart {
-			return a.WeekStart < b.WeekStart
-		}
-		if a.PlatformCode != b.PlatformCode {
-			return agentBefore(a.PlatformCode, b.PlatformCode)
-		}
-		return a.Currency < b.Currency
-	})
 
 	out := &WinLoseReport{DateFrom: dayString(weekStart(from)), DateTo: dayString(to), Consolidated: branchID == nil, Lines: lines}
 	if out.Lines == nil {
@@ -302,6 +270,18 @@ func (s *PlatformService) Report(ctx context.Context, f ReportFilter, scope Bran
 	if out.Groups, err = s.groupTotals(ctx, results()); err != nil {
 		return nil, err
 	}
+	if out.Weeks, err = weekTotals(results(), jame); err != nil {
+		return nil, err
+	}
+	if f.ByEntry {
+		entryLines, _, _, err := s.reportLines(ctx, results, "r.entry_id, "+group, rate, jame, f.PartnerID)
+		if err != nil {
+			return nil, err
+		}
+		if out.Entries, err = s.reportEntries(ctx, entryLines); err != nil {
+			return nil, err
+		}
+	}
 	for key, p := range parts {
 		p.Totals = sortedSums(partSums[key])
 		out.Partners = append(out.Partners, *p)
@@ -322,17 +302,111 @@ func (s *PlatformService) Report(ctx context.Context, f ReportFilter, scope Bran
 	return out, nil
 }
 
+// reportLines adds results up by agent and currency (after the columns before them in group): the
+// lines, the partners' share rows and the partners' names. rate and jame are the rate's and the
+// Total's columns; with partnerID, the lines are that partner's shares.
+func (s *PlatformService) reportLines(ctx context.Context, results func() *gorm.DB, group, rate, jame string, partnerID *uuid.UUID) ([]ReportLine, []reportRow, func(*uuid.UUID) string, error) {
+	// Each platform's weeks, and each partner's share of them (no partner: weeks entered without
+	// partners, at the platform's own %).
+	var lineRows, shareRows []reportRow
+	if partnerID == nil {
+		if err := results().Select(group + ", MIN(" + rate + ") AS rate_min, MAX(" + rate + ") AS rate_max, MIN(r.formula_version) AS formula_min, MAX(r.formula_version) AS formula_max, " +
+			"SUM(r.win_lose) AS win_lose, SUM(r.commission) AS commission, SUM(r.adjusted_amount) AS adjusted_amount, SUM(" + jame + ") AS jame_ps, COUNT(*) AS entries").
+			Group(group).Scan(&lineRows).Error; err != nil {
+			return nil, nil, nil, err
+		}
+	}
+	shares := results().Joins("LEFT JOIN weekly_partner_results s ON s.result_id = r.id")
+	if partnerID != nil {
+		shares = shares.Where("s.partner_id = ?", *partnerID)
+	}
+	if err := shares.Select(group + ", s.partner_id, MIN(COALESCE(s.commission_rate, " + rate + ")) AS rate_min, MAX(COALESCE(s.commission_rate, " + rate + ")) AS rate_max, " +
+		"SUM(r.win_lose) AS win_lose, SUM(r.commission) AS commission, SUM(r.adjusted_amount) AS adjusted_amount, SUM(COALESCE(s.jame_ps, " + jame + ")) AS jame_ps, COUNT(*) AS entries").
+		Group(group + ", s.partner_id").Scan(&shareRows).Error; err != nil {
+		return nil, nil, nil, err
+	}
+	if partnerID != nil {
+		// The partner's statement: their share is the line.
+		lineRows = shareRows
+	}
+
+	var platformIDs, partnerIDs []uuid.UUID
+	for _, r := range lineRows {
+		platformIDs = append(platformIDs, r.PlatformID)
+	}
+	for _, r := range shareRows {
+		if r.PartnerID != nil {
+			partnerIDs = append(partnerIDs, *r.PartnerID)
+		}
+	}
+	platforms, err := s.platformsIn(ctx, platformIDs)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	partners, err := s.partnersIn(ctx, partnerIDs)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	nameOf := func(id *uuid.UUID) string {
+		if id == nil {
+			return ""
+		}
+		return partners[*id].Name
+	}
+	lineShares := map[string][]LineShare{}
+	for _, r := range shareRows {
+		lineShares[r.key()] = append(lineShares[r.key()], LineShare{PartnerID: r.PartnerID, PartnerName: nameOf(r.PartnerID), RateMin: r.RateMin, RateMax: r.RateMax, JamePS: r.JamePS, Entries: r.Entries})
+	}
+	lines := make([]ReportLine, len(lineRows))
+	for i, r := range lineRows {
+		p := platforms[r.PlatformID]
+		l := ReportLine{EntryID: r.EntryID, PlatformID: r.PlatformID, PlatformCode: p.Code, PlatformName: p.Name,
+			RateMin: r.RateMin, RateMax: r.RateMax, Partners: []LineShare{}, Sums: r.sums()}
+		if r.FormulaMin == r.FormulaMax {
+			l.Formula = r.FormulaMin
+		}
+		if r.WeekStart != nil {
+			l.WeekStart = r.WeekStart.Format("2006-01-02")
+		}
+		// Partners only when some week had them; then weeks without any show as "no partner".
+		if list := lineShares[r.key()]; len(list) > 1 || (len(list) == 1 && list[0].PartnerID != nil) {
+			sort.Slice(list, func(i, j int) bool {
+				if (list[i].PartnerID == nil) != (list[j].PartnerID == nil) {
+					return list[j].PartnerID == nil
+				}
+				return list[i].PartnerName < list[j].PartnerName
+			})
+			l.Partners = list
+		}
+		lines[i] = l
+	}
+	sort.Slice(lines, func(i, j int) bool {
+		a, b := lines[i], lines[j]
+		if a.WeekStart != b.WeekStart {
+			return a.WeekStart < b.WeekStart
+		}
+		if a.PlatformCode != b.PlatformCode {
+			return agentBefore(a.PlatformCode, b.PlatformCode)
+		}
+		return a.Currency < b.Currency
+	})
+
+	return lines, shareRows, nameOf, nil
+}
+
 // groupTotals adds the results up by titled group, each at its part in the group (an agent in two
 // groups counts in both): by title, weeks of agents in no group last.
 func (s *PlatformService) groupTotals(ctx context.Context, results *gorm.DB) ([]GroupTotalsRow, error) {
 	var rows []struct {
-		GroupID                                     *uuid.UUID
-		Currency                                    string
-		WinLose, Commission, AdjustedAmount, JamePS decimal.Decimal
-		Entries                                     int64
+		GroupID                                                       *uuid.UUID
+		Currency                                                      string
+		WinLose, Commission, AdjustedAmount, JamePS, RateMin, RateMax decimal.Decimal
+		FormulaMin, FormulaMax                                        string
+		Entries                                                       int64
 	}
 	if err := results.Joins("LEFT JOIN weekly_group_results g ON g.result_id = r.id").
-		Select("g.group_id, r.currency, SUM(r.win_lose) AS win_lose, SUM(r.commission) AS commission, SUM(r.adjusted_amount) AS adjusted_amount, SUM(COALESCE(g.jame_ps, r.jame_ps)) AS jame_ps, COUNT(*) AS entries").
+		Select("g.group_id, r.currency, SUM(r.win_lose) AS win_lose, SUM(r.commission) AS commission, SUM(r.adjusted_amount) AS adjusted_amount, SUM(COALESCE(g.jame_ps, r.jame_ps)) AS jame_ps, " +
+			"COALESCE(MIN(g.commission_rate), 0) AS rate_min, COALESCE(MAX(g.commission_rate), 0) AS rate_max, MIN(r.formula_version) AS formula_min, MAX(r.formula_version) AS formula_max, COUNT(*) AS entries").
 		Group("g.group_id, r.currency").Scan(&rows).Error; err != nil {
 		return nil, err
 	}
@@ -359,12 +433,18 @@ func (s *PlatformService) groupTotals(ctx context.Context, results *gorm.DB) ([]
 		if r.GroupID != nil {
 			key = r.GroupID.String()
 		}
-		if byGroup[key] == nil {
-			byGroup[key] = &GroupTotalsRow{GroupID: r.GroupID}
+		g := byGroup[key]
+		if g == nil {
+			g = &GroupTotalsRow{GroupID: r.GroupID, RateMin: r.RateMin, RateMax: r.RateMax, Formula: r.FormulaMin}
 			if r.GroupID != nil {
-				byGroup[key].Title = titles[*r.GroupID]
+				g.Title = titles[*r.GroupID]
 			}
+			byGroup[key] = g
 			sums[key] = map[string]*Sums{}
+		}
+		g.RateMin, g.RateMax = decimal.Min(g.RateMin, r.RateMin), decimal.Max(g.RateMax, r.RateMax)
+		if r.FormulaMin != r.FormulaMax || r.FormulaMin != g.Formula {
+			g.Formula = ""
 		}
 		sums[key][r.Currency] = &Sums{Currency: r.Currency, WinLose: r.WinLose, Commission: r.Commission, AdjustedAmount: r.AdjustedAmount, JamePS: r.JamePS, Entries: r.Entries}
 	}
@@ -380,6 +460,76 @@ func (s *PlatformService) groupTotals(ctx context.Context, results *gorm.DB) ([]
 		}
 		return a.Title < b.Title
 	})
+	return out, nil
+}
+
+// reportEntries lists the data entries of lines by entry, each with its lines and totals: by week,
+// then as they were created; results saved before entries last.
+func (s *PlatformService) reportEntries(ctx context.Context, lines []ReportLine) ([]ReportEntry, error) {
+	var ids []uuid.UUID
+	sums := map[string]map[string]*Sums{}
+	linesOf := map[string][]ReportLine{}
+	for _, l := range lines {
+		key := ""
+		if l.EntryID != nil {
+			key = l.EntryID.String()
+		}
+		linesOf[key] = append(linesOf[key], l)
+		if sums[key] == nil {
+			sums[key] = map[string]*Sums{}
+			if l.EntryID != nil {
+				ids = append(ids, *l.EntryID)
+			}
+		}
+		if sums[key][l.Currency] == nil {
+			sums[key][l.Currency] = &Sums{Currency: l.Currency}
+		}
+		sums[key][l.Currency].add(l.Sums)
+	}
+	var list []models.WeeklyEntry
+	if len(ids) > 0 {
+		if err := s.db.WithContext(ctx).Where("id IN ?", ids).Order("week_start, created_at, id").Find(&list).Error; err != nil {
+			return nil, err
+		}
+	}
+	users := make([]uuid.UUID, len(list))
+	for i, e := range list {
+		users[i] = e.CreatedByID
+	}
+	names := s.userNames(ctx, users)
+	reactions, err := s.reactionsOf(ctx, entryReactions, ids)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ReportEntry, 0, len(sums))
+	for _, e := range list {
+		id, created := e.ID, e.CreatedAt
+		out = append(out, ReportEntry{ID: &id, Title: e.Title, WeekStart: dayString(e.WeekStart), CreatedAt: &created,
+			CreatedBy: names[e.CreatedByID], Totals: sortedSums(sums[id.String()]), Lines: linesOf[id.String()], Reactions: orNone(reactions[id])})
+	}
+	if none, ok := sums[""]; ok {
+		out = append(out, ReportEntry{Title: "Saved before entries", Totals: sortedSums(none), Lines: linesOf[""], Reactions: []EntryReaction{}})
+	}
+	return out, nil
+}
+
+// weekTotals adds the results up by week and currency (jame: the Total's column).
+func weekTotals(results *gorm.DB, jame string) ([]WeekTotals, error) {
+	var rows []reportRow
+	if err := results.Select("r.week_start, r.currency, SUM(r.win_lose) AS win_lose, SUM(r.commission) AS commission, SUM(r.adjusted_amount) AS adjusted_amount, SUM(" + jame + ") AS jame_ps, COUNT(*) AS entries").
+		Group("r.week_start, r.currency").Order("r.week_start, r.currency").Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := []WeekTotals{}
+	for _, r := range rows {
+		if r.WeekStart == nil {
+			continue
+		}
+		if day := dayString(*r.WeekStart); len(out) == 0 || out[len(out)-1].WeekStart != day {
+			out = append(out, WeekTotals{WeekStart: day, WeekEnd: dayString(r.WeekStart.AddDate(0, 0, 6))})
+		}
+		out[len(out)-1].Totals = append(out[len(out)-1].Totals, r.sums())
+	}
 	return out, nil
 }
 

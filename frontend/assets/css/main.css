@@ -29,6 +29,20 @@ button { -webkit-tap-highlight-color: transparent; }
 
 .pb-safe { padding-bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px)); }
 
+/* RP pages (Agents, Group agent assignments, Data entry): smaller text on phones. */
+@media (max-width: 639px) {
+  .rp-compact .text-xl { font-size: 17px; line-height: 1.35; }
+  .rp-compact .text-sm { font-size: 12px; line-height: 1.45; }
+  .rp-compact .text-xs { font-size: 11px; line-height: 1.45; }
+  .rp-compact .text-\[11px\] { font-size: 10px; }
+  .rp-compact .action-chip { min-height: 28px; padding: 0 8px; font-size: 10px; }
+  /* The dropdowns and search boxes (their own styles set 13px on phones) */
+  .rp-compact .search-select .search-select-trigger { min-height: 38px; padding: 8px 11px; font-size: 12px; }
+  .rp-compact .search-select .search-input-wrap input, .rp-compact .search-select .search-select-option { font-size: 12px; }
+  .rp-compact label.list-search { min-height: 38px; }
+  .rp-compact label.list-search input { font-size: 12px; }
+}
+
 /* Phones: two-column forms stack. A grid that should stay two columns (product cards) adds keep-cols. */
 @media (max-width: 760px) {
   .page-content .grid.grid-cols-2:not(.keep-cols) { grid-template-columns: 1fr; }
@@ -62,27 +76,24 @@ button { -webkit-tap-highlight-color: transparent; }
 .action-success { color: #11815e; background: #e3f6ee; }
 .action-success:hover:not(:disabled) { background: #cfeee1; }
 
-/* Win/lose report tables (Weekly report, Group summary): on phones smaller text and tighter cells,
-   so they fit the screen without scrolling sideways; amounts stay on one line. */
-.report-table { width: 100%; text-align: left; font-size: 9.5px; line-height: 1.35; }
-.report-table th, .report-table td { padding: 7px 3px; }
-.report-table th:first-child, .report-table td:first-child { padding-left: 8px; }
-.report-table th:last-child, .report-table td:last-child { padding-right: 8px; }
+/* Win/lose report tables (Weekly report, Group summary, an entry's page): on phones smaller text
+   (scaled to the screen) and tighter cells, so they fit without scrolling sideways; amounts stay on
+   one line. */
+.report-table { width: 100%; text-align: left; font-size: clamp(7px, 2.45vw, 9.5px); line-height: 1.35; }
+.report-table th, .report-table td { padding: 7px 2px; }
+.report-table th:first-child, .report-table td:first-child { padding-left: 6px; }
+.report-table th:last-child, .report-table td:last-child { padding-right: 6px; }
 .report-table thead th { font-size: 9px; letter-spacing: .02em; }
 .report-table .amount { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .report-table .name { overflow-wrap: anywhere; }
 /* An agent's code stays on one line (smaller on phones). */
-.report-table .code { white-space: nowrap; font-size: 9px; }
-/* A group's agent: the Total worked out, under its row. */
-.report-table tr.calc { border-top-width: 0 !important; }
-.report-table tr.calc td { padding-top: 0; text-align: right; font-size: 9px; }
+.report-table .code { white-space: nowrap; font-size: clamp(7px, 2.35vw, 9px); }
 .report-table td.empty { padding: 32px 12px; text-align: center; }
 @media (min-width: 640px) {
   .report-table { font-size: 12px; }
   .report-table th, .report-table td, .report-table th:first-child, .report-table td:first-child, .report-table th:last-child, .report-table td:last-child { padding: 8px 12px; }
   .report-table thead th { font-size: 10px; letter-spacing: .025em; }
   .report-table .code { font-size: inherit; }
-  .report-table tr.calc td { font-size: 11px; }
 }
 
 /* Inputs a form check (or the API) rejected: see useFormErrors().invalid(). */

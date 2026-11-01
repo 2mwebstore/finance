@@ -2,6 +2,8 @@
 -- Removes the platform tables and every win/lose result in them: only for rolling back a fresh install.
 DROP TABLE IF EXISTS weekly_settlement_totals;
 DROP TABLE IF EXISTS weekly_settlements;
+DROP TABLE IF EXISTS weekly_entry_reactions;
+DROP TABLE IF EXISTS weekly_result_reactions;
 DROP TABLE IF EXISTS weekly_entries;
 DROP TABLE IF EXISTS weekly_partner_results;
 DROP TABLE IF EXISTS weekly_platform_results;

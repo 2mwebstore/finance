@@ -159,6 +159,8 @@ type PlatformInput struct {
 	DefaultRate     string `json:"default_rate"`
 	DefaultCurrency string `json:"default_currency" binding:"required,len=3"`
 	IsActive        *bool  `json:"is_active"`
+	// Reason: why the agent is turned off (needed then; the audit log keeps it).
+	Reason string `json:"reason" binding:"max=512"`
 }
 
 type PlatformRow struct {
@@ -189,6 +191,35 @@ func agentBefore(a, b string) bool {
 		return x < y
 	}
 	return a < b
+}
+
+// DeletePlatform removes an agent that was never used: in no group (even one ended) and with no week
+// entered. A used agent can only be turned off. It returns the agent removed.
+func (s *PlatformService) DeletePlatform(ctx context.Context, id uuid.UUID) (*models.Platform, error) {
+	var p models.Platform
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&p, "id = ?", id).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrPlatformNotFound
+			}
+			return err
+		}
+		var groups, weeks int64
+		if err := tx.Unscoped().Model(&models.HQPlatformAssignment{}).Where("platform_id = ?", p.ID).Count(&groups).Error; err != nil {
+			return err
+		}
+		if err := tx.Unscoped().Model(&models.WeeklyPlatformResult{}).Where("platform_id = ?", p.ID).Count(&weeks).Error; err != nil {
+			return err
+		}
+		if groups > 0 || weeks > 0 {
+			return fmt.Errorf("%s has been in a group or has weeks entered, so it can't be deleted; turn it off instead", p.Code)
+		}
+		return tx.Unscoped().Delete(&p).Error
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &p, nil
 }
 
 func (s *PlatformService) SavePlatform(ctx context.Context, id *uuid.UUID, in PlatformInput) (*models.Platform, error) {
@@ -228,12 +259,19 @@ func (s *PlatformService) SavePlatform(ctx context.Context, id *uuid.UUID, in Pl
 		return nil, fieldError("default_currency", err.Error())
 	}
 	if in.IsActive != nil && !*in.IsActive && p.IsActive && id != nil {
+		if len(strings.TrimSpace(in.Reason)) < 3 {
+			return nil, fieldError("reason", "give a reason for turning the agent off")
+		}
 		var active int64
 		if err := s.db.WithContext(ctx).Model(&models.HQPlatformAssignment{}).Where("platform_id = ? AND active_key = 1", p.ID).Count(&active).Error; err != nil {
 			return nil, err
 		}
 		if active > 0 {
-			return nil, fieldError("is_active", fmt.Sprintf("%d groups still have this agent; end those assignments first", active))
+			groups := "groups still have"
+			if active == 1 {
+				groups = "group still has"
+			}
+			return nil, fieldError("is_active", fmt.Sprintf("%d %s this agent; take it out of them first", active, groups))
 		}
 	}
 	p.Code, p.Name, p.DefaultRate, p.DefaultCurrency = code, name, rate, currency

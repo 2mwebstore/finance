@@ -64,13 +64,21 @@ const (
 	InventoryExpensesCreate = "inventory-expenses.create"
 	InventoryExpensesVoid   = "inventory-expenses.void"
 
-	// Platforms and weekly win/lose (an HQ is a branch).
+	// RP: agents (platforms), group agent assignments, Data entry (weekly win/lose) and the Report;
+	// each page has its own view, add, update and delete (Data entry also react). An HQ is a branch.
 	PlatformsView              = "platforms.view"
-	PlatformsManage            = "platforms.manage"
-	PlatformAssignmentsManage  = "platform-assignments.manage"
+	PlatformsCreate            = "platforms.create"
+	PlatformsEdit              = "platforms.edit"
+	PlatformsDelete            = "platforms.delete"
+	PlatformAssignmentsView    = "platform-assignments.view"
+	PlatformAssignmentsCreate  = "platform-assignments.create"
+	PlatformAssignmentsEdit    = "platform-assignments.edit"
+	PlatformAssignmentsDelete  = "platform-assignments.delete"
 	WinLoseView                = "winlose.view"
 	WinLoseCreate              = "winlose.create"
 	WinLoseEdit                = "winlose.edit"
+	WinLoseDelete              = "winlose.delete"
+	WinLoseReact               = "winlose.react"
 	WinLoseReportsView         = "winlose-reports.view"
 	WinLoseReportsConsolidated = "winlose-reports.consolidated"
 	WinLoseSettlementsFinalize = "winlose-settlements.finalize"
@@ -141,13 +149,20 @@ func AllPermissions() []struct {
 		{InventoryExpensesCreate, "Create Inventory Expenses", "Inventory Expenses", "Record inventory expenses (shipping, packaging, storage…)"},
 		{InventoryExpensesVoid, "Void Inventory Expenses", "Inventory Expenses", "Void an inventory expense"},
 
-		{PlatformsView, "View Agents", "Platforms", "See agents and the groups they are in"},
-		{PlatformsManage, "Manage Agents", "Platforms", "Add and edit agents and their currency"},
-		{PlatformAssignmentsManage, "Manage Group Agent Assignments", "Platforms", "Make titled groups of agents with their rates; update, turn off or delete them"},
-		{WinLoseView, "View Win/Lose", "Win/Lose", "See the weekly win/lose entered for your groups"},
-		{WinLoseCreate, "Enter Win/Lose", "Win/Lose", "Enter a week's win/lose and commission for your groups (once a week)"},
-		{WinLoseEdit, "Correct Win/Lose", "Win/Lose", "Change a week already saved, with a reason (kept in the audit log)"},
-		{WinLoseReportsView, "View Win/Lose Reports", "Win/Lose Reports", "The weekly report and the group summary for your groups, one group at a time"},
+		{PlatformsView, "View Agents", "Platforms", "See the agents, their currency and how many groups have them"},
+		{PlatformsCreate, "Add Agents", "Platforms", "Add agents with their currency"},
+		{PlatformsEdit, "Update Agents", "Platforms", "Edit agents; turn them off (with a reason) or on"},
+		{PlatformsDelete, "Delete Agents", "Platforms", "Delete an agent that was never in a group or entered (a used one can only be turned off)"},
+		{PlatformAssignmentsView, "View Group Agent Assignments", "Platforms", "See the titled groups with their agents and rates"},
+		{PlatformAssignmentsCreate, "Add Group Agent Assignments", "Platforms", "Make a titled group of agents with their rates (Assign agents)"},
+		{PlatformAssignmentsEdit, "Update Group Agent Assignments", "Platforms", "Change a group's title, agents and rates; turn it off or on"},
+		{PlatformAssignmentsDelete, "Delete Group Agent Assignments", "Platforms", "Delete a group no week was entered for (a used one can only be turned off)"},
+		{WinLoseView, "View Data Entry", "Win/Lose", "See the entries and the W/L and COMM entered for your groups"},
+		{WinLoseCreate, "Add Data Entry", "Win/Lose", "Make new entries and enter agents' W/L and COMM for your groups"},
+		{WinLoseEdit, "Update Data Entry", "Win/Lose", "Change an entry's title and amounts already saved, with a reason (kept in the audit log)"},
+		{WinLoseDelete, "Delete Data Entry", "Win/Lose", "Delete an entry and its amounts, with a reason (kept in the audit log)"},
+		{WinLoseReact, "React to Data Entry", "Win/Lose", "Give an entry, or an agent in it, ✅ or ❌, on Data entry and the Report"},
+		{WinLoseReportsView, "View Report", "Win/Lose Reports", "The Report and the group summary for your groups, one group at a time"},
 		{WinLoseReportsConsolidated, "View Consolidated Win/Lose", "Win/Lose Reports", "Combined totals across all your groups"},
 		{WinLoseSettlementsFinalize, "Finalize Weekly Settlements", "Win/Lose Reports", "Finalize or reopen a group's week; a finalized week can't be changed"},
 	}
@@ -196,8 +211,9 @@ func DefaultRoles() map[string]struct {
 				SalesView, SalesCreate, SalesVoid, SalesEdit,
 				PurchasesView, PurchasesCreate, PurchasesApprove, PurchasesVoid, PurchasesEdit,
 				InventoryExpensesView, InventoryExpensesCreate, InventoryExpensesVoid,
-				PlatformsView, PlatformsManage, PlatformAssignmentsManage,
-				WinLoseView, WinLoseCreate, WinLoseEdit,
+				PlatformsView, PlatformsCreate, PlatformsEdit, PlatformsDelete,
+				PlatformAssignmentsView, PlatformAssignmentsCreate, PlatformAssignmentsEdit, PlatformAssignmentsDelete,
+				WinLoseView, WinLoseCreate, WinLoseEdit, WinLoseDelete, WinLoseReact,
 				WinLoseReportsView, WinLoseReportsConsolidated, WinLoseSettlementsFinalize,
 			},
 		},
@@ -217,7 +233,8 @@ func DefaultRoles() map[string]struct {
 				SalesView, SalesCreate, SalesVoid, SalesEdit,
 				PurchasesView, PurchasesCreate, PurchasesApprove, PurchasesEdit,
 				InventoryExpensesView, InventoryExpensesCreate,
-				PlatformsView, WinLoseView, WinLoseCreate, WinLoseEdit, WinLoseReportsView,
+				PlatformsView, PlatformAssignmentsView,
+				WinLoseView, WinLoseCreate, WinLoseEdit, WinLoseDelete, WinLoseReact, WinLoseReportsView,
 			},
 		},
 		"accountant": {
@@ -232,7 +249,8 @@ func DefaultRoles() map[string]struct {
 				BranchesView,
 				InventoryView, SalesView, PurchasesView, PurchasesCreate, PurchasesEdit,
 				InventoryExpensesView, InventoryExpensesCreate,
-				PlatformsView, WinLoseView, WinLoseCreate, WinLoseReportsView,
+				PlatformsView, PlatformAssignmentsView,
+				WinLoseView, WinLoseCreate, WinLoseReact, WinLoseReportsView,
 			},
 		},
 		"cashier": {
@@ -257,7 +275,7 @@ func DefaultRoles() map[string]struct {
 				ReportsView,
 				BranchesView,
 				InventoryView, SalesView, PurchasesView, InventoryExpensesView,
-				PlatformsView, WinLoseView, WinLoseReportsView,
+				PlatformsView, PlatformAssignmentsView, WinLoseView, WinLoseReportsView,
 			},
 		},
 	}

@@ -1,11 +1,11 @@
 <template>
-  <section class="mx-auto max-w-5xl space-y-4">
+  <section class="rp-compact mx-auto max-w-5xl space-y-4">
     <header class="flex flex-wrap items-center justify-between gap-3">
       <div>
-        <p class="text-[10px] font-bold tracking-[0.14em] text-slate-400">PLATFORMS</p>
+        <p class="text-[10px] font-bold tracking-[0.14em] text-slate-400">RP</p>
         <h1 class="text-xl font-bold text-navy">Group agent assignments</h1>
       </div>
-      <NuxtLink v-if="canManage" to="/admin/platform-assignments/new" class="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white hover:bg-primary-hover"><Plus :size="16" /> Assign agents</NuxtLink>
+      <NuxtLink v-if="canCreate" to="/admin/platform-assignments/new" class="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white hover:bg-primary-hover"><Plus :size="16" /> Assign agents</NuxtLink>
     </header>
 
     <div class="grid grid-cols-1 gap-2 sm:grid-cols-3">
@@ -25,29 +25,23 @@
                 <Network :size="15" class="shrink-0 text-muted" />{{ g.title }}
                 <span v-if="!g.is_active" class="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase text-muted">Off</span>
               </h2>
-              <p class="mt-0.5 text-[11px] text-muted">From {{ formatDocDate(g.starts_on) }} · {{ g.weeks }} {{ g.weeks === 1 ? 'week' : 'weeks' }} entered<template v-if="g.created_by"> · by {{ g.created_by }}</template></p>
+              <!-- Its agents are in View -->
+              <p class="mt-0.5 text-[11px] text-muted">From {{ formatDocDate(g.starts_on) }} · {{ g.agents.length }} {{ g.agents.length === 1 ? 'agent' : 'agents' }} · {{ g.weeks }} {{ g.weeks === 1 ? 'week' : 'weeks' }} entered<template v-if="g.created_by"> · by {{ g.created_by }}</template></p>
             </div>
-            <!-- Its agents, each at its rate -->
-            <ul class="flex flex-wrap gap-1">
-              <li v-for="a in g.agents" :key="a.assignment_id" class="rounded-md border border-border bg-white px-1.5 py-0.5 text-[11px] text-navy"><span class="font-mono font-semibold">{{ a.platform_code }}</span><template v-if="!g.partners.length"> · <strong>{{ formatRate(a.commission_rate) }}</strong></template></li>
-              <li v-if="!g.agents.length" class="text-[11px] italic text-slate-400">No agents</li>
-            </ul>
             <!-- Partners a group still has from before (their % decide the Total until it is updated) -->
             <ul v-if="g.partners.length" class="flex flex-wrap gap-1">
               <li v-for="p in g.partners" :key="p.partner_id" class="inline-flex items-center gap-1 rounded-md bg-blue-50 px-1.5 py-0.5 text-[11px] text-navy" :class="p.partner_active ? '' : 'opacity-60'"><Handshake :size="11" />{{ p.partner_name }}<template v-if="!p.partner_active"> (off)</template> · {{ formatRate(p.commission_rate) }}</li>
             </ul>
           </div>
           <div class="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2">
-            <label v-if="canManage" class="flex items-center gap-2 text-xs font-semibold" :class="g.is_active ? 'text-navy' : 'text-muted'">
+            <label v-if="canEdit" class="flex items-center gap-2 text-xs font-semibold" :class="g.is_active ? 'text-navy' : 'text-muted'">
               Active
               <input :checked="g.is_active" type="checkbox" role="switch" class="switch" :disabled="busyId === g.id" :aria-label="`${g.title} active`" @change="toggle(g)" />
             </label>
             <div class="flex items-center gap-1.5">
               <button type="button" class="action-chip" @click="viewing = g"><Eye :size="13" /> View</button>
-              <template v-if="canManage">
-                <NuxtLink :to="`/admin/platform-assignments/${g.id}`" class="action-chip action-edit"><Pencil :size="13" /> Update</NuxtLink>
-                <button type="button" class="action-chip action-danger" @click="openDelete(g)"><Trash2 :size="13" /> Delete</button>
-              </template>
+              <NuxtLink v-if="canEdit" :to="`/admin/platform-assignments/${g.id}`" class="action-chip action-edit"><Pencil :size="13" /> Update</NuxtLink>
+              <button v-if="canDelete" type="button" class="action-chip action-danger" @click="openDelete(g)"><Trash2 :size="13" /> Delete</button>
             </div>
           </div>
         </div>
@@ -100,7 +94,7 @@
       <template #footer>
         <button type="button" class="border border-border bg-white text-muted" :disabled="saving" @click="deleting = null">Cancel</button>
         <button v-if="deleting && !deleting.weeks" type="submit" class="bg-expense text-white disabled:opacity-60" :disabled="saving">{{ saving ? 'Deleting…' : 'Delete group' }}</button>
-        <button v-else-if="deleting && deleting.is_active" type="button" class="bg-primary text-white disabled:opacity-60" :disabled="saving" @click="turnOffDeleting">Turn it off</button>
+        <button v-else-if="deleting && deleting.is_active && canEdit" type="button" class="bg-primary text-white disabled:opacity-60" :disabled="saving" @click="turnOffDeleting">Turn it off</button>
       </template>
     </AppModal>
   </section>
@@ -116,7 +110,10 @@ import { formatRate } from '~/utils/winlose'
 const { api } = useApi()
 const { can } = usePermissions()
 const toast = useToast()
-const canManage = computed(() => can('platform-assignments.manage'))
+// Each action has its own permission (Add, Update, Delete Group Agent Assignments).
+const canCreate = computed(() => can('platform-assignments.create'))
+const canEdit = computed(() => can('platform-assignments.edit'))
+const canDelete = computed(() => can('platform-assignments.delete'))
 
 const platforms = ref<Platform[]>([])
 const platformOptions = computed(() => platforms.value.map(p => ({ value: p.id, label: p.is_active ? p.code : `${p.code} (off)` })))

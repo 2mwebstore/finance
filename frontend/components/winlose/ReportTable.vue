@@ -4,9 +4,9 @@
       <thead class="bg-canvas uppercase text-slate-500">
         <tr>
           <th class="font-bold">Agent</th>
-          <th class="amount font-bold">Win/Lose</th>
-          <th class="amount font-bold">Comm</th>
-          <!-- One group: each agent's rate in it (on phones it is in the line under the agent) -->
+          <th class="amount font-bold">W/L</th>
+          <th class="amount font-bold">COMM</th>
+          <!-- One group: the rate each agent's Total is at (on phones it is in the line under the agent) -->
           <th v-if="byGroup" class="amount hidden font-bold sm:table-cell">Rate</th>
           <th class="amount font-bold">Total</th>
         </tr>
@@ -14,15 +14,13 @@
       <tbody v-if="report.lines.length" class="divide-y divide-border">
         <template v-for="line in report.lines" :key="`${line.platform_id}-${line.currency}`">
           <tr class="text-navy">
-            <td class="name"><span class="code font-mono font-semibold">{{ line.platform_code }}</span> <span class="block text-muted sm:inline"><span class="hidden sm:inline">· </span>{{ line.currency }}</span></td>
+            <td class="name">
+              <button v-if="selectable" type="button" class="code font-mono font-semibold text-primary hover:underline" @click="emit('select', line.platform_id)">{{ line.platform_code }}</button>
+              <span v-else class="code font-mono font-semibold">{{ line.platform_code }}</span> <span class="block text-muted sm:inline"><span class="hidden sm:inline">· </span>{{ line.currency }}<span v-if="byGroup" class="sm:hidden"> · {{ usedRate(line.rate_min, line.rate_max, line.formula) }}</span></span></td>
             <td class="amount" :class="tone(line.win_lose)">{{ formatAmount(line.win_lose, line.currency) }}</td>
             <td class="amount">{{ formatAmount(line.commission, line.currency) }}</td>
-            <td v-if="byGroup" class="amount hidden sm:table-cell">{{ rateText(line) }}</td>
+            <td v-if="byGroup" class="amount hidden sm:table-cell">{{ usedRate(line.rate_min, line.rate_max, line.formula) }}</td>
             <td class="amount font-bold" :class="tone(line.jame_ps)">{{ formatAmount(line.jame_ps, line.currency) }}</td>
-          </tr>
-          <!-- How the Total is worked out, e.g. (1,000 − 100) × 10% = 90 -->
-          <tr v-if="byGroup" class="calc text-muted">
-            <td :colspan="5">{{ workedOut(line) }}</td>
           </tr>
         </template>
         <!-- The total in each currency -->
@@ -40,29 +38,18 @@
 </template>
 
 <script setup lang="ts">
-import type { WinLoseReport, WinLoseReportLine } from '~/types/api'
-import { formatAmount, formatRate } from '~/utils/winlose'
+import type { WinLoseReport } from '~/types/api'
+import { formatAmount, usedRate } from '~/utils/winlose'
 
 /**
  * A win/lose report's lines by agent, with the total per currency (`jame_ps` is the Total). For one
- * group (byGroup) each agent also shows its rate in the group and how its Total is worked out.
+ * group (byGroup) each agent also shows the rate its Total is at (an agent at 60%: 40%).
+ * Selectable: an agent's code opens its detail (`select` with its id).
  */
-withDefaults(defineProps<{ report: WinLoseReport; byGroup?: boolean }>(), { byGroup: false })
+withDefaults(defineProps<{ report: Pick<WinLoseReport, 'lines' | 'totals'>; byGroup?: boolean; selectable?: boolean }>(), { byGroup: false, selectable: false })
+const emit = defineEmits<{ select: [platformId: string] }>()
 
 function tone(value: string) {
   return Number(value) < 0 ? 'text-expense' : ''
-}
-
-function rateText(line: WinLoseReportLine) {
-  return Number(line.rate_min) === Number(line.rate_max) ? formatRate(line.rate_min) : `${formatRate(line.rate_min)}–${formatRate(line.rate_max)}`
-}
-
-// v2 takes the commission away, v1 added it. A negative amount after the sign is in brackets.
-function workedOut(line: WinLoseReportLine) {
-  const sign = line.formula === 'v2' ? '−' : line.formula === 'v1' ? '+' : ''
-  if (!sign || Number(line.rate_min) !== Number(line.rate_max)) return `Rate ${rateText(line)}`
-  const commission = formatAmount(line.commission, line.currency)
-  const after = Number(line.commission) < 0 ? `(${commission})` : commission
-  return `(${formatAmount(line.win_lose, line.currency)} ${sign} ${after}) × ${rateText(line)} = ${formatAmount(line.jame_ps, line.currency)}`
 }
 </script>

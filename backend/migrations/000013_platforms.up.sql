@@ -1,5 +1,5 @@
 -- Platforms and weekly win/lose (HQ = branch): platforms, partners, titled groups of
--- branch-platform assignments and their partners, weekly results with each partner's share, titled weekly entries, and weekly settlements. Same SQL
+-- branch-platform assignments and their partners, weekly results with each partner's share, titled weekly entries (with people's ✅/❌ reactions on them and on each agent's result), and weekly settlements. Same SQL
 -- as internal/database/platforms.go. Only adds (but for two replaced unique keys): safe to run again. The tables take the collation of
 -- branches.id, so their foreign keys can be created whichever collation the database uses.
 
@@ -188,6 +188,38 @@ SET @ddl = CONCAT('CREATE TABLE IF NOT EXISTS weekly_entries (
     PRIMARY KEY (id),
     KEY idx_weekly_entries_branch_week (branch_id, week_start),
     KEY idx_weekly_entries_created_at (created_at)
+)', ' ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=', @coll);
+PREPARE create_table FROM @ddl;
+EXECUTE create_table;
+DEALLOCATE PREPARE create_table;
+
+-- weekly_entry_reactions
+SET @ddl = CONCAT('CREATE TABLE IF NOT EXISTS weekly_entry_reactions (
+    id CHAR(36) NOT NULL,
+    entry_id CHAR(36) NOT NULL,
+    user_id CHAR(36) NOT NULL,
+    reaction VARCHAR(8) NOT NULL,
+    created_at DATETIME(3) NULL,
+    updated_at DATETIME(3) NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_weekly_entry_reaction (entry_id, user_id),
+    KEY idx_weekly_entry_reactions_user (user_id)
+)', ' ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=', @coll);
+PREPARE create_table FROM @ddl;
+EXECUTE create_table;
+DEALLOCATE PREPARE create_table;
+
+-- weekly_result_reactions
+SET @ddl = CONCAT('CREATE TABLE IF NOT EXISTS weekly_result_reactions (
+    id CHAR(36) NOT NULL,
+    result_id CHAR(36) NOT NULL,
+    user_id CHAR(36) NOT NULL,
+    reaction VARCHAR(8) NOT NULL,
+    created_at DATETIME(3) NULL,
+    updated_at DATETIME(3) NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_weekly_result_reaction (result_id, user_id),
+    KEY idx_weekly_result_reactions_user (user_id)
 )', ' ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=', @coll);
 PREPARE create_table FROM @ddl;
 EXECUTE create_table;
@@ -528,6 +560,42 @@ SET @fk = IF(
     (SELECT COUNT(*) FROM information_schema.table_constraints
       WHERE table_schema = DATABASE() AND table_name = 'weekly_entries' AND constraint_name = 'fk_weekly_entries_created_by' AND constraint_type = 'FOREIGN KEY') = 0,
     'ALTER TABLE weekly_entries ADD CONSTRAINT fk_weekly_entries_created_by FOREIGN KEY (created_by_id) REFERENCES users(id)',
+    'SELECT 1');
+PREPARE add_fk FROM @fk;
+EXECUTE add_fk;
+DEALLOCATE PREPARE add_fk;
+
+SET @fk = IF(
+    (SELECT COUNT(*) FROM information_schema.table_constraints
+      WHERE table_schema = DATABASE() AND table_name = 'weekly_entry_reactions' AND constraint_name = 'fk_weekly_entry_reactions_entry' AND constraint_type = 'FOREIGN KEY') = 0,
+    'ALTER TABLE weekly_entry_reactions ADD CONSTRAINT fk_weekly_entry_reactions_entry FOREIGN KEY (entry_id) REFERENCES weekly_entries(id) ON DELETE CASCADE',
+    'SELECT 1');
+PREPARE add_fk FROM @fk;
+EXECUTE add_fk;
+DEALLOCATE PREPARE add_fk;
+
+SET @fk = IF(
+    (SELECT COUNT(*) FROM information_schema.table_constraints
+      WHERE table_schema = DATABASE() AND table_name = 'weekly_entry_reactions' AND constraint_name = 'fk_weekly_entry_reactions_user' AND constraint_type = 'FOREIGN KEY') = 0,
+    'ALTER TABLE weekly_entry_reactions ADD CONSTRAINT fk_weekly_entry_reactions_user FOREIGN KEY (user_id) REFERENCES users(id)',
+    'SELECT 1');
+PREPARE add_fk FROM @fk;
+EXECUTE add_fk;
+DEALLOCATE PREPARE add_fk;
+
+SET @fk = IF(
+    (SELECT COUNT(*) FROM information_schema.table_constraints
+      WHERE table_schema = DATABASE() AND table_name = 'weekly_result_reactions' AND constraint_name = 'fk_weekly_result_reactions_result' AND constraint_type = 'FOREIGN KEY') = 0,
+    'ALTER TABLE weekly_result_reactions ADD CONSTRAINT fk_weekly_result_reactions_result FOREIGN KEY (result_id) REFERENCES weekly_platform_results(id) ON DELETE CASCADE',
+    'SELECT 1');
+PREPARE add_fk FROM @fk;
+EXECUTE add_fk;
+DEALLOCATE PREPARE add_fk;
+
+SET @fk = IF(
+    (SELECT COUNT(*) FROM information_schema.table_constraints
+      WHERE table_schema = DATABASE() AND table_name = 'weekly_result_reactions' AND constraint_name = 'fk_weekly_result_reactions_user' AND constraint_type = 'FOREIGN KEY') = 0,
+    'ALTER TABLE weekly_result_reactions ADD CONSTRAINT fk_weekly_result_reactions_user FOREIGN KEY (user_id) REFERENCES users(id)',
     'SELECT 1');
 PREPARE add_fk FROM @fk;
 EXECUTE add_fk;

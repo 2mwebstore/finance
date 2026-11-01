@@ -1,11 +1,11 @@
 <template>
-  <section class="mx-auto max-w-3xl space-y-4">
+  <section class="rp-compact mx-auto max-w-3xl space-y-4">
     <header>
-      <NuxtLink to="/admin/platform-assignments" class="inline-flex items-center gap-1 text-[11px] font-bold tracking-[0.14em] text-slate-400 hover:text-primary"><ChevronLeft :size="13" /> GROUP AGENT ASSIGNMENTS</NuxtLink>
+      <button type="button" class="mb-2 inline-flex items-center gap-1 rounded-lg border border-border bg-white px-3 py-1.5 text-xs font-semibold text-navy hover:bg-canvas" @click="goBack"><ChevronLeft :size="14" /> Back</button>
       <h1 class="text-xl font-bold text-navy">{{ isNew ? 'Assign agents' : 'Update group' }}</h1>
     </header>
 
-    <AppAlert v-if="!canManage" type="warning" title="You can’t change groups" message="It needs Manage Group Agent Assignments." />
+    <AppAlert v-if="!canSave" type="warning" :title="isNew ? 'You can’t add groups' : 'You can’t change groups'" :message="isNew ? 'It needs Add Group Agent Assignments.' : 'It needs Update Group Agent Assignments.'" />
     <div v-else-if="loading" class="text-sm text-muted">Loading…</div>
     <AppAlert v-else-if="loadError" title="Couldn’t load the group" :message="loadError"><template #action><NuxtLink to="/admin/platform-assignments">Back to the groups</NuxtLink></template></AppAlert>
     <form v-else class="space-y-4 rounded-xl border border-border bg-white p-4 sm:p-5" novalidate @submit.prevent="save">
@@ -22,23 +22,25 @@
         <table class="w-full text-left text-sm">
           <thead class="bg-canvas text-[10px] uppercase tracking-wide text-slate-500">
             <tr>
-              <th class="px-3 py-2 font-bold">Agent</th>
-              <th class="w-40 px-3 py-2 font-bold">Rate</th>
-              <th class="w-12 px-2 py-2"><span class="sr-only">Take out</span></th>
+              <th class="px-2 py-2 font-bold sm:px-3">Agent</th>
+              <th class="px-2 py-2 font-bold sm:w-44 sm:px-3">Rate → Total at</th>
+              <th class="px-1 py-2 sm:w-12 sm:px-2"><span class="sr-only">Take out</span></th>
             </tr>
           </thead>
           <tbody class="divide-y divide-border">
             <tr v-for="r in rows" :key="r.id">
-              <td class="px-3 py-2">
-                <span class="font-mono text-sm font-semibold text-navy">{{ r.code }}</span>
+              <td class="px-2 py-2 sm:px-3">
+                <span class="font-mono text-xs font-semibold text-navy sm:text-sm">{{ r.code }}</span>
                 <span v-if="r.weeks" class="block text-[11px] text-muted">{{ r.weeks }} {{ r.weeks === 1 ? 'week' : 'weeks' }} entered</span>
               </td>
-              <td class="px-3 py-2">
-                <label class="flex items-center gap-1.5 text-xs text-muted">
-                  <input v-model.trim="rates[r.id]" type="text" inputmode="decimal" :aria-label="`Rate for ${r.code}`" :aria-invalid="tried && !!rateProblem(rates[r.id]) ? 'true' : undefined" class="h-9 w-24 rounded-lg border border-border px-2.5 text-right text-sm text-navy" placeholder="0" />%
+              <td class="px-2 py-2 sm:px-3">
+                <label class="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-muted sm:flex-nowrap">
+                  <span class="inline-flex items-center gap-1.5"><input v-model.trim="rates[r.id]" type="text" inputmode="decimal" :aria-label="`Rate for ${r.code}`" :aria-invalid="tried && !!rateProblem(rates[r.id]) ? 'true' : undefined" class="h-9 w-16 rounded-lg border border-border px-2.5 text-right text-sm text-navy sm:w-24" placeholder="0" />%</span>
+                  <!-- The Total is at what is left: 60% → 40% (under the rate on phones) -->
+                  <span v-if="!rateProblem(rates[r.id])" class="whitespace-nowrap tabular-nums max-sm:w-full">→ {{ formatRate(100 - Number(rates[r.id] || 0)) }}</span>
                 </label>
               </td>
-              <td class="px-2 py-2 text-right">
+              <td class="px-1 py-2 text-right sm:px-2">
                 <button type="button" class="grid h-8 w-8 place-items-center rounded-lg text-muted hover:bg-red-50 hover:text-expense" :aria-label="`Take ${r.code} out`" @click="agentIds = agentIds.filter(id => id !== r.id)"><X :size="15" /></button>
               </td>
             </tr>
@@ -76,7 +78,8 @@ const route = useRoute()
 const { api } = useApi()
 const { can } = usePermissions()
 const toast = useToast()
-const canManage = computed(() => can('platform-assignments.manage'))
+// Assign agents needs Add Group Agent Assignments, a group's page Update.
+const canSave = computed(() => can(isNew.value ? 'platform-assignments.create' : 'platform-assignments.edit'))
 const isNew = computed(() => route.params.id === 'new')
 
 const platforms = ref<Platform[]>([])
@@ -136,9 +139,17 @@ const saving = ref(false)
 const saved = ref(false)
 const formError = ref('')
 const tried = ref(false)
-const rateProblem = (value: string | undefined) => !value ? 'a rate is needed' : /^\d+(\.\d{1,4})?$/.test(value) && Number(value) <= 100 ? '' : 'a rate is from 0 to 100 (at most 4 decimals)'
+// An empty rate is 0%.
+const rateProblem = (value: string | undefined) => !value || (/^\d+(\.\d{1,4})?$/.test(value) && Number(value) <= 100) ? '' : 'a rate is from 0 to 100 (at most 4 decimals)'
 
 onBeforeRouteLeave(() => saved.value || loading.value || snapshot() === initial || window.confirm('Leave without saving your changes?'))
+
+// Back where the person came from (the groups), else to the groups.
+const router = useRouter()
+function goBack() {
+  if (window.history.state?.back) router.back()
+  else navigateTo('/admin/platform-assignments')
+}
 
 async function save() {
   tried.value = true
@@ -150,7 +161,7 @@ async function save() {
   if (formError.value) return
   const body = {
     title: title.value.trim(),
-    agents: agentIds.value.map(id => ({ platform_id: id, commission_rate: rates[id] })),
+    agents: agentIds.value.map(id => ({ platform_id: id, commission_rate: rates[id] || '0' })),
     ...(isNew.value ? { starts_on: startsOn.value } : {}),
   }
   saving.value = true

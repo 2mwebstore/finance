@@ -177,6 +177,38 @@ type WeeklyEntry struct {
 
 func (WeeklyEntry) TableName() string { return "weekly_entries" }
 
+// Reactions to an entry: ✅ and ❌.
+const (
+	ReactionYes = "yes"
+	ReactionNo  = "no"
+)
+
+// WeeklyEntryReaction is one person's ✅ (yes) or ❌ (no) on an entry: one each, changed or taken
+// back by them. Removed with the entry.
+type WeeklyEntryReaction struct {
+	ID        uuid.UUID `gorm:"type:char(36);primaryKey" json:"-"`
+	EntryID   uuid.UUID `gorm:"type:char(36);not null" json:"entry_id"`
+	UserID    uuid.UUID `gorm:"type:char(36);not null" json:"user_id"`
+	Reaction  string    `gorm:"size:8;not null" json:"reaction"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func (WeeklyEntryReaction) TableName() string { return "weekly_entry_reactions" }
+
+// WeeklyResultReaction is one person's ✅ (yes) or ❌ (no) on an agent's result in an entry: one
+// each, like WeeklyEntryReaction. Removed with the result.
+type WeeklyResultReaction struct {
+	ID        uuid.UUID `gorm:"type:char(36);primaryKey" json:"-"`
+	ResultID  uuid.UUID `gorm:"type:char(36);not null" json:"result_id"`
+	UserID    uuid.UUID `gorm:"type:char(36);not null" json:"user_id"`
+	Reaction  string    `gorm:"size:8;not null" json:"reaction"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func (WeeklyResultReaction) TableName() string { return "weekly_result_reactions" }
+
 // WeeklySettlementTotal is a finalized week's totals in one currency.
 type WeeklySettlementTotal struct {
 	ID             uuid.UUID       `gorm:"type:char(36);primaryKey" json:"-"`

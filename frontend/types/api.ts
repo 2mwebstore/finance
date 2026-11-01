@@ -621,7 +621,7 @@ export interface GroupShare {
 }
 
 /** One agent on an entry (every agent that is on is listed, whatever its groups). */
-export interface WeekSheetRow {
+export interface WeekSheetRow extends WeekSheetAgentReactions {
   platform_id: string
   platform_code: string
   platform_name: string
@@ -654,9 +654,17 @@ export interface WinLoseEntry {
   created_by: string
   /** The week is finalized. */
   locked: boolean
+  /** People's ✅ (yes) and ❌ (no) on the entry, one each. */
+  reactions: EntryReaction[]
 }
 
 /** An entry (or a new one) with every agent that can be entered. */
+export interface WeekSheetAgentReactions {
+  /** A saved row's result: ✅ / ❌ go on it. */
+  result_id?: string
+  reactions?: EntryReaction[]
+}
+
 export interface WeekSheet {
   week_start: string
   week_end: string
@@ -696,12 +704,14 @@ export interface WinLoseSums {
 export interface WinLoseReportLine extends WinLoseSums {
   /** Only with by_week (the partner statement). */
   week_start?: string
+  /** An entry's line (by_entry): the data entry (null for results saved before entries). */
+  entry_id?: string | null
   platform_id: string
   platform_code: string
   platform_name: string
   rate_min: string
   rate_max: string
-  /** The formula version every week of the line was worked out with ('' when they differ): v1 adds the commission, v2 takes it away. */
+  /** The formula version every week of the line was worked out with ('' when they differ): v1 adds the commission, v2 takes it away, v3 also takes the agent's rate from 100%. */
   formula: string
   /** Who shared the Total, by name (partner_id null: weeks with no partner); empty when no week had partners. */
   partners: { partner_id: string | null; partner_name: string; rate_min: string; rate_max: string; jame_ps: string; entries: number }[]
@@ -715,11 +725,36 @@ export interface WinLoseReport {
   /** By agent and currency (and week, with by_week). */
   lines: WinLoseReportLine[]
   platforms: { platform_id: string; platform_code: string; platform_name: string; totals: WinLoseSums[] }[]
-  /** Per titled group (group_id null: agents in no group), by title. */
-  groups: { group_id: string | null; title: string; totals: WinLoseSums[] }[]
+  /** Per titled group (group_id null: agents in no group), by title. For one agent (platform_id): its
+   * rate in the group (rate_min = rate_max unless it changed) and the formula ('' when it differs). */
+  groups: { group_id: string | null; title: string; rate_min: string; rate_max: string; formula: string; totals: WinLoseSums[] }[]
+  /** Each week in the range that has results (Monday to Sunday), earliest first. */
+  weeks: { week_start: string; week_end: string; totals: WinLoseSums[] }[]
+  /** Only with by_entry: the data entries in the range (id null: results saved before entries), by week and then as created. */
+  entries?: WinLoseReportEntry[]
   /** Per partner, with the Total being their share (partner_id null: weeks with no partner). A week shared by two partners counts for each. */
   partners: { partner_id: string | null; partner_name: string; totals: WinLoseSums[] }[]
   totals: WinLoseSums[]
+}
+
+export interface WinLoseReportEntry {
+  id: string | null
+  title: string
+  week_start: string
+  created_at: string | null
+  created_by: string
+  totals: WinLoseSums[]
+  /** Its agents, by agent and currency. */
+  lines: WinLoseReportLine[]
+  /** People's ✅ (yes) and ❌ (no) on the entry, one each. */
+  reactions: EntryReaction[]
+}
+
+export interface EntryReaction {
+  reaction: 'yes' | 'no'
+  user_id: string
+  user_name: string
+  at: string
 }
 
 export interface WeeklySettlement {

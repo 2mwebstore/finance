@@ -3,6 +3,7 @@ package controllers
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/cambodia-finance/income-expense/internal/audit"
 	"github.com/cambodia-finance/income-expense/internal/models"
@@ -112,14 +113,35 @@ func (pc *PlatformController) SavePlatform(c *gin.Context) {
 		writePlatformError(c, err)
 		return
 	}
-	pc.record(c, actor, "platform.save", "platform", p.ID.String(), nil, map[string]interface{}{
+	details := map[string]interface{}{
 		"code": p.Code, "name": p.Name, "default_rate": p.DefaultRate.String(), "default_currency": p.DefaultCurrency, "is_active": p.IsActive,
-	})
+	}
+	if !p.IsActive && strings.TrimSpace(in.Reason) != "" {
+		details["reason"] = strings.TrimSpace(in.Reason)
+	}
+	pc.record(c, actor, "platform.save", "platform", p.ID.String(), nil, details)
 	status := http.StatusOK
 	if id == nil {
 		status = http.StatusCreated
 	}
 	c.JSON(status, p)
+}
+
+// DeletePlatform removes an agent that was never used (a used one can only be turned off).
+func (pc *PlatformController) DeletePlatform(c *gin.Context) {
+	id, ok := paramID(c)
+	if !ok {
+		return
+	}
+	p, err := pc.svc.DeletePlatform(c.Request.Context(), id)
+	if err != nil {
+		writePlatformError(c, err)
+		return
+	}
+	pc.record(c, actorOf(c), "platform.delete", "platform", id.String(), nil, map[string]interface{}{
+		"code": p.Code, "name": p.Name, "default_currency": p.DefaultCurrency,
+	})
+	c.JSON(http.StatusOK, gin.H{"deleted": true})
 }
 
 // ===== Partners =====
@@ -538,6 +560,63 @@ func (pc *PlatformController) DeleteEntry(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"deleted": true})
 }
 
+type entryReactionInput struct {
+	Reaction string `json:"reaction" binding:"required,max=8"`
+}
+
+// ReactToEntry sets the person's ✅ (yes) or ❌ (no) on an entry; the same again takes it back.
+func (pc *PlatformController) ReactToEntry(c *gin.Context) {
+	_, scope, ok := pc.scope(c)
+	if !ok {
+		return
+	}
+	id, ok := paramID(c)
+	if !ok {
+		return
+	}
+	var in entryReactionInput
+	if !bindJSON(c, &in) {
+		return
+	}
+	entry, now, reactions, err := pc.svc.ReactToEntry(c.Request.Context(), id, in.Reaction, scope, actorOf(c))
+	if err != nil {
+		writePlatformError(c, err)
+		return
+	}
+	pc.record(c, actorOf(c), "winlose.entry.react", "weekly_entry", id.String(), &entry.BranchID, map[string]interface{}{
+		"title": entry.Title, "week_start": entry.WeekStart.Format("2006-01-02"), "reaction": now,
+	})
+	c.JSON(http.StatusOK, gin.H{"reaction": now, "reactions": reactions})
+}
+
+// ReactToResult sets the person's ✅ (yes) or ❌ (no) on an agent's result in an entry; the same
+// again takes it back.
+func (pc *PlatformController) ReactToResult(c *gin.Context) {
+	_, scope, ok := pc.scope(c)
+	if !ok {
+		return
+	}
+	id, ok := paramID(c)
+	if !ok {
+		return
+	}
+	var in entryReactionInput
+	if !bindJSON(c, &in) {
+		return
+	}
+	result, now, reactions, err := pc.svc.ReactToResult(c.Request.Context(), id, in.Reaction, scope, actorOf(c))
+	if err != nil {
+		writePlatformError(c, err)
+		return
+	}
+	details := map[string]interface{}{"platform_id": result.PlatformID.String(), "week_start": result.WeekStart.Format("2006-01-02"), "reaction": now}
+	if result.EntryID != nil {
+		details["entry_id"] = result.EntryID.String()
+	}
+	pc.record(c, actorOf(c), "winlose.result.react", "weekly_platform_result", id.String(), &result.BranchID, details)
+	c.JSON(http.StatusOK, gin.H{"reaction": now, "reactions": reactions})
+}
+
 func (pc *PlatformController) GetGroup(c *gin.Context) {
 	_, scope, ok := pc.scope(c)
 	if !ok {
@@ -656,8 +735,16 @@ func (pc *PlatformController) Report(c *gin.Context) {
 	if !ok {
 		return
 	}
+	platformID, ok := queryID(c, "platform_id")
+	if !ok {
+		return
+	}
+	entryID, ok := queryID(c, "entry_id")
+	if !ok {
+		return
+	}
 	report, err := pc.svc.Report(c.Request.Context(), services.ReportFilter{DateFrom: c.Query("date_from"), DateTo: c.Query("date_to"), BranchID: branchID,
-		PartnerID: partnerID, GroupID: groupID, ByWeek: c.Query("by_week") == "true"},
+		PartnerID: partnerID, GroupID: groupID, PlatformID: platformID, ByWeek: c.Query("by_week") == "true", ByEntry: c.Query("by_entry") == "true", EntryID: entryID},
 		scope, access.Can(permissions.WinLoseReportsConsolidated), actorOf(c))
 	if err != nil {
 		writePlatformError(c, err)

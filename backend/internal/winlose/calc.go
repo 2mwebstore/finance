@@ -32,7 +32,9 @@ type Formula struct {
 	Description string `json:"description"`
 	// Confirmed is false until the business has checked the formula against real figures.
 	Confirmed bool `json:"confirmed"`
-	calc      func(Input) (adjusted, jamePS decimal.Decimal)
+	// Rest: the rate is the agent's own share and the Total what is left (100% − rate).
+	Rest bool `json:"rest"`
+	calc func(Input) (adjusted, jamePS decimal.Decimal)
 }
 
 // V1 is the formula read from the spreadsheet; it still has to be confirmed by the business:
@@ -51,8 +53,16 @@ const V1 = "v1"
 // e.g. (1,000 − 100) × 10% = 90.
 const V2 = "v2"
 
+// V3 is V2 with the rate the agent's own share, so the Total is at what is left of 100%:
+//
+//	adjusted = win_lose − commission
+//	jame_ps  = ROUND(adjusted × (100% − rate), 0)
+//
+// e.g. (1,000 − 100) × (100% − 60%) = 360.
+const V3 = "v3"
+
 // Default is the version weeks use unless the winlose.formula setting picks another.
-const Default = V2
+const Default = V3
 
 var hundred = decimal.NewFromInt(100)
 
@@ -72,6 +82,16 @@ var formulas = map[string]Formula{
 		calc: func(in Input) (decimal.Decimal, decimal.Decimal) {
 			adjusted := in.WinLose.Sub(in.Commission)
 			return adjusted, adjusted.Mul(in.RatePct).Div(hundred).Round(0)
+		},
+	},
+	V3: {
+		Version:     V3,
+		Description: "Total = ROUND((Win/Lose − Commission) × (100% − rate), 0)",
+		Confirmed:   true,
+		Rest:        true,
+		calc: func(in Input) (decimal.Decimal, decimal.Decimal) {
+			adjusted := in.WinLose.Sub(in.Commission)
+			return adjusted, adjusted.Mul(hundred.Sub(in.RatePct)).Div(hundred).Round(0)
 		},
 	},
 }

@@ -242,35 +242,48 @@ func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config, store storage.Store, 
 			// actor's own branches; the permissions below decide what they may do there.
 			{
 				need := func(codes ...string) gin.HandlerFunc { return middleware.RequireAnyPermission(db, codes...) }
-				api.GET("/platforms", need(permissions.PlatformsView, permissions.PlatformsManage, permissions.PlatformAssignmentsManage), platformCtrl.ListPlatforms)
-				api.POST("/platforms", need(permissions.PlatformsManage), platformCtrl.SavePlatform)
-				api.PATCH("/platforms/:id", need(permissions.PlatformsManage), platformCtrl.SavePlatform)
+				// RP: each page has view, add, update and delete; the group form lists the agents too.
+				agentsAny := need(permissions.PlatformsView, permissions.PlatformsCreate, permissions.PlatformsEdit, permissions.PlatformsDelete,
+					permissions.PlatformAssignmentsCreate, permissions.PlatformAssignmentsEdit)
+				groupsAny := need(permissions.PlatformAssignmentsView, permissions.PlatformAssignmentsCreate, permissions.PlatformAssignmentsEdit, permissions.PlatformAssignmentsDelete)
+				api.GET("/platforms", agentsAny, platformCtrl.ListPlatforms)
+				api.POST("/platforms", need(permissions.PlatformsCreate), platformCtrl.SavePlatform)
+				// Turning an agent off or on is an update.
+				api.PATCH("/platforms/:id", need(permissions.PlatformsEdit), platformCtrl.SavePlatform)
+				api.DELETE("/platforms/:id", need(permissions.PlatformsDelete), platformCtrl.DeletePlatform)
 
 				// Partners are managed with the platforms; reports and the weekly entry read their names.
-				api.GET("/partners", need(permissions.PlatformsView, permissions.PlatformsManage, permissions.PlatformAssignmentsManage, permissions.WinLoseReportsView), platformCtrl.ListPartners)
-				api.POST("/partners", need(permissions.PlatformsManage), platformCtrl.SavePartner)
-				api.PATCH("/partners/:id", need(permissions.PlatformsManage), platformCtrl.SavePartner)
+				api.GET("/partners", need(permissions.PlatformsView, permissions.PlatformsCreate, permissions.PlatformsEdit,
+					permissions.PlatformAssignmentsView, permissions.PlatformAssignmentsCreate, permissions.PlatformAssignmentsEdit, permissions.WinLoseReportsView), platformCtrl.ListPartners)
+				api.POST("/partners", need(permissions.PlatformsCreate), platformCtrl.SavePartner)
+				api.PATCH("/partners/:id", need(permissions.PlatformsEdit), platformCtrl.SavePartner)
 
 				// Groups: titled sets of agents in the person's own branch (the Group Agent Assignments page).
 				// Report viewers list them too (the reports filter by group).
-				api.GET("/platform-groups", need(permissions.PlatformsView, permissions.PlatformAssignmentsManage, permissions.WinLoseReportsView), platformCtrl.ListGroups)
-				api.GET("/platform-groups/:id", need(permissions.PlatformsView, permissions.PlatformAssignmentsManage), platformCtrl.GetGroup)
-				api.POST("/platform-groups", need(permissions.PlatformAssignmentsManage), platformCtrl.CreateGroup)
-				api.PATCH("/platform-groups/:id", need(permissions.PlatformAssignmentsManage), platformCtrl.UpdateGroup)
-				api.POST("/platform-groups/:id/active", need(permissions.PlatformAssignmentsManage), platformCtrl.SetGroupActive)
-				api.DELETE("/platform-groups/:id", need(permissions.PlatformAssignmentsManage), platformCtrl.DeleteGroup)
-				api.GET("/platform-assignments", need(permissions.PlatformsView, permissions.PlatformAssignmentsManage), platformCtrl.ListAssignments)
-				api.POST("/platform-assignments", need(permissions.PlatformAssignmentsManage), platformCtrl.Assign)
-				api.PATCH("/platform-assignments/:id", need(permissions.PlatformAssignmentsManage), platformCtrl.UpdateAssignment)
-				api.POST("/platform-assignments/:id/end", need(permissions.PlatformAssignmentsManage), platformCtrl.EndAssignment)
-				api.POST("/platform-assignments/:id/move", need(permissions.PlatformAssignmentsManage), platformCtrl.MoveAssignment)
+				// The Report's group filter lists the groups too.
+				api.GET("/platform-groups", need(permissions.PlatformAssignmentsView, permissions.PlatformAssignmentsCreate, permissions.PlatformAssignmentsEdit,
+					permissions.PlatformAssignmentsDelete, permissions.WinLoseReportsView), platformCtrl.ListGroups)
+				api.GET("/platform-groups/:id", groupsAny, platformCtrl.GetGroup)
+				api.POST("/platform-groups", need(permissions.PlatformAssignmentsCreate), platformCtrl.CreateGroup)
+				api.PATCH("/platform-groups/:id", need(permissions.PlatformAssignmentsEdit), platformCtrl.UpdateGroup)
+				api.POST("/platform-groups/:id/active", need(permissions.PlatformAssignmentsEdit), platformCtrl.SetGroupActive)
+				api.DELETE("/platform-groups/:id", need(permissions.PlatformAssignmentsDelete), platformCtrl.DeleteGroup)
+				api.GET("/platform-assignments", groupsAny, platformCtrl.ListAssignments)
+				api.POST("/platform-assignments", need(permissions.PlatformAssignmentsCreate), platformCtrl.Assign)
+				api.PATCH("/platform-assignments/:id", need(permissions.PlatformAssignmentsEdit), platformCtrl.UpdateAssignment)
+				api.POST("/platform-assignments/:id/end", need(permissions.PlatformAssignmentsEdit), platformCtrl.EndAssignment)
+				api.POST("/platform-assignments/:id/move", need(permissions.PlatformAssignmentsEdit), platformCtrl.MoveAssignment)
 
 				wl := api.Group("/winlose")
 				wl.GET("/formula", need(permissions.WinLoseView, permissions.WinLoseCreate, permissions.WinLoseEdit, permissions.WinLoseReportsView), platformCtrl.Formula)
 				// New rows need winlose.create and changed saved rows winlose.edit (checked per row).
-				wl.GET("/entries", need(permissions.WinLoseView, permissions.WinLoseCreate, permissions.WinLoseEdit), platformCtrl.ListEntries)
-				// Deleting an entry removes saved amounts: Correct Win/Lose, with a reason.
-				wl.DELETE("/entries/:id", need(permissions.WinLoseEdit), platformCtrl.DeleteEntry)
+				wl.GET("/entries", need(permissions.WinLoseView, permissions.WinLoseCreate, permissions.WinLoseEdit, permissions.WinLoseDelete), platformCtrl.ListEntries)
+				// Deleting an entry removes saved amounts: Delete Data Entry, with a reason.
+				wl.DELETE("/entries/:id", need(permissions.WinLoseDelete), platformCtrl.DeleteEntry)
+				// ✅ / ❌ on an entry, on Data entry's list and the Report's By week.
+				wl.POST("/entries/:id/reactions", need(permissions.WinLoseReact), platformCtrl.ReactToEntry)
+				// ✅ / ❌ on an agent in an entry (its result).
+				wl.POST("/results/:id/reactions", need(permissions.WinLoseReact), platformCtrl.ReactToResult)
 				// An entry by entry_id; without one, a new entry for this week in the person's own group.
 				wl.GET("/entry", need(permissions.WinLoseView, permissions.WinLoseCreate, permissions.WinLoseEdit), platformCtrl.WeekSheet)
 				wl.POST("/entry/preview", need(permissions.WinLoseCreate, permissions.WinLoseEdit), platformCtrl.Preview)

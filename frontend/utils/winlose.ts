@@ -11,6 +11,25 @@ export function byAgentCode(a: string, b: string) {
   return x < y ? -1 : x > y ? 1 : a < b ? -1 : a > b ? 1 : 0
 }
 
+/** A rate, or the range it moved in: "10%" or "10%–20%". */
+export function rateLabel(min: string, max: string) {
+  return Number(min) === Number(max) ? formatRate(min) : `${formatRate(min)}–${formatRate(max)}`
+}
+
+/**
+ * The rate a Total is worked out at: under v3 what is left of 100% after the agent's rate (60% →
+ * 40%), before that the rate itself. The rate as saved when the weeks' formulas differ.
+ */
+export function usedRate(min: string, max: string, formula: string) {
+  return formula === 'v3' ? rateLabel(String(100 - Number(max)), String(100 - Number(min))) : rateLabel(min, max)
+}
+
+/** A week as "26 Oct – 01 Nov 2026". */
+export function weekLabel(start: string, end: string) {
+  const day = (key: string, year: boolean) => new Date(`${key}T12:00:00`).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', ...(year ? { year: 'numeric' } : {}) })
+  return `${day(start, false)} – ${day(end, true)}`
+}
+
 /** An amount in its currency; losses show with a minus. */
 export function formatAmount(value: string | number | null | undefined, currency: string) {
   return formatMoney(Number(value || 0), currency)

@@ -83,17 +83,17 @@ func SeedPermissionsAndRoles(db *gorm.DB) error {
 // grants them to the roles that get every permission (super_admin, owner). It runs on every start,
 // even with AUTO_SEED off, so a new feature's page appears without a full seed. It only adds.
 //
-// A permission that takes over from another one (permissions.view used to be part of roles.view)
-// is also granted, when it is first added, to every role that has the old one, so nobody loses a
-// page they could open before.
+// A permission that takes over from others (permissions.view used to be part of roles.view) is
+// also granted, when it is first added, to every role that has one of them, so nobody loses a page
+// or an action they had before. Retired permissions are then removed.
 func EnsureRequiredPermissions(db *gorm.DB) error {
 	if !db.Migrator().HasTable(&models.Permission{}) {
 		return nil
 	}
-	// code -> the permission whose roles get it when it is first added ("" for none).
-	required := map[string]string{
-		permissions.BackupsManage:   "",
-		permissions.PermissionsView: permissions.RolesView,
+	// code -> the permissions whose roles get it when it is first added.
+	required := map[string][]string{
+		permissions.BackupsManage:   nil,
+		permissions.PermissionsView: {permissions.RolesView},
 	}
 	// Inventory: owner/admin (Manage Branches) get every inventory permission; other roles get
 	// them from the Roles page (or the default roles with AUTO_SEED).
@@ -103,12 +103,26 @@ func EnsureRequiredPermissions(db *gorm.DB) error {
 		permissions.PurchasesView, permissions.PurchasesCreate, permissions.PurchasesApprove, permissions.PurchasesVoid,
 		permissions.InventoryExpensesView, permissions.InventoryExpensesCreate, permissions.InventoryExpensesVoid,
 		permissions.SalesEdit, permissions.PurchasesEdit,
-		// Platforms (shown as agents) and weekly win/lose.
-		permissions.PlatformsView, permissions.PlatformsManage, permissions.PlatformAssignmentsManage,
-		permissions.WinLoseView, permissions.WinLoseCreate, permissions.WinLoseEdit,
+		// RP: agents (platforms), group agent assignments, Data entry and the Report.
+		permissions.PlatformsView, permissions.WinLoseView, permissions.WinLoseCreate, permissions.WinLoseEdit,
 		permissions.WinLoseReportsView, permissions.WinLoseReportsConsolidated, permissions.WinLoseSettlementsFinalize,
 	} {
-		required[code] = permissions.BranchesManage
+		required[code] = []string{permissions.BranchesManage}
+	}
+	// RP's view/add/update/delete (and react) took over from the two "manage" permissions, from
+	// Correct Win/Lose (deleting an entry) and from seeing agents (their groups).
+	for code, from := range map[string][]string{
+		permissions.PlatformsCreate:           {retiredPlatformsManage},
+		permissions.PlatformsEdit:             {retiredPlatformsManage},
+		permissions.PlatformsDelete:           {retiredPlatformsManage},
+		permissions.PlatformAssignmentsView:   {permissions.PlatformsView, retiredAssignmentsManage},
+		permissions.PlatformAssignmentsCreate: {retiredAssignmentsManage},
+		permissions.PlatformAssignmentsEdit:   {retiredAssignmentsManage},
+		permissions.PlatformAssignmentsDelete: {retiredAssignmentsManage},
+		permissions.WinLoseDelete:             {permissions.WinLoseEdit},
+		permissions.WinLoseReact:              {permissions.WinLoseView, permissions.WinLoseCreate, permissions.WinLoseEdit, permissions.WinLoseReportsView},
+	} {
+		required[code] = append([]string{permissions.BranchesManage}, from...)
 	}
 	for _, p := range permissions.AllPermissions() {
 		from, ok := required[p.Code]
@@ -123,8 +137,8 @@ func EnsureRequiredPermissions(db *gorm.DB) error {
 				return fmt.Errorf("create permission %s: %w", p.Code, err)
 			}
 			log.Printf("added permission %s", p.Code)
-			if from != "" {
-				if err := grantToHoldersOf(db, &perm, from); err != nil {
+			for _, code := range from {
+				if err := grantToHoldersOf(db, &perm, code); err != nil {
 					return err
 				}
 			}
@@ -147,6 +161,33 @@ func EnsureRequiredPermissions(db *gorm.DB) error {
 				}
 			}
 		}
+	}
+	return retirePermissions(db, retiredPlatformsManage, retiredAssignmentsManage)
+}
+
+// Retired permissions: what they allowed is now split into view/add/update/delete.
+const (
+	retiredPlatformsManage   = "platforms.manage"
+	retiredAssignmentsManage = "platform-assignments.manage"
+)
+
+// retirePermissions removes permissions no longer in the catalog, from roles too. Run after the
+// permissions that took over from them were added (and given to the same roles).
+func retirePermissions(db *gorm.DB, codes ...string) error {
+	for _, code := range codes {
+		var perm models.Permission
+		if err := db.Unscoped().Where("code = ?", code).First(&perm).Error; err == gorm.ErrRecordNotFound {
+			continue
+		} else if err != nil {
+			return err
+		}
+		if err := db.Exec("DELETE FROM role_permissions WHERE permission_id = ?", perm.ID).Error; err != nil {
+			return fmt.Errorf("take %s off roles: %w", code, err)
+		}
+		if err := db.Unscoped().Delete(&perm).Error; err != nil {
+			return fmt.Errorf("remove permission %s: %w", code, err)
+		}
+		log.Printf("removed retired permission %s", code)
 	}
 	return nil
 }

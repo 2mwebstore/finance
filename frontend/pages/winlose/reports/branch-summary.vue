@@ -2,7 +2,7 @@
   <section class="space-y-4">
     <header class="flex flex-wrap items-center justify-between gap-3">
       <div>
-        <p class="text-[10px] font-bold tracking-[0.14em] text-slate-400">PLATFORMS · REPORTS</p>
+        <p class="text-[10px] font-bold tracking-[0.14em] text-slate-400">RP · REPORTS</p>
         <h1 class="text-xl font-bold text-navy">Group summary</h1>
       </div>
       <button type="button" class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-white px-3 py-2 text-sm font-medium text-navy disabled:opacity-50" :disabled="!report?.platforms.length" @click="exportCsv"><Download :size="16" /> Export CSV</button>
@@ -28,8 +28,8 @@
               <th class="font-bold">Agent</th>
               <!-- On phones the currency goes under the agent -->
               <th class="hidden font-bold sm:table-cell">Currency</th>
-              <th class="amount font-bold">Win/Lose</th>
-              <th class="amount font-bold">Comm</th>
+              <th class="amount font-bold">W/L</th>
+              <th class="amount font-bold">COMM</th>
               <th class="amount font-bold">Total</th>
             </tr>
           </thead>
@@ -67,7 +67,7 @@ function tone(value: string) {
 function exportCsv() {
   if (!report.value) return
   downloadCsv(`winlose-summary-${range.value.from}-to-${range.value.to}.csv`,
-    ['From', 'To', 'Agent', 'Currency', 'Win/Lose', 'Comm', 'Total'],
+    ['From', 'To', 'Agent', 'Currency', 'W/L', 'COMM', 'Total'],
     report.value.platforms.flatMap(p => p.totals.map(t => [report.value!.date_from, range.value.to, p.platform_code, t.currency,
       Number(t.win_lose), Number(t.commission), Number(t.jame_ps)])))
 }

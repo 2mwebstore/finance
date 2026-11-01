@@ -34,7 +34,7 @@
 
         <div v-if="platformsNav.length" class="nav-divider"></div>
         <div v-if="platformsNav.length" class="nav-section">
-          <p class="nav-caption">PLATFORMS</p>
+          <p class="nav-caption">RP</p>
           <NuxtLink v-for="item in platformsNav" :key="item.label" :to="item.to" class="sidebar-link" :class="isActive(item) ? 'is-active' : ''">
             <component :is="item.icon" :size="18" :stroke-width="1.9" />
             <span>{{ item.label }}</span>
@@ -223,13 +223,13 @@ const inventoryNav = computed<NavItem[]>(() => {
 // Agents (platforms) and weekly win/lose per group (a branch; results are entered once a week).
 const platformsNav = computed<NavItem[]>(() => {
   const items: NavItem[] = []
-  if (can('winlose.view', 'winlose.create', 'winlose.edit')) items.push({ label: 'Data Entry', to: '/winlose/entry', icon: NotebookPen })
+  if (can('winlose.view', 'winlose.create', 'winlose.edit', 'winlose.delete')) items.push({ label: 'Data Entry', to: '/winlose/entry', icon: NotebookPen })
   if (can('winlose-reports.view')) {
-    items.push({ label: 'Weekly Report', to: '/winlose/reports/weekly', icon: CalendarRange })
+    items.push({ label: 'Report', to: '/winlose/reports/weekly', icon: CalendarRange })
     items.push({ label: 'Group Summary', to: '/winlose/reports/branch-summary', icon: ChartColumn })
   }
-  if (can('platforms.view', 'platforms.manage')) items.push({ label: 'Agents', to: '/admin/platforms', icon: Layers })
-  if (can('platforms.view', 'platform-assignments.manage')) items.push({ label: 'Group Agent Assignments', to: '/admin/platform-assignments', icon: Network })
+  if (can('platforms.view', 'platforms.create', 'platforms.edit', 'platforms.delete')) items.push({ label: 'Agents', to: '/admin/platforms', icon: Layers })
+  if (can('platform-assignments.view', 'platform-assignments.create', 'platform-assignments.edit', 'platform-assignments.delete')) items.push({ label: 'Group Agent Assignments', to: '/admin/platform-assignments', icon: Network })
   return items
 })
 
@@ -259,7 +259,7 @@ const mobileNav = computed<NavItem[]>(() => {
 const menuSections = computed(() => [
   { caption: 'FINANCIAL ACTIVITY', items: financialNav.value.filter(item => !mobileNav.value.some(tab => tab.to === item.to)) },
   { caption: 'INVENTORY', items: inventoryNav.value },
-  { caption: 'PLATFORMS', items: platformsNav.value },
+  { caption: 'RP', items: platformsNav.value },
   { caption: 'MANAGE', items: adminNav.value },
 ].filter((section) => section.items.length))
 

@@ -85,6 +85,9 @@ type WeekSheetRow struct {
 	FormulaVersion string           `json:"formula_version"`
 	UpdatedBy      string           `json:"updated_by"`
 	UpdatedAt      *time.Time       `json:"updated_at"`
+	// ResultID is the saved row's result; Reactions people's ✅ and ❌ on it.
+	ResultID  *uuid.UUID      `json:"result_id,omitempty"`
+	Reactions []EntryReaction `json:"reactions"`
 }
 
 // EntryState is the entry as Data Entry lists it (nil for a new entry until its first save).
@@ -423,7 +426,26 @@ func (s *PlatformService) EntrySheet(ctx context.Context, entryID, week, group s
 	if err != nil {
 		return nil, err
 	}
-	return s.sheet(ctx, parts, formula), nil
+	sheet := s.sheet(ctx, parts, formula)
+	// The reactions on its saved agents.
+	var ids []uuid.UUID
+	for _, r := range sheet.Rows {
+		if r.ResultID != nil {
+			ids = append(ids, *r.ResultID)
+		}
+	}
+	reactions, err := s.reactionsOf(ctx, resultReactions, ids)
+	if err != nil {
+		return nil, err
+	}
+	for i, r := range sheet.Rows {
+		if r.ResultID != nil {
+			sheet.Rows[i].Reactions = orNone(reactions[*r.ResultID])
+		} else {
+			sheet.Rows[i].Reactions = []EntryReaction{}
+		}
+	}
+	return sheet, nil
 }
 
 // entryFor loads the entry asked for or, with no entry id, the week a new one is for (in the group
@@ -476,7 +498,8 @@ func (s *PlatformService) sheet(ctx context.Context, p *entryParts, formula winl
 		if r, ok := p.results[platformID]; ok {
 			wl, cm, jp, at := r.WinLose, r.Commission, r.JamePS, r.UpdatedAt
 			row.CommissionRate, row.Currency, row.FormulaVersion = r.CommissionRate, r.Currency, r.FormulaVersion
-			row.Saved, row.WinLose, row.Commission, row.JamePS, row.UpdatedAt = true, &wl, &cm, &jp, &at
+			id := r.ID
+			row.Saved, row.WinLose, row.Commission, row.JamePS, row.UpdatedAt, row.ResultID = true, &wl, &cm, &jp, &at, &id
 			row.Groups, row.Partners = p.groupShares(p.savedShares(r)), p.partnerShares(p.partnerOf[r.ID], nil)
 			row.UpdatedBy = names[r.CreatedByID]
 			if r.UpdatedByID != nil {
@@ -552,10 +575,22 @@ type rowPlan struct {
 }
 
 // workOut gives a Total: with partners, each one's share at their % (filled into shares) and the
-// Total their sum; without, the Total at the given %.
+// Total their sum; without, the Total at the given %. When the rate is the agent's own share
+// (Rest), a partner's share is their % and the Total what is left of 100% after all of them.
 func workOut(version string, wl, cm, rate decimal.Decimal, shares []PartnerShare) (winlose.Result, error) {
 	if len(shares) == 0 {
 		return winlose.Calculate(version, winlose.Input{WinLose: wl, Commission: cm, RatePct: rate})
+	}
+	if f, ok := winlose.Lookup(version); ok && f.Rest {
+		total, err := winlose.Calculate(version, winlose.Input{WinLose: wl, Commission: cm, RatePct: shareRate(rate, shares)})
+		if err != nil {
+			return winlose.Result{}, err
+		}
+		for i := range shares {
+			jp := total.Adjusted.Mul(shares[i].CommissionRate).Div(decimal.NewFromInt(100)).Round(0)
+			shares[i].JamePS = &jp
+		}
+		return total, nil
 	}
 	total := winlose.Result{}
 	for i := range shares {
@@ -887,7 +922,7 @@ func (s *PlatformService) DeleteEntry(ctx context.Context, id uuid.UUID, reason 
 			return err
 		}
 		if finalized > 0 {
-			return fmt.Errorf("the week of %s is finalized; reopen it on the weekly report to delete the entry", week)
+			return fmt.Errorf("the week of %s is finalized; reopen it on the Report to delete the entry", week)
 		}
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("entry_id = ?", entry.ID).Find(&removed).Error; err != nil {
 			return err
@@ -904,9 +939,15 @@ func (s *PlatformService) DeleteEntry(ctx context.Context, id uuid.UUID, reason 
 			if err := tx.Where("result_id IN ?", ids).Delete(&models.WeeklyPartnerResult{}).Error; err != nil {
 				return err
 			}
+			if err := tx.Where("result_id IN ?", ids).Delete(&models.WeeklyResultReaction{}).Error; err != nil {
+				return err
+			}
 			if err := tx.Unscoped().Where("id IN ?", ids).Delete(&models.WeeklyPlatformResult{}).Error; err != nil {
 				return err
 			}
+		}
+		if err := tx.Where("entry_id = ?", entry.ID).Delete(&models.WeeklyEntryReaction{}).Error; err != nil {
+			return err
 		}
 		return tx.Delete(entry).Error
 	})
@@ -914,6 +955,136 @@ func (s *PlatformService) DeleteEntry(ctx context.Context, id uuid.UUID, reason 
 		return nil, nil, err
 	}
 	return entry, removed, nil
+}
+
+// ===== Reactions =====
+
+// EntryReaction is a person's ✅ (yes) or ❌ (no) on an entry.
+type EntryReaction struct {
+	Reaction string    `json:"reaction"`
+	UserID   uuid.UUID `json:"user_id"`
+	UserName string    `json:"user_name"`
+	At       time.Time `json:"at"`
+}
+
+// ReactToEntry sets the person's reaction on an entry they can see: the same one again takes it
+// back, the other one replaces it. It returns the entry, the person's reaction now ("" when taken
+// back) and the entry's reactions.
+func (s *PlatformService) ReactToEntry(ctx context.Context, id uuid.UUID, reaction string, scope BranchScope, actor uuid.UUID) (*models.WeeklyEntry, string, []EntryReaction, error) {
+	if err := checkReaction(reaction); err != nil {
+		return nil, "", nil, err
+	}
+	var entry *models.WeeklyEntry
+	var now string
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var err error
+		if entry, err = findEntry(tx, id.String(), scope, false); err != nil {
+			return err
+		}
+		now, err = toggleReaction(tx, entryReactions, entry.ID, actor, reaction)
+		return err
+	})
+	if err != nil {
+		return nil, "", nil, err
+	}
+	list, err := s.reactionsOf(ctx, entryReactions, []uuid.UUID{entry.ID})
+	return entry, now, orNone(list[entry.ID]), err
+}
+
+// ReactToResult sets the person's reaction on an agent's result in an entry they can see, the same
+// way. It returns the result, the reaction now and the result's reactions.
+func (s *PlatformService) ReactToResult(ctx context.Context, id uuid.UUID, reaction string, scope BranchScope, actor uuid.UUID) (*models.WeeklyPlatformResult, string, []EntryReaction, error) {
+	if err := checkReaction(reaction); err != nil {
+		return nil, "", nil, err
+	}
+	var result models.WeeklyPlatformResult
+	var now string
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.First(&result, "id = ?", id).Error; err != nil || !scope.Has(result.BranchID) {
+			return ErrEntryNotFound
+		}
+		var err error
+		now, err = toggleReaction(tx, resultReactions, result.ID, actor, reaction)
+		return err
+	})
+	if err != nil {
+		return nil, "", nil, err
+	}
+	list, err := s.reactionsOf(ctx, resultReactions, []uuid.UUID{result.ID})
+	return &result, now, orNone(list[result.ID]), err
+}
+
+// The reactions' tables: on entries and on agents' results in them.
+type reactionTable struct{ table, column string }
+
+var (
+	entryReactions  = reactionTable{"weekly_entry_reactions", "entry_id"}
+	resultReactions = reactionTable{"weekly_result_reactions", "result_id"}
+)
+
+func checkReaction(reaction string) error {
+	if reaction != models.ReactionYes && reaction != models.ReactionNo {
+		return fieldError("reaction", "react with yes (✅) or no (❌)")
+	}
+	return nil
+}
+
+// toggleReaction sets the person's reaction on id: the same one again takes it back, the other
+// replaces it (one each). It returns the reaction now ("" when taken back).
+func toggleReaction(tx *gorm.DB, t reactionTable, id, actor uuid.UUID, reaction string) (string, error) {
+	var mine struct {
+		ID       uuid.UUID
+		Reaction string
+	}
+	err := tx.Table(t.table).Clauses(clause.Locking{Strength: "UPDATE"}).Select("id, reaction").Where(t.column+" = ? AND user_id = ?", id, actor).Take(&mine).Error
+	now := time.Now()
+	switch {
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		return reaction, tx.Table(t.table).Create(map[string]interface{}{
+			"id": uuid.New(), t.column: id, "user_id": actor, "reaction": reaction, "created_at": now, "updated_at": now,
+		}).Error
+	case err != nil:
+		return "", err
+	case mine.Reaction == reaction:
+		return "", tx.Exec("DELETE FROM "+t.table+" WHERE id = ?", mine.ID).Error
+	default:
+		return reaction, tx.Table(t.table).Where("id = ?", mine.ID).Updates(map[string]interface{}{"reaction": reaction, "updated_at": now}).Error
+	}
+}
+
+// reactionsOf lists the reactions on ids by id, as they were last given.
+func (s *PlatformService) reactionsOf(ctx context.Context, t reactionTable, ids []uuid.UUID) (map[uuid.UUID][]EntryReaction, error) {
+	out := map[uuid.UUID][]EntryReaction{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	var rows []struct {
+		Target    uuid.UUID
+		UserID    uuid.UUID
+		Reaction  string
+		UpdatedAt time.Time
+	}
+	if err := s.db.WithContext(ctx).Table(t.table).Select(t.column+" AS target, user_id, reaction, updated_at").
+		Where(t.column+" IN ?", ids).Order("updated_at, id").Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	users := make([]uuid.UUID, len(rows))
+	for i, r := range rows {
+		users[i] = r.UserID
+	}
+	names := s.userNames(ctx, users)
+	for _, r := range rows {
+		out[r.Target] = append(out[r.Target], EntryReaction{Reaction: r.Reaction, UserID: r.UserID, UserName: names[r.UserID], At: r.UpdatedAt})
+	}
+	return out, nil
+}
+
+// orNone is a list that shows as [] rather than null.
+func orNone(list []EntryReaction) []EntryReaction {
+	if list == nil {
+		return []EntryReaction{}
+	}
+	return list
 }
 
 // EntryRow is one saved week on Data Entry's list.
@@ -928,6 +1099,8 @@ type EntryRow struct {
 	CreatedBy  string    `json:"created_by"`
 	// Locked: the week is finalized.
 	Locked bool `json:"locked"`
+	// Reactions: people's ✅ and ❌ on the entry.
+	Reactions []EntryReaction `json:"reactions"`
 }
 
 // EntryFilter narrows Data Entry's list: words in the title, and the days it was created on
@@ -976,6 +1149,14 @@ func (s *PlatformService) ListEntries(ctx context.Context, f EntryFilter, scope 
 		return nil, err
 	}
 	names := s.userNames(ctx, users)
+	ids := make([]uuid.UUID, len(list))
+	for i, e := range list {
+		ids[i] = e.ID
+	}
+	reactions, err := s.reactionsOf(ctx, entryReactions, ids)
+	if err != nil {
+		return nil, err
+	}
 	locked := map[string]bool{}
 	if len(branchIDs) > 0 {
 		var settled []models.WeeklySettlement
@@ -990,7 +1171,7 @@ func (s *PlatformService) ListEntries(ctx context.Context, f EntryFilter, scope 
 	for i, e := range list {
 		out[i] = EntryRow{ID: e.ID, Title: e.Title, WeekStart: dayString(e.WeekStart), WeekEnd: dayString(e.WeekStart.AddDate(0, 0, 6)),
 			BranchID: e.BranchID, BranchCode: branches[e.BranchID].Code, CreatedAt: e.CreatedAt, CreatedBy: names[e.CreatedByID],
-			Locked: locked[e.BranchID.String()+dayString(e.WeekStart)]}
+			Locked: locked[e.BranchID.String()+dayString(e.WeekStart)], Reactions: orNone(reactions[e.ID])}
 	}
 	return out, nil
 }
