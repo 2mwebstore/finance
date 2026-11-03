@@ -17,7 +17,7 @@
     <div v-else class="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_340px] lg:grid-rows-[auto_auto_1fr]">
       <div class="space-y-3 rounded-xl border border-border bg-white p-4 lg:col-start-2 lg:row-start-1">
         <h2 class="text-sm font-semibold text-navy">Details</h2>
-        <div class="space-y-1 text-xs font-medium text-muted">Branch<SearchSelect v-model="form.branch_id" :options="branchChoices" placeholder="Choose a branch" aria-label="Branch" :aria-invalid="formCheck.invalid('branch_id')" /></div>
+        <div v-if="branches.length !== 1" class="space-y-1 text-xs font-medium text-muted">Branch<SearchSelect v-model="form.branch_id" :options="branchChoices" placeholder="Choose a branch" aria-label="Branch" :aria-invalid="formCheck.invalid('branch_id')" /></div>
         <div class="grid grid-cols-2 gap-3">
           <div class="space-y-1 text-xs font-medium text-muted">Date<DatePicker v-model="form.purchase_date" aria-label="Purchase date" /></div>
           <div class="space-y-1 text-xs font-medium text-muted">Currency<SearchSelect v-model="form.currency" :options="currencyOptions" :searchable="false" aria-label="Currency" /></div>

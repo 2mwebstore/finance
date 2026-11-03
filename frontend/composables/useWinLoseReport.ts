@@ -1,4 +1,5 @@
 import type { AssignmentGroup, WinLoseReport } from '~/types/api'
+import { useRpBranch } from '~/composables/useRpBranch'
 
 /**
  * Loads a win/lose report for a date range and, optionally, one titled group (Group Agent
@@ -12,6 +13,18 @@ export function useWinLoseReport(range: () => { from: string; to: string }, opti
   const route = useRoute()
   const consolidated = computed(() => can('winlose-reports.consolidated'))
 
+  // The branch the RP pages work in (only for people with several): "All branches" for those with
+  // consolidated access, else always one branch.
+  const rp = useRpBranch()
+  const showBranch = rp.show
+  const branchModel = computed({
+    get: () => (consolidated.value ? rp.branchId.value : rp.effective.value),
+    set: (value: string) => { rp.branchId.value = value },
+  })
+  const branchOptions = computed(() => rp.optionsFor(consolidated.value))
+  /** '' = the API's own choice (every branch in scope, or the person's own group). */
+  const branch = computed(() => (showBranch.value ? branchModel.value : ''))
+
   // The groups (turned-off ones too: their weeks still count).
   const groups = ref<AssignmentGroup[]>([])
   const groupId = ref(String(route.query.group || ''))
@@ -21,9 +34,14 @@ export function useWinLoseReport(range: () => { from: string; to: string }, opti
     { value: '', label: 'All groups' },
     ...groups.value.map(g => ({ value: g.id, label: g.is_active ? g.title : `${g.title} (off)` })),
   ])
-  onMounted(async () => {
-    try { groups.value = (await api<{ items: AssignmentGroup[] }>('/platform-groups', { query: { status: 'all' } })).items || [] } catch { groups.value = [] }
-  })
+  async function loadGroups() {
+    // The branch's groups; with every branch chosen, those of all of them.
+    const branchQuery = branch.value || (showBranch.value ? 'all' : undefined)
+    try { groups.value = (await api<{ items: AssignmentGroup[] }>('/platform-groups', { query: { status: 'all', branch_id: branchQuery } })).items || [] } catch { groups.value = [] }
+    if (groupId.value && !groups.value.some(g => g.id === groupId.value)) groupId.value = ''
+  }
+  onMounted(loadGroups)
+  watch(branch, loadGroups)
 
   const report = ref<WinLoseReport | null>(null)
   const loading = ref(false)
@@ -36,7 +54,7 @@ export function useWinLoseReport(range: () => { from: string; to: string }, opti
     loading.value = true
     error.value = ''
     try {
-      const result = await api<WinLoseReport>('/winlose/reports', { query: { date_from: from, date_to: to, group_id: groupId.value || undefined, platform_id: agentId.value || undefined, by_entry: options.byEntry?.() ? 'true' : undefined, entry_id: options.entryId?.() || undefined } })
+      const result = await api<WinLoseReport>('/winlose/reports', { query: { date_from: from, date_to: to, branch_id: branch.value || undefined, group_id: groupId.value || undefined, platform_id: agentId.value || undefined, by_entry: options.byEntry?.() ? 'true' : undefined, entry_id: options.entryId?.() || undefined } })
       if (mine === request) report.value = result
     } catch (e: any) {
       if (mine === request) error.value = e?.data?.error || 'Could not load the report.'
@@ -44,8 +62,8 @@ export function useWinLoseReport(range: () => { from: string; to: string }, opti
       if (mine === request) loading.value = false
     }
   }
-  watch([range, groupId, agentId], load, { deep: true })
+  watch([range, groupId, agentId, branch], load, { deep: true })
   onMounted(load)
 
-  return { report, loading, error, load, consolidated, groups, groupId, agentId, groupOptions }
+  return { report, loading, error, load, consolidated, groups, groupId, agentId, groupOptions, showBranch, branchModel, branchOptions, branch }
 }

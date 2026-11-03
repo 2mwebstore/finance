@@ -19,6 +19,7 @@ import (
 	"github.com/cambodia-finance/income-expense/internal/database"
 	"github.com/cambodia-finance/income-expense/internal/models"
 	"github.com/cambodia-finance/income-expense/internal/permissions"
+	"github.com/cambodia-finance/income-expense/internal/winlose"
 	mysqldriver "github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
@@ -1268,18 +1269,19 @@ func TestFormulaChange(t *testing.T) {
 		t.Errorf("(1,000 − 100) × 10%% = 90, got %s", r.JamePS)
 	}
 
-	// The business's rule, v3: the rate is the agent's share, the Total at what is left.
+	// The business's rule, v4: the commission is added and the rate is the agent's share, the Total
+	// at what is left.
 	f.db.Where("`key` = ?", FormulaSettingKey).Delete(&models.AppSetting{})
 	if changed, err := f.svc.RecalculateOpenWeeks(f.ctx); err != nil || changed != 3 {
 		t.Fatalf("the three open weeks are worked out again: %v %d", err, changed)
 	}
-	if r := sheetRow(t, f.sheet(t, open, 0), f.p1); !r.JamePS.Equal(n(520)) || r.FormulaVersion != "v3" || !r.Groups[0].JamePS.Equal(n(520)) {
-		t.Errorf("(1000 − 200) × (100%% − 35%%) = 520: %s %s", r.JamePS, r.FormulaVersion)
+	if r := sheetRow(t, f.sheet(t, open, 0), f.p1); !r.JamePS.Equal(n(780)) || r.FormulaVersion != "v4" || !r.Groups[0].JamePS.Equal(n(780)) {
+		t.Errorf("(1000 + 200) × (100%% − 35%%) = 780: %s %s", r.JamePS, r.FormulaVersion)
 	}
-	if r := sheetRow(t, f.sheet(t, open.AddDate(0, 0, 7), 0), f.p1); !r.JamePS.Equal(n(810)) || !r.CommissionRate.Equal(n(10)) {
-		t.Errorf("(1,000 − 100) × (100%% − 10%%) = 810, got %s", r.JamePS)
+	if r := sheetRow(t, f.sheet(t, open.AddDate(0, 0, 7), 0), f.p1); !r.JamePS.Equal(n(990)) || !r.CommissionRate.Equal(n(10)) {
+		t.Errorf("(1,000 + 100) × (100%% − 10%%) = 990, got %s", r.JamePS)
 	}
-	// The agent at 60%: (1,000 − 100) × (100% − 60%) = 360.
+	// The agent at 60%: (1,000 + 100) × (100% − 60%) = 440.
 	if _, _, err := f.svc.UpdateAssignment(f.ctx, a.ID, AssignmentUpdateInput{CommissionRate: "60", Currency: "USD"}, all); err != nil {
 		t.Fatal(err)
 	}
@@ -1287,15 +1289,15 @@ func TestFormulaChange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r := sheetRow(t, later, f.p1); !r.JamePS.Equal(n(360)) || r.FormulaVersion != "v3" {
-		t.Errorf("(1,000 − 100) × (100%% − 60%%) = 360, got %s %s", r.JamePS, r.FormulaVersion)
+	if r := sheetRow(t, later, f.p1); !r.JamePS.Equal(n(440)) || r.FormulaVersion != "v4" {
+		t.Errorf("(1,000 + 100) × (100%% − 60%%) = 440, got %s %s", r.JamePS, r.FormulaVersion)
 	}
 }
 
 func TestRestWithPartners(t *testing.T) {
 	// v3, partners at 40% and 10% of 1,000: shares 400 and 100, the Total what is left (500).
 	shares := []PartnerShare{{CommissionRate: decimal.NewFromInt(40)}, {CommissionRate: decimal.NewFromInt(10)}}
-	r, err := workOut("v3", decimal.NewFromInt(1000), decimal.Zero, decimal.Zero, shares)
+	r, err := workOut("v3", winlose.PO, decimal.NewFromInt(1000), decimal.Zero, decimal.Zero, shares)
 	if err != nil || !r.JamePS.Equal(decimal.NewFromInt(500)) || !shares[0].JamePS.Equal(decimal.NewFromInt(400)) || !shares[1].JamePS.Equal(decimal.NewFromInt(100)) {
 		t.Errorf("total %s, shares %v %v: %v", r.JamePS, shares[0].JamePS, shares[1].JamePS, err)
 	}

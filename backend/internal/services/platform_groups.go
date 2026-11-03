@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/cambodia-finance/income-expense/internal/models"
+	"github.com/cambodia-finance/income-expense/internal/winlose"
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
@@ -26,6 +27,8 @@ var ErrGroupNotFound = errors.New("group not found")
 type GroupAgentInput struct {
 	PlatformID     string `json:"platform_id" binding:"required,uuid"`
 	CommissionRate string `json:"commission_rate"`
+	// CalcType is this agent's type, PO (the default) or GI, see winlose.Kind.
+	CalcType string `json:"calc_type"`
 }
 
 type GroupInput struct {
@@ -35,6 +38,8 @@ type GroupInput struct {
 	Currency string `json:"currency"`
 	// The first day results can be entered; empty is today.
 	StartsOn string `json:"starts_on"`
+	// BranchID: the branch the group is made in (one the person works in); empty: their own group.
+	BranchID string `json:"branch_id" binding:"omitempty,uuid"`
 }
 
 // GroupUpdateInput replaces a group's title, agents (with their rates) and currency. Partners a
@@ -46,22 +51,39 @@ type GroupUpdateInput struct {
 	Currency string `json:"currency"`
 }
 
-// agentRates reads a group's agents: each once, each with a rate from 0 to 100.
-func agentRates(agents []GroupAgentInput) ([]string, map[uuid.UUID]decimal.Decimal, error) {
+// calcType reads an agent's type: PO when empty, else PO or GI.
+func calcType(raw string) (string, error) {
+	t := strings.ToUpper(strings.TrimSpace(raw))
+	if t == "" {
+		return string(winlose.PO), nil
+	}
+	if !winlose.ValidKind(t) {
+		return "", fieldError("calc_type", "choose PO or GI")
+	}
+	return t, nil
+}
+
+// agentRates reads a group's agents: each once, each with a rate from 0 to 100 and a type.
+func agentRates(agents []GroupAgentInput) ([]string, map[uuid.UUID]decimal.Decimal, map[uuid.UUID]string, error) {
 	ids := make([]string, 0, len(agents))
 	rates := map[uuid.UUID]decimal.Decimal{}
+	kinds := map[uuid.UUID]string{}
 	for _, a := range agents {
 		id := uuid.MustParse(a.PlatformID)
 		if _, twice := rates[id]; twice {
-			return nil, nil, fieldError("agents", "an agent is listed twice")
+			return nil, nil, nil, fieldError("agents", "an agent is listed twice")
 		}
 		rate, err := parseRate("agents", a.CommissionRate)
 		if err != nil {
-			return nil, nil, fieldError("agents", "give each agent a rate from 0 to 100 (at most 4 decimals)")
+			return nil, nil, nil, fieldError("agents", "give each agent a rate from 0 to 100 (at most 4 decimals)")
 		}
-		ids, rates[id] = append(ids, a.PlatformID), rate
+		kind, err := calcType(a.CalcType)
+		if err != nil {
+			return nil, nil, nil, fieldError("agents", "choose PO or GI for each agent")
+		}
+		ids, rates[id], kinds[id] = append(ids, a.PlatformID), rate, kind
 	}
-	return ids, rates, nil
+	return ids, rates, kinds, nil
 }
 
 // GroupAgent is one of a group's agents now.
@@ -71,13 +93,17 @@ type GroupAgent struct {
 	PlatformCode   string          `json:"platform_code"`
 	Currency       string          `json:"currency"`
 	CommissionRate decimal.Decimal `json:"commission_rate"`
+	CalcType       string          `json:"calc_type"`
 	StartsOn       string          `json:"starts_on"`
 	Weeks          int64           `json:"weeks"`
 }
 
 type GroupRow struct {
 	models.AssignmentGroup
-	Agents []GroupAgent `json:"agents"`
+	// BranchID and BranchCode: the branch the group is in.
+	BranchID   uuid.UUID    `json:"branch_id"`
+	BranchCode string       `json:"branch_code"`
+	Agents     []GroupAgent `json:"agents"`
 	// Partners are the same on every agent (by name).
 	Partners []AssignmentPartnerRow `json:"partners"`
 	// Weeks is how many weekly results were entered under its agents (taken-out ones too).
@@ -89,6 +115,10 @@ type GroupFilter struct {
 	PlatformID *uuid.UUID
 	Status     string // all (default) | active | off
 	Search     string // words in the title
+	// AllBranches: the groups of every branch in the person's scope (else the one branch asked for).
+	AllBranches bool
+	// PageSize 0: every group; otherwise one page of that size.
+	Page, PageSize int
 }
 
 func groupTitle(raw string) (string, error) {
@@ -101,10 +131,22 @@ func groupTitle(raw string) (string, error) {
 
 // ListGroups lists a branch's groups: switched-on first, by title.
 func (s *PlatformService) ListGroups(ctx context.Context, branchID uuid.UUID, f GroupFilter, scope BranchScope) ([]GroupRow, error) {
-	if !scope.Has(branchID) {
-		return nil, ErrBranchAccessDenied
+	rows, _, err := s.ListGroupsPage(ctx, branchID, f, scope)
+	return rows, err
+}
+
+// ListGroupsPage lists a branch's groups (one page when f.PageSize is set), with how many groups
+// match in all.
+func (s *PlatformService) ListGroupsPage(ctx context.Context, branchID uuid.UUID, f GroupFilter, scope BranchScope) ([]GroupRow, int64, error) {
+	var q *gorm.DB
+	if f.AllBranches {
+		q = scope.where(s.db.WithContext(ctx), "branch_id")
+	} else {
+		if !scope.Has(branchID) {
+			return nil, 0, ErrBranchAccessDenied
+		}
+		q = s.db.WithContext(ctx).Where("branch_id = ?", branchID)
 	}
-	q := s.db.WithContext(ctx).Where("branch_id = ?", branchID)
 	switch f.Status {
 	case "active":
 		q = q.Where("is_active = ?", true)
@@ -114,27 +156,27 @@ func (s *PlatformService) ListGroups(ctx context.Context, branchID uuid.UUID, f 
 	if search := strings.TrimSpace(f.Search); search != "" {
 		q = q.Where("title LIKE ?", likePattern(search))
 	}
+	// A group with the agent in it now (an agent taken out of it no longer counts).
+	if f.PlatformID != nil {
+		q = q.Where("id IN (SELECT group_id FROM hq_platform_assignments WHERE platform_id = ? AND is_active = ? AND deleted_at IS NULL)", *f.PlatformID, true)
+	}
+	var total int64
+	if err := q.Session(&gorm.Session{}).Model(&models.AssignmentGroup{}).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	q = q.Order("is_active DESC, title, created_at")
+	if f.PageSize > 0 {
+		q = q.Offset((max(f.Page, 1) - 1) * f.PageSize).Limit(f.PageSize)
+	}
 	var list []models.AssignmentGroup
-	if err := q.Order("is_active DESC, title, created_at").Find(&list).Error; err != nil {
-		return nil, err
+	if err := q.Find(&list).Error; err != nil {
+		return nil, 0, err
 	}
 	rows, err := s.groupRows(ctx, list)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	if f.PlatformID == nil {
-		return rows, nil
-	}
-	out := rows[:0]
-	for _, g := range rows {
-		for _, a := range g.Agents {
-			if a.PlatformID == *f.PlatformID {
-				out = append(out, g)
-				break
-			}
-		}
-	}
-	return out, nil
+	return rows, total, nil
 }
 
 func (s *PlatformService) groupRows(ctx context.Context, list []models.AssignmentGroup) ([]GroupRow, error) {
@@ -171,13 +213,21 @@ func (s *PlatformService) groupRows(ctx context.Context, list []models.Assignmen
 		weeks[c.GroupID] = c.N
 	}
 	names := s.userNames(ctx, users)
+	branchIDs := make([]uuid.UUID, len(list))
 	for i, g := range list {
-		row := GroupRow{AssignmentGroup: g, Agents: []GroupAgent{}, Partners: []AssignmentPartnerRow{}, Weeks: weeks[g.ID], CreatedBy: names[g.CreatedByID]}
+		branchIDs[i] = g.BranchID
+	}
+	branches, err := s.branchesIn(ctx, branchIDs)
+	if err != nil {
+		return nil, err
+	}
+	for i, g := range list {
+		row := GroupRow{AssignmentGroup: g, BranchID: g.BranchID, BranchCode: branches[g.BranchID].Code, Agents: []GroupAgent{}, Partners: []AssignmentPartnerRow{}, Weeks: weeks[g.ID], CreatedBy: names[g.CreatedByID]}
 		mine := agents[g.ID]
 		sort.Slice(mine, func(a, b int) bool { return agentBefore(mine[a].PlatformCode, mine[b].PlatformCode) })
 		for _, a := range mine {
 			row.Agents = append(row.Agents, GroupAgent{AssignmentID: a.ID, PlatformID: a.PlatformID, PlatformCode: a.PlatformCode, Currency: a.Currency,
-				CommissionRate: a.CommissionRate, StartsOn: dayString(a.StartsOn), Weeks: a.Weeks})
+				CommissionRate: a.CommissionRate, CalcType: a.CalcType, StartsOn: dayString(a.StartsOn), Weeks: a.Weeks})
 		}
 		if len(mine) > 0 {
 			row.Partners = mine[0].Partners
@@ -214,15 +264,19 @@ func (s *PlatformService) CreateGroup(ctx context.Context, in GroupInput, scope 
 	if err != nil {
 		return nil, err
 	}
-	platformIDs, rates, err := agentRates(in.Agents)
+	platformIDs, rates, kinds, err := agentRates(in.Agents)
 	if err != nil {
 		return nil, err
 	}
-	plan, err := s.planAssign(ctx, AssignmentInput{PlatformIDs: platformIDs, Currency: in.Currency, StartsOn: in.StartsOn}, scope, actor)
+	var branchIDs []string
+	if strings.TrimSpace(in.BranchID) != "" {
+		branchIDs = []string{strings.TrimSpace(in.BranchID)}
+	}
+	plan, err := s.planAssign(ctx, AssignmentInput{PlatformIDs: platformIDs, BranchIDs: branchIDs, Currency: in.Currency, StartsOn: in.StartsOn}, scope, actor)
 	if err != nil {
 		return nil, err
 	}
-	plan.rates = rates
+	plan.rates, plan.kinds = rates, kinds
 	g := models.AssignmentGroup{ID: uuid.New(), BranchID: plan.branchIDs[0], Title: title, Currency: plan.currency, StartsOn: plan.starts, IsActive: true, CreatedByID: actor}
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&g).Error; err != nil {
@@ -258,7 +312,7 @@ func (s *PlatformService) UpdateGroup(ctx context.Context, id uuid.UUID, in Grou
 	if err != nil {
 		return nil, nil, err
 	}
-	platformIDs, rates, err := agentRates(in.Agents)
+	platformIDs, rates, kinds, err := agentRates(in.Agents)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -279,7 +333,7 @@ func (s *PlatformService) UpdateGroup(ctx context.Context, id uuid.UUID, in Grou
 			return err
 		}
 		// Every agent wanted must be on; the currency is the one chosen, else each agent's default.
-		plan := &assignPlan{branchIDs: []uuid.UUID{g.BranchID}, platformIDs: ids, rates: rates, starts: s.today()}
+		plan := &assignPlan{branchIDs: []uuid.UUID{g.BranchID}, platformIDs: ids, rates: rates, kinds: kinds, starts: s.today()}
 		if g.StartsOn.After(plan.starts) {
 			plan.starts = g.StartsOn
 		}
@@ -302,7 +356,7 @@ func (s *PlatformService) UpdateGroup(ctx context.Context, id uuid.UUID, in Grou
 			if currency == "" {
 				currency = plan.platforms[a.PlatformID].DefaultCurrency
 			}
-			if err := tx.Model(a).Updates(map[string]interface{}{"commission_rate": rate, "currency": currency, "updated_at": now}).Error; err != nil {
+			if err := tx.Model(a).Updates(map[string]interface{}{"commission_rate": rate, "calc_type": kinds[a.PlatformID], "currency": currency, "updated_at": now}).Error; err != nil {
 				return err
 			}
 			if err := tx.Where("assignment_id = ?", a.ID).Delete(&models.AssignmentPartner{}).Error; err != nil {

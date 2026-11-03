@@ -71,6 +71,7 @@ export const PERMISSION_CODES = [
   'winlose.edit',
   'winlose-reports.view',
   'winlose-reports.consolidated',
+  'winlose-reports.rates',
   'winlose-settlements.finalize',
 ] as const
 

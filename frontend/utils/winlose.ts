@@ -16,12 +16,25 @@ export function rateLabel(min: string, max: string) {
   return Number(min) === Number(max) ? formatRate(min) : `${formatRate(min)}–${formatRate(max)}`
 }
 
+/** The two ways a group works its Total out (set when agents are assigned). */
+export const CALC_TYPES = [
+  { value: 'PO', label: 'PO', formula: '(W/L + Comm) × (100% − Rate)' },
+  { value: 'GI', label: 'GI', formula: '−((W/L + Comm) × Rate)' },
+] as const
+
+/** What a rate turns into for a group type: PO leaves 100% − rate (60% → 40%), GI is the rate with a minus (−60%). */
+export function totalRate(calcType: string, rate: number) {
+  return calcType === 'GI' ? (rate ? `−${formatRate(rate)}` : formatRate(0)) : formatRate(100 - rate)
+}
+
 /**
- * The rate a Total is worked out at: under v3 what is left of 100% after the agent's rate (60% →
- * 40%), before that the rate itself. The rate as saved when the weeks' formulas differ.
+ * The rate a Total is worked out at: under v3 and v4 (PO) what is left of 100% after the agent's rate
+ * (60% → 40%), for a GI group ("gi") the rate with a minus, before v3 the rate itself. The rate as
+ * saved when the weeks' formulas differ.
  */
 export function usedRate(min: string, max: string, formula: string) {
-  return formula === 'v3' ? rateLabel(String(100 - Number(max)), String(100 - Number(min))) : rateLabel(min, max)
+  if (formula === 'gi') return Number(min) === 0 && Number(max) === 0 ? rateLabel(min, max) : `−${rateLabel(min, max)}`
+  return formula === 'v3' || formula === 'v4' ? rateLabel(String(100 - Number(max)), String(100 - Number(min))) : rateLabel(min, max)
 }
 
 /** A week as "26 Oct – 01 Nov 2026". */

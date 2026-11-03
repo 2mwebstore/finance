@@ -20,6 +20,10 @@ type Platform struct {
 	DefaultRate     decimal.Decimal `gorm:"type:decimal(7,4);not null" json:"default_rate"`
 	DefaultCurrency string          `gorm:"size:3;not null" json:"default_currency"`
 	IsActive        bool            `gorm:"not null" json:"is_active"`
+	// BranchID is the branch the agent belongs to: only people working in that branch see and use
+	// it (owners/admins see every agent). Nil: a shared agent, seen by every branch (agents made
+	// before branches had their own).
+	BranchID *uuid.UUID `gorm:"type:char(36)" json:"branch_id"`
 }
 
 // Partner is someone with a share of branch-platform assignments. Partners are managed in the app
@@ -46,9 +50,12 @@ type HQPlatformAssignment struct {
 	// CommissionRate (shown as "Partner %") is used when the assignment has no partners; with
 	// partners, each has their own % (AssignmentPartner).
 	CommissionRate decimal.Decimal `gorm:"type:decimal(7,4);not null" json:"commission_rate"`
-	Currency       string          `gorm:"size:3;not null" json:"currency"`
-	IsActive       bool            `gorm:"not null" json:"is_active"`
-	ActiveKey      *int8           `json:"-"`
+	// CalcType is how the agent's Total is worked out in its group: "PO" (W/L − Comm) × (100% − Rate)
+	// or "GI" −((W/L − Comm) × Rate).
+	CalcType  string `gorm:"size:2;not null;default:PO" json:"calc_type"`
+	Currency  string `gorm:"size:3;not null" json:"currency"`
+	IsActive  bool   `gorm:"not null" json:"is_active"`
+	ActiveKey *int8  `json:"-"`
 	// StartsOn and EndsOn are the first and last day results can be entered (EndsOn nil: open).
 	StartsOn    time.Time  `gorm:"type:date;not null" json:"starts_on"`
 	EndsOn      *time.Time `gorm:"type:date" json:"ends_on"`
@@ -95,9 +102,11 @@ type WeeklyPartnerResult struct {
 	ResultID       uuid.UUID       `gorm:"type:char(36);not null" json:"result_id"`
 	PartnerID      uuid.UUID       `gorm:"type:char(36);not null" json:"partner_id"`
 	CommissionRate decimal.Decimal `gorm:"type:decimal(7,4);not null" json:"commission_rate"`
-	JamePS         decimal.Decimal `gorm:"column:jame_ps;type:decimal(19,4);not null" json:"jame_ps"`
-	CreatedAt      time.Time       `json:"-"`
-	UpdatedAt      time.Time       `json:"-"`
+	// CalcType is the group's type (PO or GI) when this was worked out.
+	CalcType  string          `gorm:"size:2;not null;default:PO" json:"calc_type"`
+	JamePS    decimal.Decimal `gorm:"column:jame_ps;type:decimal(19,4);not null" json:"jame_ps"`
+	CreatedAt time.Time       `json:"-"`
+	UpdatedAt time.Time       `json:"-"`
 }
 
 // WeeklyPlatformResult is one agent (platform) on one entry: a branch's week (Monday to Sunday).
@@ -134,9 +143,11 @@ type WeeklyGroupResult struct {
 	GroupID        *uuid.UUID      `gorm:"type:char(36)" json:"group_id"`
 	AssignmentID   uuid.UUID       `gorm:"type:char(36);not null" json:"assignment_id"`
 	CommissionRate decimal.Decimal `gorm:"type:decimal(7,4);not null" json:"commission_rate"`
-	JamePS         decimal.Decimal `gorm:"column:jame_ps;type:decimal(19,4);not null" json:"jame_ps"`
-	CreatedAt      time.Time       `json:"-"`
-	UpdatedAt      time.Time       `json:"-"`
+	// CalcType is the group's type (PO or GI) when this was worked out.
+	CalcType  string          `gorm:"size:2;not null;default:PO" json:"calc_type"`
+	JamePS    decimal.Decimal `gorm:"column:jame_ps;type:decimal(19,4);not null" json:"jame_ps"`
+	CreatedAt time.Time       `json:"-"`
+	UpdatedAt time.Time       `json:"-"`
 }
 
 func (WeeklyGroupResult) TableName() string { return "weekly_group_results" }

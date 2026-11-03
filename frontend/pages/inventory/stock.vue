@@ -47,7 +47,7 @@
     <AppModal :model-value="adjustOpen" form title="Adjust stock" eyebrow="STOCK" subtitle="Add or remove stock, or set the counted quantity. Every change keeps its reason." :busy="saving" width="560px" @update:model-value="(open) => { if (!open && !saving) adjustOpen = false }" @submit="saveAdjust">
       <template #icon><SlidersHorizontal :size="20" /></template>
       <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <div class="space-y-1 text-xs font-medium text-muted">Branch<SearchSelect v-model="adjust.branch_id" :options="branchChoices" placeholder="Choose a branch" aria-label="Branch" /></div>
+        <div v-if="branches.length !== 1" class="space-y-1 text-xs font-medium text-muted">Branch<SearchSelect v-model="adjust.branch_id" :options="branchChoices" placeholder="Choose a branch" aria-label="Branch" /></div>
         <div class="space-y-1 text-xs font-medium text-muted">Product<SearchSelect v-model="adjust.product_id" :options="productChoices" placeholder="Choose a product" search-placeholder="Search by SKU or name…" aria-label="Product" /></div>
       </div>
       <p v-if="adjustProduct" class="mt-2 rounded-lg bg-canvas px-3 py-2 text-xs text-muted">In stock now: <strong class="text-navy">{{ formatQty(adjustProduct.quantity) }} {{ adjustProduct.unit }}</strong> · average cost {{ formatMoney(adjustProduct.avg_cost, adjustProduct.currency) }}</p>

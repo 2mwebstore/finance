@@ -61,8 +61,17 @@ const V2 = "v2"
 // e.g. (1,000 − 100) × (100% − 60%) = 360.
 const V3 = "v3"
 
+// V4 is V3 with the commission added to the win/lose instead of taken away (the business's
+// rule from November 2026):
+//
+//	adjusted = win_lose + commission
+//	jame_ps  = ROUND(adjusted × (100% − rate), 0)
+//
+// e.g. (1,000 + 100) × (100% − 60%) = 440. A GI group under it gives −((win_lose + commission) × rate).
+const V4 = "v4"
+
 // Default is the version weeks use unless the winlose.formula setting picks another.
-const Default = V3
+const Default = V4
 
 var hundred = decimal.NewFromInt(100)
 
@@ -94,6 +103,48 @@ var formulas = map[string]Formula{
 			return adjusted, adjusted.Mul(hundred.Sub(in.RatePct)).Div(hundred).Round(0)
 		},
 	},
+	V4: {
+		Version:     V4,
+		Description: "Total = ROUND((Win/Lose + Commission) × (100% − rate), 0)",
+		Confirmed:   true,
+		Rest:        true,
+		calc: func(in Input) (decimal.Decimal, decimal.Decimal) {
+			adjusted := in.WinLose.Add(in.Commission)
+			return adjusted, adjusted.Mul(hundred.Sub(in.RatePct)).Div(hundred).Round(0)
+		},
+	},
+}
+
+// Kind is how an agent splits the adjusted amount (the version's win/lose and commission). It is
+// set per agent on the Assign agents page and works on top of the formula version.
+type Kind string
+
+const (
+	// PO: the agent's rate is its own share and the Total is what is left, as the version says
+	// (v4: (W/L + COMM) × (100% − rate); v3: (W/L − COMM) × (100% − rate)).
+	PO Kind = "PO"
+	// GI: the Total is the agent's share, with the sign turned over: −((W/L + COMM) × rate)
+	// (under v3: −((W/L − COMM) × rate)).
+	GI Kind = "GI"
+)
+
+// ValidKind reports whether k is a kind this build knows.
+func ValidKind(k string) bool { return k == string(PO) || k == string(GI) }
+
+// CalculateKind works a week out for an agent of the given kind. An empty or PO kind follows the
+// formula version; GI is −ROUND(adjusted × rate, 0), with the adjusted amount of that version
+// (win_lose + commission under v4, win_lose − commission under v3).
+func CalculateKind(version string, kind Kind, in Input) (Result, error) {
+	if kind != GI {
+		return Calculate(version, in)
+	}
+	f, ok := formulas[version]
+	if !ok {
+		return Result{}, ErrUnknownFormula
+	}
+	adjusted, _ := f.calc(Input{WinLose: in.WinLose, Commission: in.Commission})
+	jame := adjusted.Mul(in.RatePct).Div(hundred).Round(0).Neg()
+	return Result{Version: version, Adjusted: adjusted.Round(4), JamePS: jame}, nil
 }
 
 // ErrUnknownFormula: a version this build doesn't have.

@@ -179,7 +179,7 @@
             <DateRangePicker v-model="dateRange" @update:model-value="period = 'custom'" />
           </div>
 
-          <div class="filter-group">
+          <div v-if="branches.length > 1" class="filter-group">
             <label class="filter-label">Branch</label>
             <SearchSelect v-model="branchId" :options="branchOptions" placeholder="All accessible branches" search-placeholder="Search branches…" aria-label="Branch filter" />
           </div>

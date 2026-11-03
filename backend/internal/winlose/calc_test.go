@@ -79,8 +79,8 @@ func TestV3(t *testing.T) {
 			t.Errorf("%s: got adjusted=%s jame=%s (%s), want %s and %s", c.name, got.Adjusted, got.JamePS, got.Version, c.wantAdjusted, c.wantJamePS)
 		}
 	}
-	if f, _ := Lookup(V3); Default != V3 || !f.Rest {
-		t.Error("new weeks use V3, where the rate is the agent's share")
+	if f, _ := Lookup(V3); !f.Rest {
+		t.Error("V3: the rate is the agent's share")
 	}
 }
 
@@ -93,5 +93,112 @@ func TestUnknownVersion(t *testing.T) {
 	}
 	if len(Versions()) == 0 || Versions()[0].Description == "" {
 		t.Error("versions are listed with a description")
+	}
+}
+
+func TestKinds(t *testing.T) {
+	cases := []struct {
+		name                      string
+		kind                      Kind
+		winLose, commission, rate string
+		wantAdjusted, wantJamePS  string
+	}{
+		{"PO is what is left of 100%", PO, "1000", "100", "60", "900", "360"},
+		{"empty kind is PO", "", "1000", "100", "60", "900", "360"},
+		{"GI is minus the agent's share", GI, "1000", "100", "60", "900", "-540"},
+		{"GI on a loss turns positive", GI, "-1500", "100", "35", "-1600", "560"},
+		{"GI rounds half away from zero", GI, "5", "0", "50", "5", "-3"},
+		{"GI at 0%", GI, "1000", "0", "0", "1000", "0"},
+	}
+	for _, c := range cases {
+		got, err := CalculateKind(V3, c.kind, Input{WinLose: d(c.winLose), Commission: d(c.commission), RatePct: d(c.rate)})
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if !got.Adjusted.Equal(d(c.wantAdjusted)) || !got.JamePS.Equal(d(c.wantJamePS)) {
+			t.Errorf("%s: got adjusted=%s jame=%s, want %s and %s", c.name, got.Adjusted, got.JamePS, c.wantAdjusted, c.wantJamePS)
+		}
+	}
+}
+
+// A group holds up to 100 agents, each at its own rate and type: every Total must match the
+// formula worked out by hand (PO = adjusted × (100% − rate), GI = −(adjusted × rate)).
+func TestHundredAgents(t *testing.T) {
+	var po, gi decimal.Decimal
+	for i := 1; i <= 100; i++ {
+		rate := decimal.NewFromInt(int64(i - 1)) // 0% … 99%
+		in := Input{WinLose: decimal.NewFromInt(int64(-1000 * i)), Commission: decimal.NewFromInt(2000), RatePct: rate}
+		adjusted := in.WinLose.Sub(in.Commission)
+		p, err := CalculateKind(V3, PO, in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		g, err := CalculateKind(V3, GI, in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := adjusted.Mul(decimal.NewFromInt(100).Sub(rate)).Div(decimal.NewFromInt(100)).Round(0); !p.JamePS.Equal(want) {
+			t.Fatalf("agent %d PO: got %s want %s", i, p.JamePS, want)
+		}
+		if want := adjusted.Mul(rate).Div(decimal.NewFromInt(100)).Round(0).Neg(); !g.JamePS.Equal(want) {
+			t.Fatalf("agent %d GI: got %s want %s", i, g.JamePS, want)
+		}
+		if !p.Adjusted.Equal(adjusted) || !g.Adjusted.Equal(adjusted) {
+			t.Fatalf("agent %d adjusted: %s / %s want %s", i, p.Adjusted, g.Adjusted, adjusted)
+		}
+		po, gi = po.Add(p.JamePS), gi.Add(g.JamePS)
+	}
+	t.Logf("100 agents: PO total %s, GI total %s", po, gi)
+}
+
+func TestV4(t *testing.T) {
+	cases := []struct {
+		name                      string
+		kind                      Kind
+		winLose, commission, rate string
+		wantAdjusted, wantJamePS  string
+	}{
+		{"PO: commission added, what is left of 100%", PO, "1000", "100", "60", "1100", "440"},
+		{"PO at 0% leaves the whole amount", PO, "1000", "100", "0", "1100", "1100"},
+		{"PO at 100% leaves nothing", PO, "1000", "100", "100", "1100", "0"},
+		{"PO on a loss", PO, "-100000", "10000", "60", "-90000", "-36000"},
+		{"GI: minus the share of win/lose plus commission", GI, "1000", "100", "60", "1100", "-660"},
+		{"GI on a loss turns positive", GI, "-1500", "100", "35", "-1400", "490"},
+		{"GI rounds half away from zero", GI, "4", "1", "50", "5", "-3"},
+		{"PO rounds half away from zero", PO, "4", "1", "50", "5", "3"},
+	}
+	for _, c := range cases {
+		got, err := CalculateKind(V4, c.kind, Input{WinLose: d(c.winLose), Commission: d(c.commission), RatePct: d(c.rate)})
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if !got.Adjusted.Equal(d(c.wantAdjusted)) || !got.JamePS.Equal(d(c.wantJamePS)) || got.Version != V4 {
+			t.Errorf("%s: got adjusted=%s jame=%s (%s), want %s and %s", c.name, got.Adjusted, got.JamePS, got.Version, c.wantAdjusted, c.wantJamePS)
+		}
+	}
+	if Default != V4 {
+		t.Errorf("default formula is %s, want %s", Default, V4)
+	}
+	// v3 stays as it was for the weeks saved with it.
+	old, _ := CalculateKind(V3, GI, Input{WinLose: d("1000"), Commission: d("100"), RatePct: d("60")})
+	if !old.JamePS.Equal(d("-540")) {
+		t.Errorf("v3 GI changed: %s", old.JamePS)
+	}
+}
+
+// 100 agents at rates 0%–99%, PO and GI, under v4: each Total matches the formula by hand.
+func TestHundredAgentsV4(t *testing.T) {
+	for i := 1; i <= 100; i++ {
+		rate := decimal.NewFromInt(int64(i - 1))
+		in := Input{WinLose: decimal.NewFromInt(int64(-1000 * i)), Commission: decimal.NewFromInt(2000), RatePct: rate}
+		adjusted := in.WinLose.Add(in.Commission)
+		p, _ := CalculateKind(V4, PO, in)
+		g, _ := CalculateKind(V4, GI, in)
+		if want := adjusted.Mul(decimal.NewFromInt(100).Sub(rate)).Div(decimal.NewFromInt(100)).Round(0); !p.JamePS.Equal(want) {
+			t.Fatalf("agent %d PO: got %s want %s", i, p.JamePS, want)
+		}
+		if want := adjusted.Mul(rate).Div(decimal.NewFromInt(100)).Round(0).Neg(); !g.JamePS.Equal(want) {
+			t.Fatalf("agent %d GI: got %s want %s", i, g.JamePS, want)
+		}
 	}
 }

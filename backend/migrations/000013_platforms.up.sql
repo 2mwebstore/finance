@@ -33,11 +33,13 @@ SET @ddl = CONCAT('CREATE TABLE IF NOT EXISTS platforms (
     default_rate DECIMAL(7,4) NOT NULL DEFAULT 0,
     default_currency VARCHAR(3) NOT NULL DEFAULT ''USD'',
     is_active TINYINT(1) NOT NULL DEFAULT 1,
+    branch_id CHAR(36) NULL,
     created_at DATETIME(3) NULL,
     updated_at DATETIME(3) NULL,
     deleted_at DATETIME(3) NULL,
     PRIMARY KEY (id),
     UNIQUE KEY uq_platforms_code (code),
+    KEY idx_platforms_branch (branch_id),
     KEY idx_platforms_deleted_at (deleted_at)
 )', ' ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=', @coll);
 PREPARE create_table FROM @ddl;
@@ -69,6 +71,7 @@ SET @ddl = CONCAT('CREATE TABLE IF NOT EXISTS hq_platform_assignments (
     platform_id CHAR(36) NOT NULL,
     group_id CHAR(36) NULL,
     commission_rate DECIMAL(7,4) NOT NULL,
+    calc_type VARCHAR(2) NOT NULL DEFAULT ''PO'',
     currency VARCHAR(3) NOT NULL,
     is_active TINYINT(1) NOT NULL DEFAULT 1,
     active_key TINYINT NULL,
@@ -163,6 +166,7 @@ SET @ddl = CONCAT('CREATE TABLE IF NOT EXISTS weekly_group_results (
     group_id CHAR(36) NULL,
     assignment_id CHAR(36) NOT NULL,
     commission_rate DECIMAL(7,4) NOT NULL,
+    calc_type VARCHAR(2) NOT NULL DEFAULT ''PO'',
     jame_ps DECIMAL(19,4) NOT NULL,
     created_at DATETIME(3) NULL,
     updated_at DATETIME(3) NULL,
@@ -278,6 +282,33 @@ DEALLOCATE PREPARE add_column;
 
 SET @col = IF(
     (SELECT COUNT(*) FROM information_schema.columns
+      WHERE table_schema = DATABASE() AND table_name = 'platforms' AND column_name = 'branch_id') = 0,
+    'ALTER TABLE platforms ADD COLUMN branch_id CHAR(36) NULL AFTER is_active, ADD KEY idx_platforms_branch (branch_id)',
+    'SELECT 1');
+PREPARE add_column FROM @col;
+EXECUTE add_column;
+DEALLOCATE PREPARE add_column;
+
+SET @col = IF(
+    (SELECT COUNT(*) FROM information_schema.columns
+      WHERE table_schema = DATABASE() AND table_name = 'hq_platform_assignments' AND column_name = 'calc_type') = 0,
+    'ALTER TABLE hq_platform_assignments ADD COLUMN calc_type VARCHAR(2) NOT NULL DEFAULT ''PO'' AFTER commission_rate',
+    'SELECT 1');
+PREPARE add_column FROM @col;
+EXECUTE add_column;
+DEALLOCATE PREPARE add_column;
+
+SET @col = IF(
+    (SELECT COUNT(*) FROM information_schema.columns
+      WHERE table_schema = DATABASE() AND table_name = 'weekly_group_results' AND column_name = 'calc_type') = 0,
+    'ALTER TABLE weekly_group_results ADD COLUMN calc_type VARCHAR(2) NOT NULL DEFAULT ''PO'' AFTER commission_rate',
+    'SELECT 1');
+PREPARE add_column FROM @col;
+EXECUTE add_column;
+DEALLOCATE PREPARE add_column;
+
+SET @col = IF(
+    (SELECT COUNT(*) FROM information_schema.columns
       WHERE table_schema = DATABASE() AND table_name = 'weekly_platform_results' AND column_name = 'entry_id') = 0,
     'ALTER TABLE weekly_platform_results ADD COLUMN entry_id CHAR(36) NULL AFTER id',
     'SELECT 1');
@@ -384,6 +415,15 @@ EXECUTE drop_key;
 DEALLOCATE PREPARE drop_key;
 
 -- Foreign keys, each added only when missing.
+
+SET @fk = IF(
+    (SELECT COUNT(*) FROM information_schema.table_constraints
+      WHERE table_schema = DATABASE() AND table_name = 'platforms' AND constraint_name = 'fk_platforms_branch' AND constraint_type = 'FOREIGN KEY') = 0,
+    'ALTER TABLE platforms ADD CONSTRAINT fk_platforms_branch FOREIGN KEY (branch_id) REFERENCES branches(id)',
+    'SELECT 1');
+PREPARE add_fk FROM @fk;
+EXECUTE add_fk;
+DEALLOCATE PREPARE add_fk;
 
 SET @fk = IF(
     (SELECT COUNT(*) FROM information_schema.table_constraints

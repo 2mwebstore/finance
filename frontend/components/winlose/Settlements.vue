@@ -38,7 +38,8 @@ import { formatDocDate, formatDocDateTime, todayISO } from '~/utils/inventory'
 import { formatAmount, plusDays } from '~/utils/winlose'
 
 /** The week's settlement for the person's own group: finalize (keeps its totals, locks its entry) or reopen. */
-const props = defineProps<{ weekStart: string }>()
+/** branchId: the branch whose week it is ('' = the person's own). */
+const props = defineProps<{ weekStart: string; branchId?: string }>()
 const emit = defineEmits<{ changed: [] }>()
 
 const { api } = useApi()
@@ -60,14 +61,14 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    settlement.value = (await api<{ items: WeeklySettlement[] }>('/winlose/settlements', { query: { week_start: props.weekStart } })).items?.[0] || null
+    settlement.value = (await api<{ items: WeeklySettlement[] }>('/winlose/settlements', { query: { week_start: props.weekStart, branch_id: props.branchId || undefined } })).items?.[0] || null
   } catch (e: any) {
     error.value = e?.data?.error || 'Could not load the settlement.'
   } finally {
     loading.value = false
   }
 }
-watch(() => props.weekStart, load)
+watch(() => [props.weekStart, props.branchId], load)
 onMounted(load)
 
 function label(s?: WeeklySettlement | null) {
@@ -80,7 +81,7 @@ function tone(s?: WeeklySettlement | null) {
 async function finalize() {
   busy.value = true
   try {
-    await api<WeeklySettlement>('/winlose/settlements', { method: 'POST', body: { week_start: props.weekStart } })
+    await api<WeeklySettlement>('/winlose/settlements', { method: 'POST', body: { week_start: props.weekStart, branch_id: props.branchId || undefined } })
     toast.success('Its entry is locked.', { title: 'Week finalized' })
     await load()
     emit('changed')

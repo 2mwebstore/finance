@@ -118,6 +118,7 @@ type WeekSheet struct {
 type share struct {
 	group      *uuid.UUID
 	assignment uuid.UUID
+	kind       winlose.Kind    // PO or GI: how the group splits the amount
 	rate       decimal.Decimal // with partners, their % added up
 	partners   []PartnerShare  // assignments (and weeks) from before groups had their own rates
 	existing   *models.WeeklyGroupResult
@@ -250,7 +251,8 @@ func (s *PlatformService) loadEntry(tx *gorm.DB, branchID uuid.UUID, start time.
 		return nil, err
 	}
 	var active []models.Platform
-	if err := tx.Where("is_active = ?", true).Find(&active).Error; err != nil {
+	// Only this branch's agents and the shared ones can be entered here.
+	if err := tx.Where("is_active = ? AND (branch_id = ? OR branch_id IS NULL)", true, branchID).Find(&active).Error; err != nil {
 		return nil, err
 	}
 	for _, pl := range active {
@@ -278,7 +280,11 @@ func (p *entryParts) newShares(platformID uuid.UUID) []share {
 		for _, l := range p.links[a.ID] {
 			partners = append(partners, PartnerShare{PartnerID: l.PartnerID, CommissionRate: l.CommissionRate})
 		}
-		out = append(out, share{group: a.GroupID, assignment: a.ID, rate: shareRate(a.CommissionRate, partners), partners: partners})
+		kind := winlose.PO
+		if winlose.Kind(a.CalcType) == winlose.GI {
+			kind = winlose.GI
+		}
+		out = append(out, share{group: a.GroupID, assignment: a.ID, kind: kind, rate: shareRate(a.CommissionRate, partners), partners: partners})
 	}
 	return out
 }
@@ -327,7 +333,7 @@ func (p *entryParts) savedShares(r models.WeeklyPlatformResult) []share {
 	list := p.saved[r.ID]
 	var out []share
 	for i := range list {
-		sh := share{group: list[i].GroupID, assignment: list[i].AssignmentID, rate: list[i].CommissionRate, existing: &list[i]}
+		sh := share{group: list[i].GroupID, assignment: list[i].AssignmentID, kind: winlose.Kind(list[i].CalcType), rate: list[i].CommissionRate, existing: &list[i]}
 		if len(list) == 1 {
 			for _, pr := range p.partnerOf[r.ID] {
 				sh.partners = append(sh.partners, PartnerShare{PartnerID: pr.PartnerID, CommissionRate: pr.CommissionRate})
@@ -521,6 +527,14 @@ func (s *PlatformService) sheet(ctx context.Context, p *entryParts, formula winl
 	return out
 }
 
+// kindOf is the kind as stored: PO unless GI.
+func kindOf(k winlose.Kind) string {
+	if k == winlose.GI {
+		return string(winlose.GI)
+	}
+	return string(winlose.PO)
+}
+
 // shareRate is a share's rate: its partners' % added up, or its own when it has none.
 func shareRate(own decimal.Decimal, partners []PartnerShare) decimal.Decimal {
 	if len(partners) == 0 {
@@ -577,9 +591,9 @@ type rowPlan struct {
 // workOut gives a Total: with partners, each one's share at their % (filled into shares) and the
 // Total their sum; without, the Total at the given %. When the rate is the agent's own share
 // (Rest), a partner's share is their % and the Total what is left of 100% after all of them.
-func workOut(version string, wl, cm, rate decimal.Decimal, shares []PartnerShare) (winlose.Result, error) {
+func workOut(version string, kind winlose.Kind, wl, cm, rate decimal.Decimal, shares []PartnerShare) (winlose.Result, error) {
 	if len(shares) == 0 {
-		return winlose.Calculate(version, winlose.Input{WinLose: wl, Commission: cm, RatePct: rate})
+		return winlose.CalculateKind(version, kind, winlose.Input{WinLose: wl, Commission: cm, RatePct: rate})
 	}
 	if f, ok := winlose.Lookup(version); ok && f.Rest {
 		total, err := winlose.Calculate(version, winlose.Input{WinLose: wl, Commission: cm, RatePct: shareRate(rate, shares)})
@@ -650,7 +664,7 @@ func (s *PlatformService) plan(p *entryParts, rows []WeekEntryRow, formula winlo
 		plan.result = winlose.Result{Version: version, Adjusted: base.Adjusted}
 		for j := range plan.shares {
 			sh := &plan.shares[j]
-			r, err := workOut(version, wl, cm, sh.rate, sh.partners)
+			r, err := workOut(version, sh.kind, wl, cm, sh.rate, sh.partners)
 			if err != nil {
 				return nil, err
 			}
@@ -687,10 +701,17 @@ func (s *PlatformService) Preview(ctx context.Context, in WeekEntryInput, scope 
 	}
 	out := make([]PreviewRow, len(plans))
 	for i, p := range plans {
+		// groupShares lists the groups by title, not in the order of the shares: each Total goes to
+		// its own group (an agent in two groups has one share in each).
 		groups := parts.groupShares(p.shares)
-		for j, sh := range p.shares {
-			total := sh.total
-			groups[j].JamePS = &total
+		for j := range groups {
+			for _, sh := range p.shares {
+				if (sh.group == nil && groups[j].GroupID == nil) || (sh.group != nil && groups[j].GroupID != nil && *sh.group == *groups[j].GroupID) {
+					total := sh.total
+					groups[j].JamePS = &total
+					break
+				}
+			}
 		}
 		out[i] = PreviewRow{PlatformID: p.platform, CommissionRate: p.rate, Currency: p.currency, Groups: groups, Result: p.result}
 	}
@@ -765,7 +786,7 @@ func (s *PlatformService) SaveWeek(ctx context.Context, in WeekEntryInput, scope
 					return err
 				}
 				for _, sh := range p.shares {
-					if err := tx.Create(&models.WeeklyGroupResult{ID: uuid.New(), ResultID: row.ID, GroupID: sh.group, AssignmentID: sh.assignment, CommissionRate: sh.rate, JamePS: sh.total}).Error; err != nil {
+					if err := tx.Create(&models.WeeklyGroupResult{ID: uuid.New(), ResultID: row.ID, GroupID: sh.group, AssignmentID: sh.assignment, CommissionRate: sh.rate, CalcType: kindOf(sh.kind), JamePS: sh.total}).Error; err != nil {
 						return err
 					}
 				}
@@ -876,7 +897,7 @@ func recalculate(tx *gorm.DB, formula winlose.Formula, results []models.WeeklyPl
 			if len(groupsOf[r.ID]) == 1 {
 				shares = partnersOf[r.ID]
 			}
-			res, err := workOut(formula.Version, r.WinLose, r.Commission, g.CommissionRate, shares)
+			res, err := workOut(formula.Version, winlose.Kind(g.CalcType), r.WinLose, r.Commission, g.CommissionRate, shares)
 			if err != nil {
 				return err
 			}
@@ -1106,8 +1127,13 @@ type EntryRow struct {
 // EntryFilter narrows Data Entry's list: words in the title, and the days it was created on
 // (YYYY-MM-DD, either may be empty).
 type EntryFilter struct {
+	// BranchID: only this branch's entries (it must be one the person works in); nil: every branch
+	// in their scope.
+	BranchID               *uuid.UUID
 	Search                 string
 	CreatedFrom, CreatedTo string
+	// PageSize 0: the newest 500; otherwise one page of that size.
+	Page, PageSize int
 }
 
 // likePattern matches text anywhere in a column (LIKE's own wildcards taken literally).
@@ -1117,7 +1143,20 @@ func likePattern(text string) string {
 
 // ListEntries lists the entries of the groups in scope, newest first (at most 500).
 func (s *PlatformService) ListEntries(ctx context.Context, f EntryFilter, scope BranchScope) ([]EntryRow, error) {
+	rows, _, err := s.ListEntriesPage(ctx, f, scope)
+	return rows, err
+}
+
+// ListEntriesPage lists entries newest first: one page when f.PageSize is set (with how many match
+// in all), else the newest 500.
+func (s *PlatformService) ListEntriesPage(ctx context.Context, f EntryFilter, scope BranchScope) ([]EntryRow, int64, error) {
 	q := scope.where(s.db.WithContext(ctx).Model(&models.WeeklyEntry{}), "branch_id")
+	if f.BranchID != nil {
+		if !scope.Has(*f.BranchID) {
+			return nil, 0, ErrBranchAccessDenied
+		}
+		q = q.Where("branch_id = ?", *f.BranchID)
+	}
 	if search := strings.TrimSpace(f.Search); search != "" {
 		q = q.Where("title LIKE ?", likePattern(search))
 	}
@@ -1125,20 +1164,28 @@ func (s *PlatformService) ListEntries(ctx context.Context, f EntryFilter, scope 
 	if strings.TrimSpace(f.CreatedFrom) != "" {
 		day, err := s.parseDay("created_from", f.CreatedFrom)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		q = q.Where("created_at >= ?", time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, s.loc))
 	}
 	if strings.TrimSpace(f.CreatedTo) != "" {
 		day, err := s.parseDay("created_to", f.CreatedTo)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		q = q.Where("created_at < ?", time.Date(day.Year(), day.Month(), day.Day()+1, 0, 0, 0, 0, s.loc))
 	}
+	var total int64
+	if err := q.Session(&gorm.Session{}).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	q = q.Order("created_at DESC, id").Limit(500)
+	if f.PageSize > 0 {
+		q = q.Offset((max(f.Page, 1) - 1) * f.PageSize).Limit(f.PageSize)
+	}
 	var list []models.WeeklyEntry
-	if err := q.Order("created_at DESC, id").Limit(500).Find(&list).Error; err != nil {
-		return nil, err
+	if err := q.Find(&list).Error; err != nil {
+		return nil, 0, err
 	}
 	var branchIDs, users []uuid.UUID
 	for _, e := range list {
@@ -1146,7 +1193,7 @@ func (s *PlatformService) ListEntries(ctx context.Context, f EntryFilter, scope 
 	}
 	branches, err := s.branchesIn(ctx, branchIDs)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	names := s.userNames(ctx, users)
 	ids := make([]uuid.UUID, len(list))
@@ -1155,13 +1202,13 @@ func (s *PlatformService) ListEntries(ctx context.Context, f EntryFilter, scope 
 	}
 	reactions, err := s.reactionsOf(ctx, entryReactions, ids)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	locked := map[string]bool{}
 	if len(branchIDs) > 0 {
 		var settled []models.WeeklySettlement
 		if err := s.db.WithContext(ctx).Where("branch_id IN ? AND status = ?", branchIDs, models.SettlementFinalized).Find(&settled).Error; err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		for _, st := range settled {
 			locked[st.BranchID.String()+dayString(st.WeekStart)] = true
@@ -1173,7 +1220,7 @@ func (s *PlatformService) ListEntries(ctx context.Context, f EntryFilter, scope 
 			BranchID: e.BranchID, BranchCode: branches[e.BranchID].Code, CreatedAt: e.CreatedAt, CreatedBy: names[e.CreatedByID],
 			Locked: locked[e.BranchID.String()+dayString(e.WeekStart)], Reactions: orNone(reactions[e.ID])}
 	}
-	return out, nil
+	return out, total, nil
 }
 
 // ===== Weekly settlements =====

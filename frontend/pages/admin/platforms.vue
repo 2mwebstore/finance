@@ -1,5 +1,5 @@
 <template>
-  <section class="rp-compact mx-auto max-w-4xl space-y-4">
+  <section class="rp-compact space-y-4">
     <header class="flex flex-wrap items-center justify-between gap-3">
       <div>
         <p class="text-[10px] font-bold tracking-[0.14em] text-slate-400">RP</p>
@@ -13,11 +13,13 @@
 
     <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
       <div class="min-w-0 flex-1"><ListSearch v-model="search" placeholder="Search by user or name…" /></div>
+      <!-- Only for people who work in more than one branch -->
+      <div v-if="showBranch" class="sm:w-56"><SearchSelect v-model="branchFilter" :options="branchOptions" aria-label="Branch" /></div>
       <label class="flex items-center gap-2 text-xs font-medium text-navy"><input v-model="showInactive" type="checkbox" class="accent-primary" /> Show turned-off agents</label>
     </div>
 
-    <div v-if="loading" class="text-sm text-muted">Loading agents…</div>
-    <AppAlert v-else-if="error" title="Couldn’t load agents" :message="error"><template #action><button type="button" @click="load">Try again</button></template></AppAlert>
+    <div v-if="loading && !items.length" class="text-sm text-muted">Loading agents…</div>
+    <AppAlert v-else-if="error && !items.length" title="Couldn’t load agents" :message="error"><template #action><button type="button" @click="reset">Try again</button></template></AppAlert>
     <!-- Like Data entry: on phones the buttons are icons only -->
     <div v-else class="overflow-hidden rounded-xl border border-border bg-white">
       <table class="w-full text-left text-sm">
@@ -26,6 +28,7 @@
             <th class="px-2 py-2 font-bold sm:px-3">User</th>
             <!-- On phones the currency goes under the user -->
             <th class="hidden px-2 py-2 font-bold sm:table-cell sm:px-3">Currency</th>
+            <th v-if="showBranch" class="hidden px-2 py-2 font-bold sm:table-cell sm:px-3">Branch</th>
             <th class="px-2 py-2 text-right font-bold sm:px-3">Groups</th>
             <th v-if="canEdit || canDelete" class="px-2 py-2 sm:px-3"><span class="sr-only">Actions</span></th>
           </tr>
@@ -38,6 +41,7 @@
               <span class="block text-[11px] text-muted"><span class="sm:hidden">{{ platform.default_currency }}</span><template v-if="platform.name && platform.name !== platform.code"><span class="sm:hidden"> · </span>{{ platform.name }}</template></span>
             </td>
             <td class="hidden px-2 py-2.5 sm:table-cell sm:px-3">{{ platform.default_currency }}</td>
+            <td v-if="showBranch" class="hidden px-2 py-2.5 sm:table-cell sm:px-3"><span v-if="platform.branch_code">{{ platform.branch_code }}</span><span v-else class="text-muted" title="Shared: every branch sees it">Shared</span></td>
             <td class="px-2 py-2.5 text-right tabular-nums sm:px-3">{{ platform.active_hqs }}</td>
             <td v-if="canEdit || canDelete" class="px-2 py-2 sm:px-3">
               <div class="flex justify-end gap-1 sm:gap-1.5">
@@ -47,10 +51,11 @@
               </div>
             </td>
           </tr>
-          <tr v-if="!shown.length"><td :colspan="canEdit || canDelete ? 4 : 3" class="px-3 py-8 text-center text-sm text-muted">{{ search ? `No agent matches “${search}”.` : 'No agents yet.' }}</td></tr>
+          <tr v-if="!shown.length"><td :colspan="(canEdit || canDelete ? 4 : 3) + (showBranch ? 1 : 0)" class="px-3 py-8 text-center text-sm text-muted">{{ search ? `No agent matches “${search}”.` : 'No agents yet.' }}</td></tr>
         </tbody>
       </table>
     </div>
+    <InfiniteLoader :has-more="hasMore" :loading="loadingMore" :count="items.length" @more="loadMore" />
 
     <!-- Delete: only an agent never in a group or entered; a used one can only be turned off -->
     <AppModal :model-value="!!deleting" form :title="deleting ? `Delete ${deleting.code}?` : ''" eyebrow="DELETE AGENT" subtitle="Only an agent that was never in a group or entered can be deleted; a used one can only be turned off." :busy="deleteBusy" width="460px" @update:model-value="(open) => { if (!open && !deleteBusy) deleting = null }" @submit="deleteAgent">
@@ -69,6 +74,8 @@
       <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label class="block space-y-1 text-xs font-medium text-muted">User <span class="text-expense">*</span><input v-model.trim="form.code" maxlength="64" required :aria-invalid="formCheck.invalid('code')" class="w-full rounded-lg border border-border px-3 py-2 font-mono text-sm text-navy" placeholder="e.g. 12K_YMLLJB_V2" /></label>
         <label class="block space-y-1 text-xs font-medium text-muted">Name <span class="font-normal">(optional)</span><input v-model.trim="form.name" maxlength="128" :aria-invalid="formCheck.invalid('name')" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" /></label>
+        <!-- With one branch it is chosen for you; an owner/admin can move an agent to another branch -->
+        <div v-if="showBranch && (!editing || hasFullAccess)" class="space-y-1 text-xs font-medium text-muted sm:col-span-2">Branch<SearchSelect v-model="form.branch_id" :options="formBranchOptions" :searchable="false" aria-label="Agent branch" /></div>
         <div class="space-y-1 text-xs font-medium text-muted sm:col-span-2">Default currency<SearchSelect v-model="form.default_currency" :options="currencyOptions" :searchable="false" aria-label="Default currency" :aria-invalid="formCheck.invalid('default_currency')" /></div>
       </div>
       <p v-if="editing" class="mt-3 rounded-lg bg-canvas px-3 py-2 text-[11px] text-muted">Changing the currency only affects groups assigned from now on; each assignment keeps its own, and saved weeks keep the currency they were entered in.</p>
@@ -87,6 +94,8 @@ import type { Platform } from '~/types/api'
 import { useToast } from '~/composables/useToast'
 import { useFormErrors } from '~/composables/useFormErrors'
 import { useCurrency } from '~/composables/useCurrency'
+import { useInfiniteList } from '~/composables/useInfiniteList'
+import { useBranchOptions } from '~/composables/useBranchOptions'
 import { rule } from '~/utils/validation'
 
 const { api } = useApi()
@@ -98,35 +107,43 @@ const canEdit = computed(() => can('platforms.edit'))
 const canDelete = computed(() => can('platforms.delete'))
 const { currencyOptions, load: loadCurrency } = useCurrency()
 
-const items = ref<Platform[]>([])
-const loading = ref(true)
-const error = ref('')
 const search = ref('')
 const showInactive = ref(false)
-const shown = computed(() => {
-  const q = search.value.trim().toLowerCase()
-  return items.value.filter(p => (showInactive.value || p.is_active) && (!q || p.code.toLowerCase().includes(q) || p.name.toLowerCase().includes(q)))
+// Agents belong to a branch. People who work in one branch just get theirs (nothing to choose);
+// with several, a Branch filter and a Branch choice on the form.
+const { branches, options: branchOptions } = useBranchOptions('All branches')
+const { hasFullAccess } = usePermissions()
+const showBranch = computed(() => branches.value.length > 1)
+const branchFilter = ref('')
+const formBranchOptions = computed(() => [
+  ...(editing.value ? [] : [{ value: '', label: 'My own branch' }]),
+  ...(editing.value && !editing.value.branch_id ? [{ value: '', label: 'Shared — choose a branch to move it' }] : []),
+  ...branches.value.map(branch => ({ value: branch.id, label: `${branch.code} — ${branch.name}` })),
+])
+// Agents load a page at a time as the list is scrolled (search and turned-off agents are worked out
+// by the API); a save or delete fetches the pages already shown again.
+const { items, loading, loadingMore, error, hasMore, reset, loadMore, refresh: load } = useInfiniteList<Platform>(
+  async (page, size) => await api<{ items: Platform[]; total: number }>('/platforms', {
+    query: { include_inactive: showInactive.value ? 'true' : undefined, search: search.value.trim() || undefined, branch_id: branchFilter.value || undefined, page, page_size: size },
+  }),
+  platform => platform.id, 30, 'Could not load agents.',
+)
+const shown = computed(() => items.value)
+// Another search or filter starts from the top again.
+let searchTimer: ReturnType<typeof setTimeout> | undefined
+watch(search, () => {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(reset, 300)
 })
-
-async function load() {
-  loading.value = true
-  error.value = ''
-  try {
-    items.value = (await api<{ items: Platform[] }>('/platforms', { query: { include_inactive: 'true' } })).items || []
-  } catch (e: any) {
-    error.value = e?.data?.error || 'Could not load agents.'
-  } finally {
-    loading.value = false
-  }
-}
-onMounted(() => { load(); loadCurrency() })
+watch([showInactive, branchFilter], reset)
+onMounted(() => { reset(); loadCurrency() })
 
 const formOpen = ref(false)
 const saving = ref(false)
 const formError = ref('')
 const editing = ref<Platform | null>(null)
 const busyId = ref('')
-const form = reactive({ code: '', name: '', default_currency: 'USD' })
+const form = reactive({ code: '', name: '', default_currency: 'USD', branch_id: '' })
 
 // Same rules as the API (services.PlatformInput / SavePlatform).
 const formCheck = reactive(useFormErrors(
@@ -140,7 +157,7 @@ const formCheck = reactive(useFormErrors(
 
 function openCreate() {
   editing.value = null
-  Object.assign(form, { code: '', name: '', default_currency: 'USD' })
+  Object.assign(form, { code: '', name: '', default_currency: 'USD', branch_id: '' })
   formError.value = ''
   formCheck.reset()
   formOpen.value = true
@@ -148,7 +165,7 @@ function openCreate() {
 
 function openEdit(platform: Platform) {
   editing.value = platform
-  Object.assign(form, { code: platform.code, name: platform.name, default_currency: platform.default_currency })
+  Object.assign(form, { code: platform.code, name: platform.name, default_currency: platform.default_currency, branch_id: platform.branch_id || '' })
   formError.value = ''
   formCheck.reset()
   formOpen.value = true

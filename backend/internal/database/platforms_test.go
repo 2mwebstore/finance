@@ -22,12 +22,12 @@ func TestPlatformMigrationMatchesStartupSQL(t *testing.T) {
 		}
 	}
 	for _, c := range platformColumns {
-		if !strings.Contains(migration, squash(c.ddl)) {
+		if !strings.Contains(migration, squash(strings.ReplaceAll(c.ddl, "'", "''"))) {
 			t.Errorf("migration 000013 is missing the %s.%s column", c.table, c.column)
 		}
 	}
 	for _, c := range platformNullable {
-		if !strings.Contains(migration, squash(c.ddl)) {
+		if !strings.Contains(migration, squash(strings.ReplaceAll(c.ddl, "'", "''"))) {
 			t.Errorf("migration 000013 doesn't let %s.%s be empty", c.table, c.column)
 		}
 	}

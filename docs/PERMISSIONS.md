@@ -70,6 +70,7 @@ Server-side authorization is enforced on every protected API. The UI uses the sa
 | `winlose.react` | React to Data Entry | Win/Lose | Give an entry, or an agent in it, ✅ or ❌, on Data entry and the Report |
 | `winlose-reports.view` | View Report | Win/Lose Reports | The Report and the group summary for your groups, one group at a time |
 | `winlose-reports.consolidated` | View Consolidated Win/Lose | Win/Lose Reports | Combined totals across all your groups |
+| `winlose-reports.rates` | View Rates in Reports | Win/Lose Reports | Show each agent's rate on the Report and the Group Summary; without it the rates are hidden |
 | `winlose-settlements.finalize` | Finalize Weekly Settlements | Win/Lose Reports | Finalize or reopen a group's week; a finalized week can't be changed |
 
 ## By module
@@ -185,6 +186,7 @@ In the RP menu (once called PLATFORMS) a platform is called an **agent** and a b
 | `winlose.react` | Give an entry, or an agent in it, ✅ or ❌, on Data entry and the Report |
 | `winlose-reports.view` | The Report and the group summary for your groups, one group at a time |
 | `winlose-reports.consolidated` | Combined totals across all your groups |
+| `winlose-reports.rates` | Show each agent's rate on the Report and the Group Summary (hidden without it) |
 | `winlose-settlements.finalize` | Finalize or reopen a group's week; a finalized week can't be changed |
 
 Win/lose is entered once a week (Monday to Sunday) per branch and platform. A saved week keeps the partners, partner %, currency and formula version it was worked out with; changing it needs `winlose.edit` and a reason (audit log). A finalized week can't be changed until someone with `winlose-settlements.finalize` reopens it. Reports without one branch chosen (all your branches together) need `winlose-reports.consolidated`. Owner/admin (Manage Branches) get these permissions automatically when they first ship.

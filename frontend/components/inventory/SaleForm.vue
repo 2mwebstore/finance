@@ -14,7 +14,7 @@
     <!-- One card, top to bottom: details, products, discount and shipping, note, totals. -->
     <div v-else class="space-y-5 rounded-xl border border-border bg-white p-4 sm:p-5">
       <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <div class="space-y-1 text-xs font-medium text-muted">Branch<SearchSelect v-model="form.branch_id" :options="branchChoices" placeholder="Choose a branch" aria-label="Branch" :aria-invalid="formCheck.invalid('branch_id')" /></div>
+        <div v-if="branches.length !== 1" class="space-y-1 text-xs font-medium text-muted">Branch<SearchSelect v-model="form.branch_id" :options="branchChoices" placeholder="Choose a branch" aria-label="Branch" :aria-invalid="formCheck.invalid('branch_id')" /></div>
         <label class="block space-y-1 text-xs font-medium text-muted">Customer <span class="font-normal">(optional)</span><input v-model.trim="form.customer" maxlength="191" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" placeholder="Walk-in" /></label>
         <div class="space-y-1 text-xs font-medium text-muted">Sale date<DatePicker v-model="form.sale_date" aria-label="Sale date" /></div>
         <div class="space-y-1 text-xs font-medium text-muted">

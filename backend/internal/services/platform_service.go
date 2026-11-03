@@ -11,6 +11,7 @@ import (
 
 	"github.com/cambodia-finance/income-expense/internal/accounting"
 	"github.com/cambodia-finance/income-expense/internal/models"
+	"github.com/cambodia-finance/income-expense/internal/winlose"
 	"github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
@@ -161,28 +162,101 @@ type PlatformInput struct {
 	IsActive        *bool  `json:"is_active"`
 	// Reason: why the agent is turned off (needed then; the audit log keeps it).
 	Reason string `json:"reason" binding:"max=512"`
+	// BranchID: the branch the agent belongs to. A new agent without one goes to the person's own
+	// group (an owner/admin with no group of their own makes a shared one); an agent being changed
+	// keeps its branch unless an owner/admin gives another.
+	BranchID string `json:"branch_id" binding:"omitempty,uuid"`
 }
 
 type PlatformRow struct {
 	models.Platform
+	// BranchCode is the code of the agent's branch ("" for a shared agent).
+	BranchCode string `gorm:"column:branch_code" json:"branch_code"`
 	// ActiveHQs ("Groups") is how many switched-on groups have the agent now.
 	// (The column tag matters: GORM would otherwise read "active_h_qs".)
 	ActiveHQs int64 `gorm:"column:active_hqs" json:"active_hqs"`
 }
 
+// PlatformFilter narrows the agents listed. PageSize 0: every agent (the forms that pick agents);
+// otherwise one page of that size.
+type PlatformFilter struct {
+	IncludeInactive bool
+	Search          string // words in the user (code) or name
+	Page, PageSize  int
+	// Scope limits the list to the agents the person may see: those of their branches and the
+	// shared ones (nil: no limit, for the code that works on every branch).
+	Scope *BranchScope
+	// BranchID: only this branch's agents, and the shared ones too when WithShared.
+	BranchID   *uuid.UUID
+	WithShared bool
+}
+
+// canUsePlatform: the agent is shared or belongs to a branch the person works in.
+func canUsePlatform(scope BranchScope, p models.Platform) bool {
+	return p.BranchID == nil || scope.Has(*p.BranchID)
+}
+
+// canManagePlatform: change, turn off or delete an agent. A shared agent belongs to no branch, so
+// only an owner/admin manages it.
+func canManagePlatform(scope BranchScope, p models.Platform) bool {
+	return scope.All || (p.BranchID != nil && scope.Has(*p.BranchID))
+}
+
 func (s *PlatformService) ListPlatforms(ctx context.Context, includeInactive bool) ([]PlatformRow, error) {
-	q := s.db.WithContext(ctx).Model(&models.Platform{}).
-		Select("platforms.*, (SELECT COUNT(*) FROM hq_platform_assignments a LEFT JOIN assignment_groups g ON g.id = a.group_id " +
-			"WHERE a.platform_id = platforms.id AND a.active_key = 1 AND a.deleted_at IS NULL AND (g.id IS NULL OR g.is_active = 1)) AS active_hqs")
-	if !includeInactive {
-		q = q.Where("is_active = ?", true)
+	rows, _, err := s.ListPlatformsPage(ctx, PlatformFilter{IncludeInactive: includeInactive})
+	return rows, err
+}
+
+// ListPlatformsPage lists agents A to Z by code, with how many agents match in all.
+func (s *PlatformService) ListPlatformsPage(ctx context.Context, f PlatformFilter) ([]PlatformRow, int64, error) {
+	base := s.db.WithContext(ctx).Model(&models.Platform{})
+	if !f.IncludeInactive {
+		base = base.Where("platforms.is_active = ?", true)
+	}
+	if search := strings.TrimSpace(f.Search); search != "" {
+		base = base.Where("(platforms.code LIKE ? OR platforms.name LIKE ?)", likePattern(search), likePattern(search))
+	}
+	if f.Scope != nil && !f.Scope.All {
+		if len(f.Scope.IDs) == 0 {
+			base = base.Where("platforms.branch_id IS NULL")
+		} else {
+			base = base.Where("(platforms.branch_id IN ? OR platforms.branch_id IS NULL)", f.Scope.IDs)
+		}
+	}
+	if f.BranchID != nil {
+		if f.WithShared {
+			base = base.Where("(platforms.branch_id = ? OR platforms.branch_id IS NULL)", *f.BranchID)
+		} else {
+			base = base.Where("platforms.branch_id = ?", *f.BranchID)
+		}
+	}
+	var total int64
+	if err := base.Session(&gorm.Session{}).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	// The groups counted are the ones the person may see (a shared agent can be in other branches').
+	groupScope, groupArgs := "", []interface{}{}
+	if f.Scope != nil && !f.Scope.All {
+		if len(f.Scope.IDs) == 0 {
+			groupScope = " AND 1 = 0"
+		} else {
+			groupScope, groupArgs = " AND a.branch_id IN ?", []interface{}{f.Scope.IDs}
+		}
+	}
+	// Lower-cased and compared byte by byte, the same order agentBefore gives.
+	q := base.Session(&gorm.Session{}).
+		Joins("LEFT JOIN branches br ON br.id = platforms.branch_id").
+		Select("platforms.*, br.code AS branch_code, (SELECT COUNT(*) FROM hq_platform_assignments a LEFT JOIN assignment_groups g ON g.id = a.group_id "+
+			"WHERE a.platform_id = platforms.id AND a.active_key = 1 AND a.deleted_at IS NULL AND (g.id IS NULL OR g.is_active = 1)"+groupScope+") AS active_hqs", groupArgs...).
+		Order("LOWER(platforms.code) COLLATE utf8mb4_bin, platforms.code COLLATE utf8mb4_bin")
+	if f.PageSize > 0 {
+		q = q.Offset((max(f.Page, 1) - 1) * f.PageSize).Limit(f.PageSize)
 	}
 	var rows []PlatformRow
 	if err := q.Scan(&rows).Error; err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	sort.Slice(rows, func(i, j int) bool { return agentBefore(rows[i].Code, rows[j].Code) })
-	return rows, nil
+	return rows, total, nil
 }
 
 // agentBefore orders agents A to Z by code, ignoring case (the same order on every page).
@@ -196,6 +270,12 @@ func agentBefore(a, b string) bool {
 // DeletePlatform removes an agent that was never used: in no group (even one ended) and with no week
 // entered. A used agent can only be turned off. It returns the agent removed.
 func (s *PlatformService) DeletePlatform(ctx context.Context, id uuid.UUID) (*models.Platform, error) {
+	return s.DeletePlatformIn(ctx, id, BranchScope{All: true})
+}
+
+// DeletePlatformIn is DeletePlatform for a person who works in the branches of scope: an agent of
+// another branch is not found, and a shared agent is deleted only by an owner/admin.
+func (s *PlatformService) DeletePlatformIn(ctx context.Context, id uuid.UUID, scope BranchScope) (*models.Platform, error) {
 	var p models.Platform
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&p, "id = ?", id).Error; err != nil {
@@ -203,6 +283,9 @@ func (s *PlatformService) DeletePlatform(ctx context.Context, id uuid.UUID) (*mo
 				return ErrPlatformNotFound
 			}
 			return err
+		}
+		if !canManagePlatform(scope, p) {
+			return ErrPlatformNotFound
 		}
 		var groups, weeks int64
 		if err := tx.Unscoped().Model(&models.HQPlatformAssignment{}).Where("platform_id = ?", p.ID).Count(&groups).Error; err != nil {
@@ -223,6 +306,54 @@ func (s *PlatformService) DeletePlatform(ctx context.Context, id uuid.UUID) (*mo
 }
 
 func (s *PlatformService) SavePlatform(ctx context.Context, id *uuid.UUID, in PlatformInput) (*models.Platform, error) {
+	return s.SavePlatformIn(ctx, id, in, BranchScope{All: true}, uuid.Nil)
+}
+
+// platformBranch works out the branch of an agent being saved: see PlatformInput.BranchID.
+func (s *PlatformService) platformBranch(ctx context.Context, p *models.Platform, creating bool, raw string, scope BranchScope, actor uuid.UUID) (*uuid.UUID, error) {
+	if strings.TrimSpace(raw) != "" {
+		id, err := uuid.Parse(strings.TrimSpace(raw))
+		if err != nil {
+			return nil, fieldError("branch_id", "choose a branch")
+		}
+		if !scope.Has(id) {
+			return nil, ErrBranchAccessDenied
+		}
+		if !creating && (p.BranchID == nil || *p.BranchID != id) {
+			// Moving an agent to another branch is for owners/admins, and only while no other
+			// branch's group has had it (its weeks stay with the branch that entered them).
+			if !scope.All {
+				return nil, fieldError("branch_id", "only an owner or admin can move an agent to another branch")
+			}
+			var elsewhere int64
+			if err := s.db.WithContext(ctx).Unscoped().Model(&models.HQPlatformAssignment{}).Where("platform_id = ? AND branch_id <> ?", p.ID, id).Count(&elsewhere).Error; err != nil {
+				return nil, err
+			}
+			if elsewhere > 0 {
+				return nil, fieldError("branch_id", "another branch's groups have had this agent, so it can't be moved")
+			}
+		}
+		return &id, nil
+	}
+	if !creating {
+		return p.BranchID, nil
+	}
+	if actor != uuid.Nil {
+		own, err := s.OwnGroup(ctx, actor, scope)
+		if err == nil {
+			return &own, nil
+		}
+		if !scope.All {
+			return nil, err
+		}
+	}
+	return nil, nil // an owner/admin with no group of their own makes a shared agent
+}
+
+// SavePlatformIn makes or changes an agent for a person who works in the branches of scope: a new
+// agent belongs to the branch chosen (their own group when none is), one of another branch is not
+// found, and a shared agent is changed only by an owner/admin.
+func (s *PlatformService) SavePlatformIn(ctx context.Context, id *uuid.UUID, in PlatformInput, scope BranchScope, actor uuid.UUID) (*models.Platform, error) {
 	var p models.Platform
 	if id != nil {
 		if err := s.db.WithContext(ctx).First(&p, "id = ?", *id).Error; err != nil {
@@ -231,8 +362,15 @@ func (s *PlatformService) SavePlatform(ctx context.Context, id *uuid.UUID, in Pl
 			}
 			return nil, err
 		}
+		if !canManagePlatform(scope, p) {
+			return nil, ErrPlatformNotFound
+		}
 	} else {
 		p = models.Platform{Base: models.Base{ID: uuid.New()}, IsActive: true}
+	}
+	branch, err := s.platformBranch(ctx, &p, id == nil, in.BranchID, scope, actor)
+	if err != nil {
+		return nil, err
 	}
 	code := strings.TrimSpace(in.Code)
 	if !platformCode.MatchString(code) {
@@ -274,7 +412,7 @@ func (s *PlatformService) SavePlatform(ctx context.Context, id *uuid.UUID, in Pl
 			return nil, fieldError("is_active", fmt.Sprintf("%d %s this agent; take it out of them first", active, groups))
 		}
 	}
-	p.Code, p.Name, p.DefaultRate, p.DefaultCurrency = code, name, rate, currency
+	p.Code, p.Name, p.DefaultRate, p.DefaultCurrency, p.BranchID = code, name, rate, currency, branch
 	if in.IsActive != nil {
 		p.IsActive = *in.IsActive
 	}
@@ -537,7 +675,9 @@ type assignPlan struct {
 	platforms              map[uuid.UUID]models.Platform
 	shares                 []models.AssignmentPartner
 	// rates: each platform's own Partner % (a group's agents); missing: the platform's default.
-	rates    map[uuid.UUID]decimal.Decimal
+	rates map[uuid.UUID]decimal.Decimal
+	// kinds: each platform's type, PO or GI (a group's agents); missing: PO.
+	kinds    map[uuid.UUID]string
 	currency string // "" is each platform's default
 	starts   time.Time
 }
@@ -603,6 +743,16 @@ func (s *PlatformService) checkPlatforms(ctx context.Context, plan *assignPlan, 
 		if !ok || !p.IsActive || p.DeletedAt.Valid {
 			return fieldError("platform_ids", "an agent was not found or is turned off")
 		}
+		// An agent of one branch is not given to another's groups.
+		if p.BranchID != nil {
+			here := false
+			for _, b := range plan.branchIDs {
+				here = here || b == *p.BranchID
+			}
+			if !here {
+				return fieldError("platform_ids", p.Code+" belongs to another branch")
+			}
+		}
 		if plan.currency == "" {
 			if err := validateCurrency(ctx, s.db, p.DefaultCurrency); err != nil {
 				return fieldError("currency", p.Code+": "+err.Error())
@@ -639,6 +789,10 @@ func (s *PlatformService) applyAssign(tx *gorm.DB, plan *assignPlan, actor uuid.
 			}
 			if rate, ok := plan.rates[platformID]; ok {
 				a.CommissionRate = rate
+			}
+			a.CalcType = string(winlose.PO)
+			if kind, ok := plan.kinds[platformID]; ok {
+				a.CalcType = kind
 			}
 			if err := tx.Create(&a).Error; err != nil {
 				if isDuplicate(err) {

@@ -56,11 +56,13 @@ var platformTables = []string{
 	default_rate DECIMAL(7,4) NOT NULL DEFAULT 0,
 	default_currency VARCHAR(3) NOT NULL DEFAULT 'USD',
 	is_active TINYINT(1) NOT NULL DEFAULT 1,
+	branch_id CHAR(36) NULL,
 	created_at DATETIME(3) NULL,
 	updated_at DATETIME(3) NULL,
 	deleted_at DATETIME(3) NULL,
 	PRIMARY KEY (id),
 	UNIQUE KEY uq_platforms_code (code),
+	KEY idx_platforms_branch (branch_id),
 	KEY idx_platforms_deleted_at (deleted_at)
 )`,
 	`CREATE TABLE IF NOT EXISTS assignment_groups (
@@ -82,6 +84,7 @@ var platformTables = []string{
 	platform_id CHAR(36) NOT NULL,
 	group_id CHAR(36) NULL,
 	commission_rate DECIMAL(7,4) NOT NULL,
+	calc_type VARCHAR(2) NOT NULL DEFAULT 'PO',
 	currency VARCHAR(3) NOT NULL,
 	is_active TINYINT(1) NOT NULL DEFAULT 1,
 	active_key TINYINT NULL,
@@ -156,6 +159,7 @@ var platformTables = []string{
 	group_id CHAR(36) NULL,
 	assignment_id CHAR(36) NOT NULL,
 	commission_rate DECIMAL(7,4) NOT NULL,
+	calc_type VARCHAR(2) NOT NULL DEFAULT 'PO',
 	jame_ps DECIMAL(19,4) NOT NULL,
 	created_at DATETIME(3) NULL,
 	updated_at DATETIME(3) NULL,
@@ -233,7 +237,10 @@ var platformTables = []string{
 
 // platformColumns were added to a table after it first shipped: added when missing.
 var platformColumns = []struct{ table, column, ddl string }{
+	{"platforms", "branch_id", "ALTER TABLE platforms ADD COLUMN branch_id CHAR(36) NULL AFTER is_active, ADD KEY idx_platforms_branch (branch_id)"},
 	{"hq_platform_assignments", "group_id", "ALTER TABLE hq_platform_assignments ADD COLUMN group_id CHAR(36) NULL AFTER platform_id, ADD KEY idx_hq_platform_assignments_group (group_id)"},
+	{"hq_platform_assignments", "calc_type", "ALTER TABLE hq_platform_assignments ADD COLUMN calc_type VARCHAR(2) NOT NULL DEFAULT 'PO' AFTER commission_rate"},
+	{"weekly_group_results", "calc_type", "ALTER TABLE weekly_group_results ADD COLUMN calc_type VARCHAR(2) NOT NULL DEFAULT 'PO' AFTER commission_rate"},
 	{"weekly_platform_results", "entry_id", "ALTER TABLE weekly_platform_results ADD COLUMN entry_id CHAR(36) NULL AFTER id"},
 }
 
@@ -252,6 +259,14 @@ const fillResultEntries = `UPDATE weekly_platform_results r JOIN weekly_entries 
 const fillGroupResults = `INSERT IGNORE INTO weekly_group_results (id, result_id, group_id, assignment_id, commission_rate, jame_ps, created_at, updated_at)
 	SELECT UUID(), r.id, a.group_id, a.id, r.commission_rate, r.jame_ps, NOW(3), NOW(3)
 	FROM weekly_platform_results r JOIN hq_platform_assignments a ON a.id = r.assignment_id`
+
+// Agents made before they belonged to a branch: one used in exactly one branch's groups goes to that
+// branch (so its data is kept apart); one used in several, or in none, stays shared (no branch) until
+// an owner or admin picks one. Run once, when the column is added.
+const fillPlatformBranches = `UPDATE platforms p SET p.branch_id = (
+		SELECT MIN(a.branch_id) FROM hq_platform_assignments a WHERE a.platform_id = p.id AND a.deleted_at IS NULL)
+	WHERE p.branch_id IS NULL AND (
+		SELECT COUNT(DISTINCT a.branch_id) FROM hq_platform_assignments a WHERE a.platform_id = p.id AND a.deleted_at IS NULL) = 1`
 
 // platformKeys were added after the tables first shipped: added when missing. An agent can be in
 // several groups of a branch, so an active assignment is one per group (not per branch); a week
@@ -288,6 +303,7 @@ func hasIndex(db *gorm.DB, table, name string) (bool, error) {
 type foreignKey struct{ table, name, columns, ref string }
 
 var platformForeignKeys = []foreignKey{
+	{"platforms", "fk_platforms_branch", "branch_id", "branches(id)"},
 	{"assignment_groups", "fk_assignment_groups_branch", "branch_id", "branches(id)"},
 	{"assignment_groups", "fk_assignment_groups_created_by", "created_by_id", "users(id)"},
 	{"hq_platform_assignments", "fk_hq_platform_assignments_group", "group_id", "assignment_groups(id)"},
@@ -347,13 +363,14 @@ func EnsurePlatformTables(db *gorm.DB) error {
 			return err
 		}
 	}
-	entryColumnAdded := false
+	entryColumnAdded, platformBranchAdded := false, false
 	for _, c := range platformColumns {
 		if !db.Migrator().HasColumn(c.table, c.column) {
 			if err := db.Exec(c.ddl).Error; err != nil {
 				return err
 			}
 			entryColumnAdded = entryColumnAdded || c.column == "entry_id"
+			platformBranchAdded = platformBranchAdded || (c.table == "platforms" && c.column == "branch_id")
 		}
 	}
 	for _, c := range platformNullable {
@@ -391,6 +408,11 @@ func EnsurePlatformTables(db *gorm.DB) error {
 	}
 	if entryColumnAdded {
 		if err := db.Exec(fillResultEntries).Error; err != nil {
+			return err
+		}
+	}
+	if platformBranchAdded && !created {
+		if err := db.Exec(fillPlatformBranches).Error; err != nil {
 			return err
 		}
 	}

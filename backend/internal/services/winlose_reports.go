@@ -146,6 +146,26 @@ type WinLoseReport struct {
 	Totals  []Sums        `json:"totals"`
 }
 
+// HideRates blanks every rate (and the formula they are read with) for people without View Rates
+// in Reports: the Totals stay, so the report still adds up.
+func (r *WinLoseReport) HideRates() {
+	hide := func(lines []ReportLine) {
+		for i := range lines {
+			lines[i].RateMin, lines[i].RateMax, lines[i].Formula = decimal.Zero, decimal.Zero, ""
+			for j := range lines[i].Partners {
+				lines[i].Partners[j].RateMin, lines[i].Partners[j].RateMax = decimal.Zero, decimal.Zero
+			}
+		}
+	}
+	hide(r.Lines)
+	for i := range r.Entries {
+		hide(r.Entries[i].Lines)
+	}
+	for i := range r.Groups {
+		r.Groups[i].RateMin, r.Groups[i].RateMax, r.Groups[i].Formula = decimal.Zero, decimal.Zero, ""
+	}
+}
+
 type reportRow struct {
 	WeekStart                                                     *time.Time
 	EntryID                                                       *uuid.UUID
@@ -223,11 +243,11 @@ func (s *PlatformService) Report(ctx context.Context, f ReportFilter, scope Bran
 		return q
 	}
 	// A result's Total is its groups' added up; for one group, its part in that group.
-	rate, jame := "r.commission_rate", "r.jame_ps"
+	rate, jame, formula := "r.commission_rate", "r.jame_ps", "r.formula_version"
 	if f.GroupID != nil {
-		rate, jame = "gf.commission_rate", "gf.jame_ps"
+		rate, jame, formula = "gf.commission_rate", "gf.jame_ps", kindFormula("gf")
 	}
-	lines, shareRows, nameOf, err := s.reportLines(ctx, results, group, rate, jame, f.PartnerID)
+	lines, shareRows, nameOf, err := s.reportLines(ctx, results, group, rate, jame, formula, f.PartnerID)
 	if err != nil {
 		return nil, err
 	}
@@ -274,7 +294,7 @@ func (s *PlatformService) Report(ctx context.Context, f ReportFilter, scope Bran
 		return nil, err
 	}
 	if f.ByEntry {
-		entryLines, _, _, err := s.reportLines(ctx, results, "r.entry_id, "+group, rate, jame, f.PartnerID)
+		entryLines, _, _, err := s.reportLines(ctx, results, "r.entry_id, "+group, rate, jame, formula, f.PartnerID)
 		if err != nil {
 			return nil, err
 		}
@@ -302,15 +322,21 @@ func (s *PlatformService) Report(ctx context.Context, f ReportFilter, scope Bran
 	return out, nil
 }
 
+// kindFormula is the SQL for the formula a group's part was worked out with: "gi" for a GI group,
+// else the result's version. The report shows the rate the Total is at from it (utils/winlose.ts).
+func kindFormula(alias string) string {
+	return "CASE WHEN " + alias + ".calc_type = 'GI' THEN 'gi' ELSE r.formula_version END"
+}
+
 // reportLines adds results up by agent and currency (after the columns before them in group): the
 // lines, the partners' share rows and the partners' names. rate and jame are the rate's and the
 // Total's columns; with partnerID, the lines are that partner's shares.
-func (s *PlatformService) reportLines(ctx context.Context, results func() *gorm.DB, group, rate, jame string, partnerID *uuid.UUID) ([]ReportLine, []reportRow, func(*uuid.UUID) string, error) {
+func (s *PlatformService) reportLines(ctx context.Context, results func() *gorm.DB, group, rate, jame, formula string, partnerID *uuid.UUID) ([]ReportLine, []reportRow, func(*uuid.UUID) string, error) {
 	// Each platform's weeks, and each partner's share of them (no partner: weeks entered without
 	// partners, at the platform's own %).
 	var lineRows, shareRows []reportRow
 	if partnerID == nil {
-		if err := results().Select(group + ", MIN(" + rate + ") AS rate_min, MAX(" + rate + ") AS rate_max, MIN(r.formula_version) AS formula_min, MAX(r.formula_version) AS formula_max, " +
+		if err := results().Select(group + ", MIN(" + rate + ") AS rate_min, MAX(" + rate + ") AS rate_max, MIN(" + formula + ") AS formula_min, MAX(" + formula + ") AS formula_max, " +
 			"SUM(r.win_lose) AS win_lose, SUM(r.commission) AS commission, SUM(r.adjusted_amount) AS adjusted_amount, SUM(" + jame + ") AS jame_ps, COUNT(*) AS entries").
 			Group(group).Scan(&lineRows).Error; err != nil {
 			return nil, nil, nil, err
@@ -406,7 +432,7 @@ func (s *PlatformService) groupTotals(ctx context.Context, results *gorm.DB) ([]
 	}
 	if err := results.Joins("LEFT JOIN weekly_group_results g ON g.result_id = r.id").
 		Select("g.group_id, r.currency, SUM(r.win_lose) AS win_lose, SUM(r.commission) AS commission, SUM(r.adjusted_amount) AS adjusted_amount, SUM(COALESCE(g.jame_ps, r.jame_ps)) AS jame_ps, " +
-			"COALESCE(MIN(g.commission_rate), 0) AS rate_min, COALESCE(MAX(g.commission_rate), 0) AS rate_max, MIN(r.formula_version) AS formula_min, MAX(r.formula_version) AS formula_max, COUNT(*) AS entries").
+			"COALESCE(MIN(g.commission_rate), 0) AS rate_min, COALESCE(MAX(g.commission_rate), 0) AS rate_max, MIN(" + kindFormula("g") + ") AS formula_min, MAX(" + kindFormula("g") + ") AS formula_max, COUNT(*) AS entries").
 		Group("g.group_id, r.currency").Scan(&rows).Error; err != nil {
 		return nil, err
 	}

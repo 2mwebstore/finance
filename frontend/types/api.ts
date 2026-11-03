@@ -527,6 +527,9 @@ export interface Platform {
   default_rate: string
   default_currency: Currency
   is_active: boolean
+  /** The branch the agent belongs to; empty: a shared agent every branch sees. */
+  branch_id: string | null
+  branch_code: string
   /** How many HQs have it now. */
   active_hqs: number
 }
@@ -580,6 +583,9 @@ export interface PlatformAssignment {
 export interface AssignmentGroup {
   id: string
   title: string
+  /** The branch the group is in. */
+  branch_id: string
+  branch_code: string
   /** Empty: each agent's own default. */
   currency: string
   starts_on: string
@@ -587,7 +593,7 @@ export interface AssignmentGroup {
   is_active: boolean
   created_at: string
   created_by: string
-  agents: { assignment_id: string; platform_id: string; platform_code: string; currency: Currency; commission_rate: string; starts_on: string; weeks: number }[]
+  agents: { assignment_id: string; platform_id: string; platform_code: string; currency: Currency; commission_rate: string; /** PO (W/L − COMM) × (100% − Rate) or GI −((W/L − COMM) × Rate). */ calc_type: 'PO' | 'GI'; starts_on: string; weeks: number }[]
   /** The same on every agent, by name. */
   partners: AssignmentPartner[]
   /** Weeks entered under its agents (taken-out ones too); a group with weeks can't be deleted. */

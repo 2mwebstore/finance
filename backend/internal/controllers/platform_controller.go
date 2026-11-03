@@ -3,6 +3,7 @@ package controllers
 import (
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/cambodia-finance/income-expense/internal/audit"
@@ -81,16 +82,80 @@ func (pc *PlatformController) record(c *gin.Context, actor uuid.UUID, action, en
 
 // ===== Platforms =====
 
+// listPage reads page and page_size for the lists that page only when asked, so the forms that
+// need every row (agent pickers, the group filter) still call them as before. size is 1 to 100
+// (20 when missing); on is false when neither was sent.
+func listPage(c *gin.Context) (page, size int, on bool) {
+	_, hasPage := c.GetQuery("page")
+	_, hasSize := c.GetQuery("page_size")
+	if !hasPage && !hasSize {
+		return 0, 0, false
+	}
+	page, _ = strconv.Atoi(c.DefaultQuery("page", "1"))
+	size, _ = strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	if page < 1 {
+		page = 1
+	}
+	if size < 1 {
+		size = 20
+	}
+	return page, min(size, 100), true
+}
+
+// pagedJSON answers a list: the page with its total when it was asked for, else every row.
+func pagedJSON(c *gin.Context, items interface{}, total int64, page, size int, on bool) {
+	if !on {
+		c.JSON(http.StatusOK, gin.H{"items": items})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": items, "total": total, "page": page, "page_size": size})
+}
+
+// ListPlatforms lists the agents the person may see: those of their branches and the shared ones
+// (an owner/admin sees every branch's). branch_id: only that branch's agents; assignable=true: the
+// agents that can go into the person's own group (its branch's and the shared ones).
 func (pc *PlatformController) ListPlatforms(c *gin.Context) {
-	rows, err := pc.svc.ListPlatforms(c.Request.Context(), c.Query("include_inactive") == "true")
+	_, scope, ok := pc.scope(c)
+	if !ok {
+		return
+	}
+	page, size, on := listPage(c)
+	f := services.PlatformFilter{IncludeInactive: c.Query("include_inactive") == "true", Search: c.Query("search"), Scope: &scope}
+	if on {
+		f.Page, f.PageSize = page, size
+	}
+	branchID, ok := queryID(c, "branch_id")
+	if !ok {
+		return
+	}
+	if branchID != nil {
+		if !scope.Has(*branchID) {
+			writePlatformError(c, services.ErrBranchAccessDenied)
+			return
+		}
+		f.BranchID = branchID
+	}
+	if c.Query("assignable") == "true" {
+		// For the branch asked for, else the person's own group.
+		if branchID != nil {
+			f.WithShared = true
+		} else if own, err := pc.svc.OwnGroup(c.Request.Context(), actorOf(c), scope); err == nil {
+			f.BranchID, f.WithShared = &own, true
+		}
+	}
+	rows, total, err := pc.svc.ListPlatformsPage(c.Request.Context(), f)
 	if err != nil {
 		writePlatformError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"items": orEmpty(rows)})
+	pagedJSON(c, orEmpty(rows), total, page, size, on)
 }
 
 func (pc *PlatformController) SavePlatform(c *gin.Context) {
+	_, scope, ok := pc.scope(c)
+	if !ok {
+		return
+	}
 	var id *uuid.UUID
 	if c.Param("id") != "" {
 		parsed, ok := paramID(c)
@@ -108,13 +173,16 @@ func (pc *PlatformController) SavePlatform(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
-	p, err := pc.svc.SavePlatform(c.Request.Context(), id, in)
+	p, err := pc.svc.SavePlatformIn(c.Request.Context(), id, in, scope, actor)
 	if err != nil {
 		writePlatformError(c, err)
 		return
 	}
 	details := map[string]interface{}{
 		"code": p.Code, "name": p.Name, "default_rate": p.DefaultRate.String(), "default_currency": p.DefaultCurrency, "is_active": p.IsActive,
+	}
+	if p.BranchID != nil {
+		details["branch_id"] = p.BranchID.String()
 	}
 	if !p.IsActive && strings.TrimSpace(in.Reason) != "" {
 		details["reason"] = strings.TrimSpace(in.Reason)
@@ -129,11 +197,15 @@ func (pc *PlatformController) SavePlatform(c *gin.Context) {
 
 // DeletePlatform removes an agent that was never used (a used one can only be turned off).
 func (pc *PlatformController) DeletePlatform(c *gin.Context) {
+	_, scope, ok := pc.scope(c)
+	if !ok {
+		return
+	}
 	id, ok := paramID(c)
 	if !ok {
 		return
 	}
-	p, err := pc.svc.DeletePlatform(c.Request.Context(), id)
+	p, err := pc.svc.DeletePlatformIn(c.Request.Context(), id, scope)
 	if err != nil {
 		writePlatformError(c, err)
 		return
@@ -345,21 +417,29 @@ func (pc *PlatformController) ListGroups(c *gin.Context) {
 	if !ok {
 		return
 	}
-	// No branch_id: the person's own group (branch).
-	branchID, ok := pc.ownGroupUnless(c, scope)
-	if !ok {
+	// No branch_id: the person's own group (branch); branch_id=all: every branch in their scope.
+	allBranches := c.Query("branch_id") == "all"
+	var branchID *uuid.UUID
+	if allBranches {
+		branchID = &uuid.UUID{}
+	} else if branchID, ok = pc.ownGroupUnless(c, scope); !ok {
 		return
 	}
 	platformID, ok := queryID(c, "platform_id")
 	if !ok {
 		return
 	}
-	rows, err := pc.svc.ListGroups(c.Request.Context(), *branchID, services.GroupFilter{PlatformID: platformID, Status: c.Query("status"), Search: c.Query("search")}, scope)
+	page, size, on := listPage(c)
+	f := services.GroupFilter{PlatformID: platformID, Status: c.Query("status"), Search: c.Query("search"), AllBranches: allBranches}
+	if on {
+		f.Page, f.PageSize = page, size
+	}
+	rows, total, err := pc.svc.ListGroupsPage(c.Request.Context(), *branchID, f, scope)
 	if err != nil {
 		writePlatformError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"items": orEmpty(rows)})
+	pagedJSON(c, orEmpty(rows), total, page, size, on)
 }
 
 func (pc *PlatformController) CreateGroup(c *gin.Context) {
@@ -640,12 +720,21 @@ func (pc *PlatformController) ListEntries(c *gin.Context) {
 	if !ok {
 		return
 	}
-	rows, err := pc.svc.ListEntries(c.Request.Context(), services.EntryFilter{Search: c.Query("search"), CreatedFrom: c.Query("created_from"), CreatedTo: c.Query("created_to")}, scope)
+	page, size, on := listPage(c)
+	branchID, ok := queryID(c, "branch_id")
+	if !ok {
+		return
+	}
+	f := services.EntryFilter{BranchID: branchID, Search: c.Query("search"), CreatedFrom: c.Query("created_from"), CreatedTo: c.Query("created_to")}
+	if on {
+		f.Page, f.PageSize = page, size
+	}
+	rows, total, err := pc.svc.ListEntriesPage(c.Request.Context(), f, scope)
 	if err != nil {
 		writePlatformError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"items": orEmpty(rows)})
+	pagedJSON(c, orEmpty(rows), total, page, size, on)
 }
 
 // ===== Settlements =====
@@ -749,6 +838,9 @@ func (pc *PlatformController) Report(c *gin.Context) {
 	if err != nil {
 		writePlatformError(c, err)
 		return
+	}
+	if !access.Can(permissions.WinLoseReportsRates) {
+		report.HideRates()
 	}
 	c.JSON(http.StatusOK, report)
 }

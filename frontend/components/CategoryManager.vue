@@ -60,7 +60,8 @@
             <span>Code</span><input v-model.trim="form.code" required minlength="2" maxlength="64" :aria-invalid="formCheck.invalid('code')" class="w-full rounded-lg border border-border px-3 py-2.5 font-mono font-normal" placeholder="e.g. office-supplies" />
             <small class="block font-normal text-muted">{{ formMode === 'create' ? 'Generated from the name; you can adjust it before saving.' : 'Changing the code keeps existing transactions linked to this category.' }}</small>
           </label>
-          <div class="block space-y-1.5 text-xs font-semibold text-navy">
+          <!-- A branch manager with one branch has no choice: the category is made in it -->
+          <div v-if="formMode !== 'create' || hasFullAccess || branches.length > 1" class="block space-y-1.5 text-xs font-semibold text-navy">
             <span>Applies to</span>
             <SearchSelect v-if="formMode === 'create'" v-model="form.branch_id" :options="scopeOptions" search-placeholder="Search branches…" aria-label="Category applies to" />
             <p v-else class="rounded-lg border border-border bg-canvas px-3 py-2.5 font-normal text-muted">{{ editing?.branch_id ? (editing.branch_name || 'One branch') : 'Shared — every branch' }}</p>

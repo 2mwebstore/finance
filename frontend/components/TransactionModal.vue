@@ -51,7 +51,8 @@
               <small v-if="errors.transaction_date" class="field-error">{{ errors.transaction_date }}</small>
             </div>
 
-            <div v-if="mode === 'create'" class="form-field" :class="{ 'has-error': errors.branch_id }">
+            <!-- With only one branch it is chosen for you (set when the form opens) -->
+            <div v-if="mode === 'create' && branches.length !== 1" class="form-field" :class="{ 'has-error': errors.branch_id }">
               <span>Branch <b class="required-mark" aria-hidden="true">*</b></span>
               <SearchSelect v-model="form.branch_id" :options="branchOptions" placeholder="Select a branch" search-placeholder="Search branches…" aria-label="Branch" />
               <small v-if="errors.branch_id" class="field-error">{{ errors.branch_id }}</small>

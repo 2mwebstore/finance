@@ -81,6 +81,7 @@ const (
 	WinLoseReact               = "winlose.react"
 	WinLoseReportsView         = "winlose-reports.view"
 	WinLoseReportsConsolidated = "winlose-reports.consolidated"
+	WinLoseReportsRates        = "winlose-reports.rates"
 	WinLoseSettlementsFinalize = "winlose-settlements.finalize"
 )
 
@@ -164,6 +165,7 @@ func AllPermissions() []struct {
 		{WinLoseReact, "React to Data Entry", "Win/Lose", "Give an entry, or an agent in it, ✅ or ❌, on Data entry and the Report"},
 		{WinLoseReportsView, "View Report", "Win/Lose Reports", "The Report and the group summary for your groups, one group at a time"},
 		{WinLoseReportsConsolidated, "View Consolidated Win/Lose", "Win/Lose Reports", "Combined totals across all your groups"},
+		{WinLoseReportsRates, "View Rates in Reports", "Win/Lose Reports", "Show each agent's rate on the Report and the Group Summary; without it the rates are hidden"},
 		{WinLoseSettlementsFinalize, "Finalize Weekly Settlements", "Win/Lose Reports", "Finalize or reopen a group's week; a finalized week can't be changed"},
 	}
 }
@@ -214,7 +216,7 @@ func DefaultRoles() map[string]struct {
 				PlatformsView, PlatformsCreate, PlatformsEdit, PlatformsDelete,
 				PlatformAssignmentsView, PlatformAssignmentsCreate, PlatformAssignmentsEdit, PlatformAssignmentsDelete,
 				WinLoseView, WinLoseCreate, WinLoseEdit, WinLoseDelete, WinLoseReact,
-				WinLoseReportsView, WinLoseReportsConsolidated, WinLoseSettlementsFinalize,
+				WinLoseReportsView, WinLoseReportsConsolidated, WinLoseReportsRates, WinLoseSettlementsFinalize,
 			},
 		},
 		"manager": {
@@ -234,7 +236,7 @@ func DefaultRoles() map[string]struct {
 				PurchasesView, PurchasesCreate, PurchasesApprove, PurchasesEdit,
 				InventoryExpensesView, InventoryExpensesCreate,
 				PlatformsView, PlatformAssignmentsView,
-				WinLoseView, WinLoseCreate, WinLoseEdit, WinLoseDelete, WinLoseReact, WinLoseReportsView,
+				WinLoseView, WinLoseCreate, WinLoseEdit, WinLoseDelete, WinLoseReact, WinLoseReportsView, WinLoseReportsRates,
 			},
 		},
 		"accountant": {
@@ -250,7 +252,7 @@ func DefaultRoles() map[string]struct {
 				InventoryView, SalesView, PurchasesView, PurchasesCreate, PurchasesEdit,
 				InventoryExpensesView, InventoryExpensesCreate,
 				PlatformsView, PlatformAssignmentsView,
-				WinLoseView, WinLoseCreate, WinLoseReact, WinLoseReportsView,
+				WinLoseView, WinLoseCreate, WinLoseReact, WinLoseReportsView, WinLoseReportsRates,
 			},
 		},
 		"cashier": {

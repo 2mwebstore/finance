@@ -105,7 +105,7 @@ func EnsureRequiredPermissions(db *gorm.DB) error {
 		permissions.SalesEdit, permissions.PurchasesEdit,
 		// RP: agents (platforms), group agent assignments, Data entry and the Report.
 		permissions.PlatformsView, permissions.WinLoseView, permissions.WinLoseCreate, permissions.WinLoseEdit,
-		permissions.WinLoseReportsView, permissions.WinLoseReportsConsolidated, permissions.WinLoseSettlementsFinalize,
+		permissions.WinLoseReportsView, permissions.WinLoseReportsConsolidated, permissions.WinLoseReportsRates, permissions.WinLoseSettlementsFinalize,
 	} {
 		required[code] = []string{permissions.BranchesManage}
 	}
@@ -120,6 +120,7 @@ func EnsureRequiredPermissions(db *gorm.DB) error {
 		permissions.PlatformAssignmentsEdit:   {retiredAssignmentsManage},
 		permissions.PlatformAssignmentsDelete: {retiredAssignmentsManage},
 		permissions.WinLoseDelete:             {permissions.WinLoseEdit},
+		permissions.WinLoseReportsRates:       {permissions.WinLoseReportsView},
 		permissions.WinLoseReact:              {permissions.WinLoseView, permissions.WinLoseCreate, permissions.WinLoseEdit, permissions.WinLoseReportsView},
 	} {
 		required[code] = append([]string{permissions.BranchesManage}, from...)

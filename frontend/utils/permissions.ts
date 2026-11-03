@@ -75,6 +75,7 @@ export const P = {
   WinLoseReact: 'winlose.react',
   WinLoseReportsView: 'winlose-reports.view',
   WinLoseReportsConsolidated: 'winlose-reports.consolidated',
+  WinLoseReportsRates: 'winlose-reports.rates',
   WinLoseSettlementsFinalize: 'winlose-settlements.finalize',
 } as const
 
@@ -161,6 +162,7 @@ export const PERMISSION_CATALOG: {
   { code: P.WinLoseReact, name: 'React to Data Entry', module: 'Win/Lose', description: 'Give an entry, or an agent in it, ✅ or ❌, on Data entry and the Report' },
   { code: P.WinLoseReportsView, name: 'View Report', module: 'Win/Lose Reports', description: 'The Report and the group summary for your groups, one group at a time' },
   { code: P.WinLoseReportsConsolidated, name: 'View Consolidated Win/Lose', module: 'Win/Lose Reports', description: 'Combined totals across all your groups' },
+  { code: P.WinLoseReportsRates, name: 'View Rates in Reports', module: 'Win/Lose Reports', description: 'Show each agent\'s rate on the Report and the Group Summary; without it the rates are hidden' },
   { code: P.WinLoseSettlementsFinalize, name: 'Finalize Weekly Settlements', module: 'Win/Lose Reports', description: 'Finalize or reopen a group\'s week; a finalized week can\'t be changed' },
 ]
 

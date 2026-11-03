@@ -13,14 +13,16 @@
         </div>
       </header>
 
-      <div class="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+      <div class="grid grid-cols-1 gap-2" :class="rp.show.value ? 'md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)]' : 'md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]'">
         <ListSearch v-model="search" placeholder="Search by title…" />
+        <!-- Only for people who work in more than one branch (chosen once for all the RP pages) -->
+        <SearchSelect v-if="rp.show.value" v-model="rp.branchId.value" :options="rp.optionsFor(true)" :searchable="false" aria-label="Branch" />
         <!-- The days the entries were created (empty: any day) -->
         <WinloseDateFilter v-model="created" allow-all label="Created" />
       </div>
 
       <div v-if="listLoading && !entries.length" class="text-sm text-muted">Loading entries…</div>
-      <AppAlert v-else-if="listError" title="Couldn’t load entries" :message="listError"><template #action><button type="button" @click="loadEntries">Try again</button></template></AppAlert>
+      <AppAlert v-else-if="listError && !entries.length" title="Couldn’t load entries" :message="listError"><template #action><button type="button" @click="resetEntries">Try again</button></template></AppAlert>
       <div v-else class="overflow-hidden rounded-xl border border-border bg-white">
         <table class="w-full text-left text-sm">
           <thead class="bg-canvas text-[10px] uppercase tracking-wide text-slate-500">
@@ -35,6 +37,7 @@
               <td class="px-2 py-2.5 text-[10px] text-muted sm:whitespace-nowrap sm:px-3 sm:text-xs"><span class="block sm:inline">{{ formatDocDate(e.created_at) }}</span><template v-if="e.created_by"><span class="hidden sm:inline"> · </span><span class="block whitespace-nowrap font-medium text-navy sm:inline">{{ e.created_by }}</span></template></td>
               <td class="px-2 py-2.5 sm:px-3">
                 <span class="block font-semibold">{{ e.title }}</span>
+                <span v-if="rp.show.value && e.branch_code" class="block text-[11px] text-muted">{{ e.branch_code }}</span>
                 <!-- ✅ / ❌: hovering (or tapping) one shows who -->
                 <div class="mt-1"><WinloseEntryReactions :url="`/winlose/entries/${e.id}/reactions`" :reactions="e.reactions || []" /></div>
               </td>
@@ -51,6 +54,7 @@
           </tbody>
         </table>
       </div>
+      <InfiniteLoader :has-more="hasMore" :loading="loadingMore" :count="entries.length" @more="loadMore" />
     </template>
 
     <!-- New entry / edit: the week, a title and each agent's amounts -->
@@ -63,6 +67,12 @@
 
       <!-- A new entry is for this week; one being updated keeps its own. The title saves on its own
            too (each agent's Save also saves it). -->
+      <!-- Only with several branches: a new entry picks its branch (its agents change with it); a saved one keeps its own -->
+      <div v-if="rp.show.value" class="space-y-1">
+        <span class="block text-xs font-medium text-muted">Branch</span>
+        <SearchSelect v-if="form.mode === 'new' && !sheet?.entry" v-model="form.branch_id" :options="rp.optionsFor(false)" :searchable="false" aria-label="Entry branch" />
+        <p v-else class="h-10 rounded-lg border border-border bg-canvas px-3 py-2.5 text-sm text-muted">{{ sheet?.branch_code }}<template v-if="sheet?.branch_name"> — {{ sheet.branch_name }}</template></p>
+      </div>
       <div class="space-y-1">
         <label for="entry-title" class="block text-xs font-medium text-muted">Title</label>
         <div class="flex items-center gap-2">
@@ -132,6 +142,8 @@
 import { ChevronLeft, Eye, FileSpreadsheet, Pencil, Plus, Save, Trash2 } from 'lucide-vue-next'
 import type { WeekSheet, WeekSheetRow, WinLoseEntry } from '~/types/api'
 import { useToast } from '~/composables/useToast'
+import { useInfiniteList } from '~/composables/useInfiniteList'
+import { useRpBranch } from '~/composables/useRpBranch'
 import { currentMonthRange } from '~/utils/dateRanges'
 import { formatDocDate, todayISO } from '~/utils/inventory'
 import { mondayOf } from '~/utils/winlose'
@@ -145,34 +157,27 @@ const canDelete = computed(() => can('winlose.delete'))
 const today = todayISO()
 
 // --- the list ---
-const entries = ref<WinLoseEntry[]>([])
-const listLoading = ref(false)
-const listError = ref('')
+// The branch the RP pages work in (only for people with several).
+const rp = useRpBranch()
 const search = ref('')
 const created = ref(currentMonthRange()) // this month; All dates in the filter
-let listRequest = 0
-async function loadEntries() {
-  const request = ++listRequest
-  listLoading.value = true
-  listError.value = ''
-  try {
-    const result = await api<{ items: WinLoseEntry[] }>('/winlose/entries', {
-      query: { search: search.value.trim() || undefined, created_from: created.value.from || undefined, created_to: created.value.to || undefined },
-    })
-    if (request === listRequest) entries.value = result.items || []
-  } catch (e: any) {
-    if (request === listRequest) listError.value = e?.data?.error || 'Could not load entries.'
-  } finally {
-    if (request === listRequest) listLoading.value = false
-  }
-}
+// Entries load a page at a time as the list is scrolled; a save or delete fetches the pages
+// already shown again (loadEntries).
+const { items: entries, loading: listLoading, loadingMore, error: listError, hasMore, reset: resetEntries, loadMore, refresh: loadEntries } = useInfiniteList<WinLoseEntry>(
+  async (page, size) => await api<{ items: WinLoseEntry[]; total: number }>('/winlose/entries', {
+    query: { search: search.value.trim() || undefined, created_from: created.value.from || undefined, created_to: created.value.to || undefined, branch_id: rp.branchId.value || undefined, page, page_size: size },
+  }),
+  entry => entry.id, 30, 'Could not load entries.',
+)
+// Another search or dates start from the top again.
 let searchTimer: ReturnType<typeof setTimeout> | undefined
 watch(search, () => {
   if (searchTimer) clearTimeout(searchTimer)
-  searchTimer = setTimeout(loadEntries, 300)
+  searchTimer = setTimeout(resetEntries, 300)
 })
-watch(created, loadEntries, { deep: true })
-onMounted(loadEntries)
+watch(created, resetEntries, { deep: true })
+watch(() => rp.branchId.value, resetEntries)
+onMounted(resetEntries)
 
 // --- delete (Correct Win/Lose, with a reason) ---
 const deleting = ref<WinLoseEntry | null>(null)
@@ -197,7 +202,7 @@ async function deleteEntry(reason: string) {
 
 // --- the form: a new entry is for this week, in the person's own group (the API works it out) ---
 // A new entry has no id until its first save; the saves after change only that entry.
-const form = ref<{ mode: 'new' | 'edit'; week_start: string; entry_id: string } | null>(null)
+const form = ref<{ mode: 'new' | 'edit'; week_start: string; entry_id: string; branch_id: string } | null>(null)
 const sheet = ref<WeekSheet | null>(null)
 const loading = ref(false)
 const error = ref('')
@@ -205,11 +210,14 @@ const title = ref('')
 const edits = reactive<Record<string, { win_lose: string; commission: string }>>({})
 
 function openNew() {
-  form.value = { mode: 'new', week_start: mondayOf(today), entry_id: '' }
+  // A new entry is in the branch chosen (else the person's own; with one branch the API picks it).
+  form.value = { mode: 'new', week_start: mondayOf(today), entry_id: '', branch_id: rp.effective.value }
   load()
 }
+// Another branch for a new entry has other agents: the sheet is loaded again.
+watch(() => form.value?.branch_id, () => { if (form.value?.mode === 'new' && !form.value.entry_id) load() })
 function openEdit(e: WinLoseEntry) {
-  form.value = { mode: 'edit', week_start: e.week_start, entry_id: e.id }
+  form.value = { mode: 'edit', week_start: e.week_start, entry_id: e.id, branch_id: e.branch_id }
   load()
 }
 function closeForm() {
@@ -242,7 +250,7 @@ async function load() {
   error.value = ''
   saveError.value = ''
   try {
-    const result = await api<WeekSheet>('/winlose/entry', { query: form.value.entry_id ? { entry_id: form.value.entry_id } : { week_start: form.value.week_start } })
+    const result = await api<WeekSheet>('/winlose/entry', { query: form.value.entry_id ? { entry_id: form.value.entry_id } : { week_start: form.value.week_start, branch_id: form.value.branch_id || undefined } })
     if (request !== loadRequest) return
     sheet.value = result
     resetEdits()
@@ -319,12 +327,12 @@ async function save(reason: string) {
   try {
     const saved = await api<WeekSheet>('/winlose/entry', {
       method: 'PUT',
-      body: { entry_id: form.value.entry_id || undefined, week_start: form.value.week_start, title: title.value.trim(), rows: row ? [rowBody(row)] : [], reason },
+      body: { entry_id: form.value.entry_id || undefined, branch_id: form.value.entry_id ? undefined : form.value.branch_id || undefined, week_start: form.value.week_start, title: title.value.trim(), rows: row ? [rowBody(row)] : [], reason },
     })
     reasonOpen.value = false
     // Stay on the entry: the agent saved shows what was saved, the others keep what was typed.
     sheet.value = saved
-    form.value = { mode: 'edit', week_start: saved.week_start, entry_id: saved.entry?.id || form.value.entry_id }
+    form.value = { mode: 'edit', week_start: saved.week_start, entry_id: saved.entry?.id || form.value.entry_id, branch_id: saved.branch_id }
     for (const r of saved.rows) {
       if (r.platform_id === row?.platform_id || !edits[r.platform_id]) edits[r.platform_id] = { win_lose: asText(r.win_lose), commission: asText(r.commission) }
     }

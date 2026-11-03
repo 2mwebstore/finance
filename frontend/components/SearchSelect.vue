@@ -12,7 +12,10 @@
       <span :class="hasSelection ? 'selected-label' : 'placeholder-label'">{{ selectedLabel }}</span>
       <ChevronDown :size="15" />
     </button>
-    <div v-if="open" class="search-select-menu" :class="{ 'no-search': !searchable, 'drop-up': dropUp }">
+    <!-- The list is drawn on the page itself, not inside the select: a popup (or any scrolling box)
+         around the select would cut it off. -->
+    <Teleport to="body">
+    <div v-if="open" ref="menu" class="search-select-menu" :class="{ 'no-search': !searchable, 'drop-up': dropUp }" :style="menuStyle">
       <div v-if="searchable" class="search-input-wrap">
         <Search :size="14" />
         <input ref="searchInput" v-model="search" type="search" :placeholder="searchPlaceholder" @keydown.esc="open = false" />
@@ -35,11 +38,12 @@
         <p v-if="!filteredOptions.length" class="search-select-empty">{{ emptyText }}</p>
       </div>
     </div>
+    </Teleport>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onClickOutside } from '@vueuse/core'
+import { onClickOutside, useEventListener } from '@vueuse/core'
 import { Check, ChevronDown, Search } from 'lucide-vue-next'
 
 interface SearchSelectOption {
@@ -71,6 +75,8 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{ 'update:modelValue': [value: any] }>()
 
 const root = ref<HTMLElement | null>(null)
+const menu = ref<HTMLElement | null>(null)
+const menuStyle = ref<Record<string, string>>({})
 const searchInput = ref<HTMLInputElement | null>(null)
 const open = ref(false)
 const dropUp = ref(false)
@@ -91,17 +97,32 @@ const filteredOptions = computed(() => {
   return props.options.filter(option => option.label.toLocaleLowerCase().includes(query))
 })
 
+// Puts the list under (or, near the bottom of the screen, over) the select, as wide as it.
+function place() {
+  const rect = root.value?.getBoundingClientRect()
+  if (!rect) return
+  const spaceBelow = window.innerHeight - rect.bottom
+  // Open upwards when the trigger sits near the bottom of the screen (e.g. "Rows" in a pager).
+  dropUp.value = spaceBelow < 240 && rect.top > spaceBelow
+  menuStyle.value = {
+    left: `${rect.left}px`,
+    width: `${rect.width}px`,
+    ...(dropUp.value ? { bottom: `${window.innerHeight - rect.top + 5}px` } : { top: `${rect.bottom + 5}px` }),
+  }
+}
+
 function toggle() {
   if (props.disabled) return
   open.value = !open.value
   if (open.value) {
     search.value = ''
-    // Open upwards when the trigger sits near the bottom of the screen (e.g. "Rows" in a pager).
-    const rect = root.value?.getBoundingClientRect()
-    const spaceBelow = rect ? window.innerHeight - rect.bottom : Infinity
-    dropUp.value = !!rect && spaceBelow < 240 && rect.top > spaceBelow
+    place()
   }
 }
+
+// The list follows the select when the page or the popup scrolls or the window changes size.
+useEventListener(window, 'scroll', () => { if (open.value) place() }, { capture: true, passive: true })
+useEventListener(window, 'resize', () => { if (open.value) place() })
 
 function select(option: SearchSelectOption) {
   if (option.disabled) return
@@ -128,7 +149,7 @@ watch(open, async (isOpen) => {
   }
 })
 
-onClickOutside(root, () => { open.value = false })
+onClickOutside(root, () => { open.value = false }, { ignore: [menu] })
 </script>
 
 <style scoped>
@@ -139,12 +160,12 @@ onClickOutside(root, () => { open.value = false })
 .search-select-trigger > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .search-select-trigger > svg { flex: 0 0 auto; color: #7d90aa; }
 .placeholder-label { color: #8292aa; }
-.search-select-menu { position: absolute; z-index: 30; top: calc(100% + 5px); left: 0; width: 100%; overflow: hidden; border: 1px solid #dfe7f1; border-radius: 9px; background: #fff; box-shadow: 0 12px 28px rgb(20 48 86 / 15%); }
+.search-select-menu { position: fixed; z-index: 1000; overflow: hidden; border: 1px solid #dfe7f1; border-radius: 9px; background: #fff; box-shadow: 0 12px 28px rgb(20 48 86 / 15%); }
 .search-input-wrap { display: flex; align-items: center; gap: 7px; margin: 7px; border: 1px solid #e3eaf3; border-radius: 7px; padding: 0 8px; color: #8394ac; }
 .search-input-wrap input { width: 100%; min-width: 0; border: 0; outline: 0; padding: 8px 0; color: #2c4468; background: transparent; font: inherit; font-size: 10px; }
 .search-select-options { max-height: 190px; overflow-y: auto; padding: 0 4px 5px; }
 .no-search .search-select-options { padding-top: 5px; }
-.search-select-menu.drop-up { top: auto; bottom: calc(100% + 5px); box-shadow: 0 -12px 28px rgb(20 48 86 / 15%); }
+.search-select-menu.drop-up { box-shadow: 0 -12px 28px rgb(20 48 86 / 15%); }
 .search-select-option { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 8px; border: 0; border-radius: 6px; padding: 8px; color: #405a7e; background: #fff; font: inherit; font-size: 10px; text-align: left; cursor: pointer; }
 .search-select-option:hover, .search-select-option.selected { color: #1769d2; background: #f0f6ff; }
 .search-select-option:disabled { color: #a3afbf; cursor: not-allowed; }

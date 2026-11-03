@@ -42,7 +42,7 @@
     <AppModal :model-value="formOpen" form title="New inventory expense" eyebrow="INVENTORY EXPENSE" subtitle="Saved straight away; void it to cancel." :busy="saving" width="640px" @update:model-value="(open) => { if (!open && !saving) formOpen = false }" @submit="save">
       <template #icon><ReceiptText :size="20" /></template>
       <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <div class="space-y-1 text-xs font-medium text-muted">Branch<SearchSelect v-model="form.branch_id" :options="branchChoices" placeholder="Choose a branch" aria-label="Branch" /></div>
+        <div v-if="branches.length !== 1" class="space-y-1 text-xs font-medium text-muted">Branch<SearchSelect v-model="form.branch_id" :options="branchChoices" placeholder="Choose a branch" aria-label="Branch" /></div>
         <div class="space-y-1 text-xs font-medium text-muted">Date<DatePicker v-model="form.expense_date" aria-label="Expense date" /></div>
         <div class="space-y-1 text-xs font-medium text-muted sm:col-span-2">Category<SearchSelect v-model="form.category_id" :options="categoryChoices" placeholder="Choose a category" :aria-invalid="formCheck.invalid('category_id')" aria-label="Category" /></div>
         <p v-if="!categoryChoices.length" class="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 sm:col-span-2">No inventory expense categories yet. Add them under Inventory → Expense categories.</p>

@@ -8,8 +8,10 @@
       <button type="button" class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-white px-3 py-2 text-sm font-medium text-navy disabled:opacity-50" :disabled="!report?.platforms.length" @click="exportCsv"><Download :size="16" /> Export CSV</button>
     </header>
 
-    <div class="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+    <div class="grid grid-cols-1 gap-2" :class="showBranch ? 'md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)]' : 'md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]'">
       <WinloseDateFilter v-model="range" />
+      <!-- Only for people who work in more than one branch (chosen once for all the RP pages) -->
+      <SearchSelect v-if="showBranch" v-model="branchModel" :options="branchOptions" :searchable="false" aria-label="Branch" />
       <SearchSelect v-model="groupId" :options="groupOptions" aria-label="Group" />
     </div>
 
@@ -58,7 +60,7 @@ import { currentMonthRange } from '~/utils/dateRanges'
 import { downloadCsv, formatAmount } from '~/utils/winlose'
 
 const range = ref(currentMonthRange()) // this month
-const { report, loading, error, groupId, groupOptions } = useWinLoseReport(() => range.value)
+const { report, loading, error, groupId, groupOptions, showBranch, branchModel, branchOptions } = useWinLoseReport(() => range.value)
 
 function tone(value: string) {
   return Number(value) < 0 ? 'text-expense' : ''

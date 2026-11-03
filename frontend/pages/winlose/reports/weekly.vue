@@ -12,8 +12,10 @@
     </header>
 
     <!-- In a detail only the dates can change, in one entry (or week) of it nothing -->
-    <div v-if="!weekStart" class="grid grid-cols-1 gap-2" :class="inDetail ? '' : 'md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]'">
+    <div v-if="!weekStart" class="grid grid-cols-1 gap-2" :class="inDetail ? '' : showBranch ? 'md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)]' : 'md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]'">
       <WinloseDateFilter v-model="range" />
+      <!-- Only for people who work in more than one branch (chosen once for all the RP pages) -->
+      <SearchSelect v-if="!inDetail && showBranch" v-model="branchModel" :options="branchOptions" :searchable="false" aria-label="Branch" />
       <SearchSelect v-if="!inDetail" :model-value="groupId" :options="groupOptions" aria-label="Group" @update:model-value="(id: string) => id && openGroup(id)" />
     </div>
 
@@ -23,7 +25,6 @@
       <WinloseTotals v-if="report.totals.length" :totals="report.totals" title="Totals" />
       <!-- One agent: its part in each of its groups, at its rate there -->
       <template v-if="agentId">
-        <p class="text-[11px] text-muted">Total = (W/L − COMM) × Rate, the Rate being 100% − the agent's rate in the group</p>
         <WinloseGroupTotals :groups="report.groups" detail />
         <!-- By week: the agent in each data entry (week-1, week-2, …); one opens its groups in it -->
         <WinloseEntryTotals v-if="!weekStart" title="By week" :entries="report.entries || []" selectable @select="openEntry" />
@@ -35,34 +36,43 @@
         <!-- One group: its agents, each at its rate in the group -->
         <div v-if="groupId" class="space-y-1">
           <h2 class="flex items-center gap-2 text-sm font-semibold text-navy"><Network :size="15" /> {{ groupTitle }}</h2>
-          <p class="text-[11px] text-muted">Total = (W/L − COMM) × Rate, the Rate being 100% − the agent's rate</p>
         </div>
         <p v-else-if="report.lines.length" class="text-[11px] text-muted">Tap an agent for its groups</p>
         <!-- One entry (or week) of a group: its agents in each data entry (a title opens the entry), with ✅ / ❌ -->
         <template v-if="weekStart && report.entries?.length">
-          <article v-for="e in report.entries" :key="e.id || 'none'" class="space-y-1.5">
+          <article v-for="e in report.entries" :id="`entry-card-${e.id || 'none'}`" :key="e.id || 'none'" class="space-y-1.5">
             <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-1">
               <h3 class="flex items-center gap-1.5 text-sm font-semibold text-navy">
-                <FileText :size="14" class="shrink-0 text-muted" />
+                <FileText :size="14" class="shrink-0 text-muted" data-capture-skip />
                 <NuxtLink v-if="e.id" :to="`/winlose/entries/${e.id}`" class="text-primary hover:underline">{{ e.title }}</NuxtLink>
                 <template v-else>{{ e.title }}</template>
               </h3>
               <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
                 <p v-if="e.created_at" class="text-[11px] text-muted">Created {{ formatDocDate(e.created_at) }}<template v-if="e.created_by"> by {{ e.created_by }}</template></p>
-                <WinloseEntryReactions v-if="e.id" :url="`/winlose/entries/${e.id}/reactions`" :reactions="e.reactions || []" />
+                <!-- Left out of the picture -->
+                <div v-if="e.id" class="flex items-center gap-x-2" data-capture-skip><WinloseEntryReactions :url="`/winlose/entries/${e.id}/reactions`" :reactions="e.reactions || []" /></div>
+                <WinloseEntryImage :target-id="`entry-card-${e.id || 'none'}`" :title="e.title" :group="groupTitle" />
               </div>
             </div>
             <WinloseReportTable :report="{ lines: e.lines || [], totals: e.totals }" by-group selectable @select="openAgent" />
           </article>
         </template>
-        <WinloseReportTable v-else :report="report" :by-group="!!groupId" selectable @select="openAgent" />
+        <!-- One group over the dates: every agent in one card, with an Image button (one picture of all of them) -->
+        <article v-else-if="groupId" id="group-card" class="space-y-1.5">
+          <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-1">
+            <h3 class="text-sm font-semibold text-navy">{{ formatDocDate(range.from) }} – {{ formatDocDate(range.to) }}</h3>
+            <WinloseEntryImage target-id="group-card" :title="`${groupTitle} ${range.from} to ${range.to}`" :group="groupTitle" />
+          </div>
+          <WinloseReportTable :report="report" by-group selectable @select="openAgent" />
+        </article>
+        <WinloseReportTable v-else :report="report" selectable @select="openAgent" />
         <!-- By week: the group in each data entry (week-1, week-2, …); one opens its agents in it -->
         <WinloseEntryTotals v-if="groupId && !weekStart" title="By week" :entries="report.entries || []" selectable @select="openEntry" />
       </template>
     </template>
 
     <!-- Settlement: only for a whole Monday-to-Sunday week -->
-    <WinloseSettlements v-if="isWholeWeek" :week-start="range.from" @changed="load" />
+    <WinloseSettlements v-if="isWholeWeek" :week-start="range.from" :branch-id="branch" @changed="load" />
     <p v-else-if="!isWholeWeek" class="text-[11px] text-muted">Choose a whole week (Monday to Sunday) to see or finalize its settlement.</p>
   </section>
 </template>
@@ -79,7 +89,7 @@ const route = useRoute()
 const thisMonth = currentMonthRange()
 const range = ref({ from: String(route.query.from || thisMonth.from), to: String(route.query.to || thisMonth.to) }) // this month
 // A detail has its data entries too (By week); one entry of it, only that entry's results.
-const { report, loading, error, load, groups, groupId, agentId, groupOptions } = useWinLoseReport(() => range.value, { byEntry: () => inDetail.value, entryId: () => entryId.value })
+const { report, loading, error, load, groups, groupId, agentId, groupOptions, showBranch, branchModel, branchOptions, branch } = useWinLoseReport(() => range.value, { byEntry: () => inDetail.value, entryId: () => entryId.value })
 
 // A group's title (in By group) opens its agents, an agent's code its groups, and a week in a
 // detail's By week that week of it. Each goes in the address, so the phone's back button (or Back)
