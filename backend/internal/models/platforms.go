@@ -102,11 +102,9 @@ type WeeklyPartnerResult struct {
 	ResultID       uuid.UUID       `gorm:"type:char(36);not null" json:"result_id"`
 	PartnerID      uuid.UUID       `gorm:"type:char(36);not null" json:"partner_id"`
 	CommissionRate decimal.Decimal `gorm:"type:decimal(7,4);not null" json:"commission_rate"`
-	// CalcType is the group's type (PO or GI) when this was worked out.
-	CalcType  string          `gorm:"size:2;not null;default:PO" json:"calc_type"`
-	JamePS    decimal.Decimal `gorm:"column:jame_ps;type:decimal(19,4);not null" json:"jame_ps"`
-	CreatedAt time.Time       `json:"-"`
-	UpdatedAt time.Time       `json:"-"`
+	JamePS         decimal.Decimal `gorm:"column:jame_ps;type:decimal(19,4);not null" json:"jame_ps"`
+	CreatedAt      time.Time       `json:"-"`
+	UpdatedAt      time.Time       `json:"-"`
 }
 
 // WeeklyPlatformResult is one agent (platform) on one entry: a branch's week (Monday to Sunday).
