@@ -67,6 +67,7 @@ const { canExportReports } = usePermissions()
 const dateRange = ref(currentMonthRange())
 const branchFilter = ref('')
 const { options: branchOptions, showFilter: showBranchFilter } = useBranchOptions()
+const { activeBranchId } = useActiveBranch()
 const data = ref<DashboardSummary | null>(null)
 const loading = ref(true)
 const err = ref('')
@@ -107,7 +108,8 @@ async function doExport() {
   try {
     const token = getToken()
     const params = new URLSearchParams({ period: 'custom', date_from: dateRange.value.from, date_to: dateRange.value.to })
-    if (branchFilter.value) params.set('branch_id', branchFilter.value)
+    const branch = branchFilter.value || activeBranchId.value
+    if (branch) params.set('branch_id', branch)
     const res = await fetch(`${apiBase}/reports/export?${params.toString()}`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
       credentials: 'include',

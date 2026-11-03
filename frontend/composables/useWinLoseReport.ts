@@ -23,7 +23,7 @@ export function useWinLoseReport(range: () => { from: string; to: string }, opti
   })
   const branchOptions = computed(() => rp.optionsFor(consolidated.value))
   /** '' = the API's own choice (every branch in scope, or the person's own group). */
-  const branch = computed(() => (showBranch.value ? branchModel.value : ''))
+  const branch = computed(() => (showBranch.value ? branchModel.value : rp.effective.value))
 
   // The groups (turned-off ones too: their weeks still count).
   const groups = ref<AssignmentGroup[]>([])

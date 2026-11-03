@@ -71,15 +71,33 @@
           <kbd>↵</kbd>
         </form>
         <div class="topbar-spacer"></div>
-        <NuxtLink to="/profile" class="topbar-user" aria-label="Open your profile">
+        <!-- Several branches: the branch being shown, and a menu to change it. One branch: just its name. -->
+        <div v-if="canSwitch" ref="branchMenuEl" class="topbar-user-wrap" @keydown.esc="branchMenuOpen = false">
+          <button type="button" class="topbar-user" aria-haspopup="menu" :aria-expanded="branchMenuOpen" :aria-label="`Showing ${branchLine}. Change branch`" @click="branchMenuOpen = !branchMenuOpen">
+            <div class="profile-avatar topbar-avatar">{{ initials }}</div>
+            <div class="topbar-user-copy"><strong>{{ user?.full_name || 'Account' }}</strong><small>{{ branchLine }}</small></div>
+            <ChevronDown :size="15" class="topbar-chevron" :class="{ 'is-open': branchMenuOpen }" />
+          </button>
+          <div v-if="branchMenuOpen" class="topbar-menu" role="menu" aria-label="Branch">
+            <p class="topbar-menu-caption">SHOW DATA FOR</p>
+            <div class="topbar-menu-list">
+              <button v-for="option in branchChoices" :key="option.value" type="button" role="menuitemradio" :aria-checked="option.value === activeBranchId" class="topbar-menu-item" :class="{ 'is-active': option.value === activeBranchId }" @click="chooseBranch(option.value)">
+                <span>{{ option.label }}</span>
+                <Check v-if="option.value === activeBranchId" :size="15" />
+              </button>
+            </div>
+            <NuxtLink to="/profile" role="menuitem" class="topbar-menu-item topbar-menu-profile"><UserRound :size="15" /><span>My profile</span></NuxtLink>
+          </div>
+        </div>
+        <NuxtLink v-else to="/profile" class="topbar-user" aria-label="Open your profile">
           <div class="profile-avatar topbar-avatar">{{ initials }}</div>
-          <div class="topbar-user-copy"><strong>{{ user?.full_name || 'Account' }}</strong><small>{{ profileRole }}</small></div>
-          <ChevronDown :size="15" class="topbar-chevron" />
+          <div class="topbar-user-copy"><strong>{{ user?.full_name || 'Account' }}</strong><small>{{ branchLine }}</small></div>
         </NuxtLink>
         <button class="mobile-logout" aria-label="Sign out" @click="onLogout"><LogOut :size="17" /></button>
       </header>
 
-      <main class="page-content">
+      <!-- Changing branch reopens the page, so everything on it loads again for that branch. -->
+      <main :key="pageKey" class="page-content">
         <slot />
       </main>
     </div>
@@ -123,8 +141,9 @@
 
 <script setup lang="ts">
 import type { Component } from 'vue'
-import { useResizeObserver } from '@vueuse/core'
+import { onClickOutside, useResizeObserver } from '@vueuse/core'
 import { useCurrency } from '~/composables/useCurrency'
+import type { PosCart } from '~/composables/usePosCart'
 import {
   ArrowLeftRight,
   Boxes,
@@ -136,6 +155,7 @@ import {
   NotebookPen,
   ChartPie,
   ChartNoAxesCombined,
+  Check,
   Coins,
   Package,
   ShoppingCart,
@@ -158,6 +178,7 @@ import {
   Tags,
   TrendingDown,
   TrendingUp,
+  UserRound,
   UsersRound,
   X,
 } from 'lucide-vue-next'
@@ -340,11 +361,42 @@ onBeforeUnmount(() => {
   if (popTimer) clearTimeout(popTimer)
 })
 
-watch(() => route.fullPath, () => { mobileMenuOpen.value = false })
+watch(() => route.fullPath, () => { mobileMenuOpen.value = false; branchMenuOpen.value = false })
 
 const initials = computed(() => (user.value?.full_name || user.value?.username || 'A')
   .split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join(''))
 const profileRole = computed(() => isSuperAdmin.value ? 'Super Administrator' : user.value?.roles?.[0] || 'Administrator')
+
+// The line under the name: the one branch being shown, or all of them.
+const { myBranches, canSwitch, activeBranch, activeBranchId, setActiveBranch } = useActiveBranch()
+const branchLine = computed(() => activeBranch.value?.name || (canSwitch.value ? 'All branches' : myBranches.value[0]?.name) || profileRole.value)
+const branchChoices = computed(() => [
+  { value: '', label: 'All branches' },
+  ...myBranches.value.map(branch => ({ value: branch.id, label: `${branch.code} — ${branch.name}` })),
+])
+const branchMenuOpen = ref(false)
+const branchMenuEl = ref<HTMLElement | null>(null)
+onClickOutside(branchMenuEl, () => { branchMenuOpen.value = false })
+
+const pageKey = ref(0)
+// Changing branch reopens the page, which loses what a form holds. The POS cart stays while the
+// person is on other pages, but belongs to one branch: POS empties it when opened in another.
+const FORM_PAGE = /\/(new|edit)$|^\/winlose\/entry$|^\/admin\/platform-assignments\/[^/]+$/
+const posCart = useState<PosCart | undefined>('pos-cart')
+function lossWarning(id: string) {
+  if (FORM_PAGE.test(route.path)) return 'Change branch? Anything not saved on this page will be lost.'
+  const cart = posCart.value
+  if (id && cart?.lines.length && cart.branch_id !== id) return 'Change branch? The POS cart will be emptied.'
+  return ''
+}
+function chooseBranch(id: string) {
+  branchMenuOpen.value = false
+  if (id === activeBranchId.value) return
+  const warning = lossWarning(id)
+  if (warning && !window.confirm(warning)) return
+  setActiveBranch(id)
+  pageKey.value++
+}
 
 function isActive(item: NavItem) {
   const path = item.to.split('?')[0]
@@ -403,14 +455,25 @@ async function onLogout() {
 .global-search input::placeholder { color: #899bb5; }
 .global-search kbd { padding: 2px 5px; border: 1px solid #e4eaf3; border-radius: 4px; color: #91a1b7; font-size: 10px; }
 .topbar-spacer { flex: 1; }
-.topbar-user { display: flex; align-items: center; gap: 9px; min-width: 0; padding: 4px 8px 4px 4px; border-radius: 10px; color: inherit; text-decoration: none; transition: background .15s ease; }
-.topbar-user:hover { background: #f5f8fd; }
+.topbar-user-wrap { position: relative; min-width: 0; }
+.topbar-user { display: flex; align-items: center; gap: 9px; min-width: 0; padding: 4px 8px 4px 4px; border: 0; border-radius: 10px; color: inherit; background: transparent; font: inherit; text-align: left; text-decoration: none; cursor: pointer; transition: background .15s ease; }
+.topbar-user:hover, .topbar-user[aria-expanded="true"] { background: #f5f8fd; }
 .topbar-user:hover .topbar-avatar { box-shadow: 0 0 0 3px #e6effe; }
 .topbar-avatar { width: 33px; height: 33px; }
 .topbar-user-copy { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
 .topbar-user-copy strong { overflow: hidden; max-width: 150px; color: #1b3156; font-size: 12px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
-.topbar-user-copy small { color: #8293ad; font-size: 10px; }
-.topbar-chevron { color: #8293ad; }
+.topbar-user-copy small { overflow: hidden; max-width: 150px; color: #8293ad; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.topbar-chevron { flex: 0 0 auto; color: #8293ad; transition: rotate .15s ease; }
+.topbar-chevron.is-open { rotate: 180deg; }
+.topbar-menu { position: absolute; top: calc(100% + 8px); right: 0; z-index: 40; width: 270px; max-width: calc(100vw - 28px); padding: 8px; border: 1px solid #e4ebf5; border-radius: 12px; background: #fff; box-shadow: 0 14px 34px rgb(20 48 86 / 16%); }
+.topbar-menu-caption { margin: 4px 8px 6px; color: #8293ad; font-size: 10px; font-weight: 750; letter-spacing: .13em; }
+.topbar-menu-list { display: flex; max-height: min(320px, 55vh); flex-direction: column; gap: 2px; overflow-y: auto; }
+.topbar-menu-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; min-height: 38px; padding: 7px 9px; border: 0; border-radius: 8px; color: #1b3156; background: transparent; font: inherit; font-size: 12.5px; font-weight: 600; text-align: left; text-decoration: none; cursor: pointer; }
+.topbar-menu-item > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topbar-menu-item > svg { flex: 0 0 auto; }
+.topbar-menu-item:hover { background: #f2f6fc; }
+.topbar-menu-item.is-active { color: #1769e8; background: #eef5ff; }
+.topbar-menu-profile { justify-content: flex-start; margin-top: 6px; border-top: 1px solid #edf1f7; border-radius: 0 0 8px 8px; color: #4e658a; }
 .mobile-brand, .mobile-logout{ display: none; }
 .mobile-menu-backdrop { display: none; }
 .mobile-sheet { display: none; }
@@ -427,8 +490,10 @@ async function onLogout() {
   .mobile-brand strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .small-brand-mark { width: 31px; height: 31px; border-radius: 9px; }
   .global-search { display: none; }
-  .topbar-spacer, .topbar-user-copy, .topbar-chevron { display: none; }
-  .topbar-user { margin-left: auto; border: 0; }
+  .topbar-spacer, .topbar-user-copy strong { display: none; }
+  .topbar-user-copy small { max-width: 96px; color: #31517f; font-size: 11px; font-weight: 650; }
+  .topbar-user, .topbar-user-wrap { margin-left: auto; border: 0; }
+  .topbar-user-wrap .topbar-user { margin-left: 0; }
   .topbar-avatar { width: 33px; height: 33px; }
   .mobile-logout { display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; border: 1px solid #e1e9f4; border-radius: 10px; color: #607898; background: #fff; cursor: pointer; }
   .page-content { padding: 18px 14px calc(96px + env(safe-area-inset-bottom)); }

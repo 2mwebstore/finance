@@ -6,7 +6,7 @@
         <h1 class="text-xl font-bold text-navy">Transfers</h1>
         <p class="mt-1 text-xs text-muted">Stock moved between branches, at the sending branch’s average cost.</p>
       </div>
-      <button v-if="canTransfer && branches.length > 1" type="button" class="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white hover:bg-primary-hover" @click="openCreate"><Plus :size="16" /> New transfer</button>
+      <button v-if="canTransfer && everyBranch.length > 1" type="button" class="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white hover:bg-primary-hover" @click="openCreate"><Plus :size="16" /> New transfer</button>
     </header>
 
     <div class="flex flex-col gap-2 lg:flex-row lg:items-center">
@@ -93,8 +93,10 @@ const { api } = useApi()
 const { can } = usePermissions()
 const toast = useToast()
 const canTransfer = computed(() => can('inventory.transfer'))
-const { branches, options: branchOptions, showFilter: showBranchFilter } = useBranchOptions('All branches')
-const branchChoices = computed(() => branches.value.map(b => ({ value: b.id, label: `${b.code} — ${b.name}` })))
+const { everyBranch, options: branchOptions, showFilter: showBranchFilter } = useBranchOptions('All branches')
+const { activeBranchId } = useActiveBranch()
+// A transfer goes to another branch, so the form offers every branch even when the top bar shows one.
+const branchChoices = computed(() => everyBranch.value.map(b => ({ value: b.id, label: `${b.code} — ${b.name}` })))
 const toChoices = computed(() => branchChoices.value.filter(b => b.value !== form.from_branch_id))
 const statusOptions = [{ value: '', label: 'All statuses' }, { value: 'completed', label: 'Done' }, { value: 'voided', label: 'Voided' }]
 
@@ -163,7 +165,7 @@ watch(() => form.from_branch_id, () => {
 })
 
 function openCreate() {
-  Object.assign(form, { from_branch_id: '', to_branch_id: '', transfer_date: todayISO(), note: '', lines: [] })
+  Object.assign(form, { from_branch_id: activeBranchId.value, to_branch_id: '', transfer_date: todayISO(), note: '', lines: [] })
   formError.value = ''
   formCheck.reset()
   formOpen.value = true

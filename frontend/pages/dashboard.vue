@@ -179,7 +179,7 @@
             <DateRangePicker v-model="dateRange" @update:model-value="period = 'custom'" />
           </div>
 
-          <div v-if="branches.length > 1" class="filter-group">
+          <div v-if="branches.length > 1 && !activeBranchId" class="filter-group">
             <label class="filter-label">Branch</label>
             <SearchSelect v-model="branchId" :options="branchOptions" placeholder="All accessible branches" search-placeholder="Search branches…" aria-label="Branch filter" />
           </div>
@@ -227,6 +227,7 @@ import { currentMonthRange } from '~/utils/dateRanges'
 const { api } = useApi()
 const { user } = useAuth()
 const { canViewBranches, canViewTransactions, canViewUsers, canViewRoles, canViewReports } = usePermissions()
+const { activeBranchId } = useActiveBranch()
 const data = ref<DashboardSummary | null>(null)
 const branches = ref<Branch[]>([])
 const period = ref('this_month')
@@ -268,7 +269,7 @@ const chartColors = ['#1769e8', '#58a0ff', '#86bcff', '#22a77a', '#f3b544', '#8b
 const periodLabel = computed(() => ({ today: 'Today', this_week: 'This week', this_month: 'This month', custom: 'Custom range' })[period.value] || 'Selected period')
 const currencyMark = computed(() => currencyMeta(currency.value).symbol.trim())
 const branchLabel = computed(() => {
-  const selected = branches.value.find(branch => branch.id === branchId.value)
+  const selected = branches.value.find(branch => branch.id === (activeBranchId.value || branchId.value))
   return selected ? selected.code : 'All branches'
 })
 const selectedIncomeDisplay = computed(() => formatMoney(amountOf(data.value, 'income'), currency.value))

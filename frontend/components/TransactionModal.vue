@@ -179,6 +179,7 @@ const emit = defineEmits<{
 const { api } = useApi()
 const { user } = useAuth()
 const { canViewBranches, canApprove } = usePermissions()
+const { activeBranchId } = useActiveBranch()
 const branches = ref<Branch[]>([])
 const categories = ref<Category[]>([])
 const form = reactive({
@@ -345,9 +346,10 @@ function initializeForm() {
   form.currency = txn?.currency || defaultCurrency.value
   form.amount = txn?.amount || ''
   form.transaction_date = txn?.transaction_date?.slice(0, 10) || localDate()
-  // Default to the user's own branch when it is in their scope, else the first branch they may use.
+  // Default to the branch picked in the top bar, else the user's own branch when it is in their
+  // scope, else the first branch they may use.
   const ownBranch = user.value?.branches?.find(b => (user.value?.scope_branches || user.value?.branches || []).some(s => s.id === b.id))
-  form.branch_id = txn?.branch_id || ownBranch?.id || user.value?.scope_branches?.[0]?.id || ''
+  form.branch_id = txn?.branch_id || activeBranchId.value || ownBranch?.id || user.value?.scope_branches?.[0]?.id || ''
   form.category_id = txn?.category_id || ''
   form.description = txn?.description || ''
   form.pending = false
@@ -397,6 +399,7 @@ async function loadBranches() {
       // The assigned branches from the user's profile remain available as a fallback.
     }
   }
+  if (activeBranchId.value) branches.value = branches.value.filter(b => b.id === activeBranchId.value)
   if (!form.branch_id && branches.value.length) form.branch_id = branches.value[0].id
 }
 

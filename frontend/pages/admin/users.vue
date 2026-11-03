@@ -47,7 +47,7 @@
 
     <ListSearch v-model="search" placeholder="Search by name, username or email…" />
     <FilterCard :summary="userFilterSummary" :active="userFiltersActive">
-      <div v-if="branches.length > 1" class="filter-field">
+      <div v-if="branches.length > 1 && !activeBranchId" class="filter-field">
         <span>Branch</span>
         <SearchSelect v-model="branchFilter" :options="filterBranchOptions" placeholder="All branches" search-placeholder="Search branches…" aria-label="Filter users by branch" />
       </div>
@@ -127,6 +127,7 @@ import { useFormErrors } from '~/composables/useFormErrors'
 const { api } = useApi()
 const { user: currentUser } = useAuth()
 const { can, canCreateUser, hasFullAccess, permissions } = usePermissions()
+const { activeBranchId } = useActiveBranch()
 const canCreate = canCreateUser
 const canEditUser = computed(() => can('users.edit', 'users.manage'))
 const canManageUsers = computed(() => can('users.manage'))
@@ -146,7 +147,7 @@ const editingUser = ref<AdminUser | null>(null)
 const passwordTarget = ref<AdminUser | null>(null)
 const passwordError = ref('')
 const expandedPerms = ref<Record<string, boolean>>({})
-const createForm = reactive({ username: '', email: '', full_name: '', password: '', role_code: '', branch_id: '', manager_ids: [] as string[] })
+const createForm = reactive({ username: '', email: '', full_name: '', password: '', role_code: '', branch_id: activeBranchId.value, manager_ids: [] as string[] })
 const editForm = reactive({ email: '', full_name: '', role_codes: [] as string[], branch_ids: [] as string[], manager_ids: [] as string[] })
 const passwordForm = reactive({ password: '' })
 
@@ -267,10 +268,10 @@ async function load() {
   try {
     const [userResult, roleResult, branchResult, everyone] = await Promise.all([
       fetchUsers(),
-      api<{ items: Role[] }>('/roles').catch(() => ({ items: [] })),
+      api<{ items: Role[] }>('/roles', { everyBranch: true }).catch(() => ({ items: [] })),
       api<{ items: Branch[] }>('/branches?page_size=100').catch(() => ({ items: [] })),
       // Unfiltered list for the Managers picker (the visible list may be filtered).
-      api<{ items: AdminUser[] }>('/users', { query: { page_size: 100, is_active: 'true' } }).catch(() => ({ items: [] })),
+      api<{ items: AdminUser[] }>('/users', { query: { page_size: 100, is_active: 'true' }, everyBranch: true }).catch(() => ({ items: [] })),
     ])
     items.value = userResult.items || []
     roles.value = roleResult.items || []
@@ -358,7 +359,7 @@ async function create() {
       manager_ids: createForm.manager_ids,
     } })
     const name = createForm.full_name.trim() || createForm.username.trim()
-    Object.assign(createForm, { username: '', email: '', full_name: '', password: '', role_code: '', branch_id: '', manager_ids: [] })
+    Object.assign(createForm, { username: '', email: '', full_name: '', password: '', role_code: '', branch_id: activeBranchId.value, manager_ids: [] })
     showCreate.value = false
     toast.success(`${name} can sign in with their username and PIN.`, { title: 'User created' })
     await load()

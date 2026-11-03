@@ -102,8 +102,10 @@ const copy = computed(() => props.type === 'inv_expense'
 const { api } = useApi()
 const { user } = useAuth()
 const { can, hasFullAccess } = usePermissions()
+const { activeBranchId } = useActiveBranch()
 const canManage = computed(() => can(props.type === 'inv_expense' ? 'inventory.manage' : 'categories.manage'))
-const branches = ref<Branch[]>([])
+const everyBranch = ref<Branch[]>([])
+const branches = computed(() => (activeBranchId.value ? everyBranch.value.filter(b => b.id === activeBranchId.value) : everyBranch.value))
 // Shared categories belong to the owner/admin; branch managers only work in their branches.
 const SHARED = ''
 const scopeOptions = computed(() => [
@@ -241,11 +243,11 @@ async function save() {
 
 async function loadBranches() {
   // The user's own branches; owners/admins load every branch.
-  branches.value = [...(user.value?.scope_branches || user.value?.branches || [])]
+  everyBranch.value = [...(user.value?.scope_branches || user.value?.branches || [])]
   if (!hasFullAccess.value) return
   try {
     const result = await api<{ items: Branch[] }>('/branches', { query: { page_size: 100 } })
-    branches.value = result.items || branches.value
+    everyBranch.value = result.items || everyBranch.value
   } catch {
     // The profile's scope branches remain as a fallback.
   }

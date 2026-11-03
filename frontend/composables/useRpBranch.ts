@@ -9,10 +9,12 @@ const STORAGE_KEY = 'rp-branch'
  *
  * `''` is "every branch I work in" where a page can show that (lists, reports for those with
  * consolidated access); anywhere that needs one branch (a new entry, a new group) `effective` is
- * the chosen branch, else the person's default one.
+ * the chosen branch, else the person's default one. A branch picked in the top bar decides for all
+ * of these, and the pages then offer no choice of their own.
  */
 export function useRpBranch() {
   const { user } = useAuth()
+  const { activeBranchId } = useActiveBranch()
   const { branches } = useBranchOptions('All branches')
   const chosen = useState<string>('rp-branch', () => {
     try { return localStorage.getItem(STORAGE_KEY) || '' } catch { return '' }
@@ -22,7 +24,7 @@ export function useRpBranch() {
   const show = computed(() => branches.value.length > 1)
   // What was chosen, if the person still works in it.
   const branchId = computed({
-    get: () => (show.value && branches.value.some(b => b.id === chosen.value) ? chosen.value : ''),
+    get: () => activeBranchId.value || (show.value && branches.value.some(b => b.id === chosen.value) ? chosen.value : ''),
     set: (value: string) => {
       chosen.value = value
       try { localStorage.setItem(STORAGE_KEY, value) } catch { /* private window: it just isn't remembered */ }
@@ -34,7 +36,7 @@ export function useRpBranch() {
     return branches.value.find(b => b.id === own)?.id || branches.value[0]?.id || ''
   })
   /** The one branch to work in: the chosen one, else the person's own ('' with a single branch: the API picks it). */
-  const effective = computed(() => (show.value ? branchId.value || defaultBranchId.value : ''))
+  const effective = computed(() => activeBranchId.value || (show.value ? branchId.value || defaultBranchId.value : ''))
   /** Options for a Branch select; allowAll adds "All branches" ('' = every branch in scope). */
   const optionsFor = (allowAll: boolean) => [
     ...(allowAll ? [{ value: '', label: 'All branches' }] : []),

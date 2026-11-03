@@ -1,5 +1,6 @@
 import type { User, LoginResponse } from '~/types/api'
 import { useApiBase } from '~/composables/useApiBase'
+import { forgetActiveBranch } from '~/composables/useActiveBranch'
 
 const accessToken = ref<string | null>(null)
 const currentUser = ref<User | null>(null)
@@ -18,6 +19,7 @@ export function useAuth() {
       credentials: 'include',
     })
     accessToken.value = res.access_token
+    forgetActiveBranch()
     // Load full profile with permissions
     await fetchMe()
     return res

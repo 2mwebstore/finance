@@ -11,6 +11,7 @@ export default defineNuxtConfig({
     presets: [
       { from: '~/composables/useAuth', imports: ['useAuth'] },
       { from: '~/composables/useApi', imports: ['useApi'] },
+      { from: '~/composables/useActiveBranch', imports: ['useActiveBranch'] },
       { from: '~/composables/usePermissions', imports: ['usePermissions'] },
       { from: '~/stores/permissions', imports: ['usePermissionsStore'] },
     ],

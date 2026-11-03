@@ -4,7 +4,7 @@
       <div>
         <p class="text-[10px] font-bold tracking-[0.14em] text-slate-400">INVENTORY</p>
         <h1 class="text-xl font-bold text-navy">Products</h1>
-        <p class="mt-1 text-xs text-muted">The products every branch buys and sells. Stock shown is for {{ branchFilter ? labelForBranch(branchFilter) : 'all your branches' }}.</p>
+        <p class="mt-1 text-xs text-muted">The products every branch buys and sells. Stock shown is for {{ branchFilter ? labelForBranch(branchFilter) : activeBranch?.code || 'all your branches' }}.</p>
       </div>
       <div v-if="canManage" class="flex flex-wrap gap-2">
         <button type="button" class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-white px-3 py-2 text-sm font-medium text-navy" @click="categoriesOpen = true"><Tags :size="16" /> Categories</button>
@@ -204,6 +204,7 @@ const activeFilter = ref('true')
 // Stock of one branch, or the total of the user's branches.
 const branchFilter = ref('')
 const { options: branchOptions, showFilter: showBranchFilter, labelFor: labelForBranch } = useBranchOptions('All my branches')
+const { activeBranch } = useActiveBranch()
 const allCategories = ref<ProductCategory[]>([])
 
 const activeOptions = [{ value: 'true', label: 'Active' }, { value: 'false', label: 'Inactive' }, { value: '', label: 'All' }]

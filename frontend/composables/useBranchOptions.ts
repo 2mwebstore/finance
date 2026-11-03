@@ -4,12 +4,17 @@ import type { Branch } from '~/types/api'
  * Branches the signed-in user can see (their roles' data scope), for branch filters on lists.
  * GET /branches is limited the same way; people who cannot call it use scope_branches from
  * their profile.
+ *
+ * `branches` is only the branch picked in the top bar when there is one, so filters hide and forms
+ * preselect it; `everyBranch` is for choices that need the others too (where a transfer goes).
  */
 export function useBranchOptions(allLabel = 'All branches') {
   const { api } = useApi()
   const { user } = useAuth()
   const { can } = usePermissions()
-  const branches = ref<Pick<Branch, 'id' | 'code' | 'name'>[]>([...(user.value?.scope_branches || user.value?.branches || [])])
+  const { activeBranchId } = useActiveBranch()
+  const everyBranch = ref<Pick<Branch, 'id' | 'code' | 'name'>[]>([...(user.value?.scope_branches || user.value?.branches || [])])
+  const branches = computed(() => (activeBranchId.value ? everyBranch.value.filter(b => b.id === activeBranchId.value) : everyBranch.value))
 
   const options = computed(() => [
     { value: '', label: allLabel },
@@ -27,12 +32,12 @@ export function useBranchOptions(allLabel = 'All branches') {
     if (!can('branches.view', 'branches.manage', 'users.create', 'users.manage')) return
     try {
       const result = await api<{ items: Branch[] }>('/branches', { query: { page_size: 100 } })
-      if (result.items?.length) branches.value = result.items
+      if (result.items?.length) everyBranch.value = result.items
     } catch {
       // Keep the profile branches.
     }
   }
 
   onMounted(load)
-  return { branches, options, showFilter, labelFor }
+  return { branches, everyBranch, options, showFilter, labelFor }
 }

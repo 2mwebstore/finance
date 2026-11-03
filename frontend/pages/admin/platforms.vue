@@ -113,6 +113,7 @@ const showInactive = ref(false)
 // with several, a Branch filter and a Branch choice on the form.
 const { branches, options: branchOptions } = useBranchOptions('All branches')
 const { hasFullAccess } = usePermissions()
+const { activeBranchId } = useActiveBranch()
 const showBranch = computed(() => branches.value.length > 1)
 const branchFilter = ref('')
 const formBranchOptions = computed(() => [
@@ -157,7 +158,7 @@ const formCheck = reactive(useFormErrors(
 
 function openCreate() {
   editing.value = null
-  Object.assign(form, { code: '', name: '', default_currency: 'USD', branch_id: '' })
+  Object.assign(form, { code: '', name: '', default_currency: 'USD', branch_id: activeBranchId.value })
   formError.value = ''
   formCheck.reset()
   formOpen.value = true
