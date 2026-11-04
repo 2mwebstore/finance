@@ -169,18 +169,19 @@ func (s *RoleService) GetByID(ctx context.Context, id uuid.UUID) (*models.Role, 
 	return &role, nil
 }
 
-// OwnerRoleCode is the built-in Owner role, which role lists leave out for all but a Super Admin.
-const OwnerRoleCode = "owner"
+// SuperAdminRoleCode is the built-in Super Admin role, which role lists leave out for all but a
+// Super Admin.
+const SuperAdminRoleCode = "super_admin"
 
 // RoleListFilter: which roles a list shows. All adds the roles without a branch (the built-in ones)
 // to the branch roles; without it, only the roles of BranchIDs. ForBranch narrows the branch roles
-// to that branch. HideOwner leaves out the Owner role.
+// to that branch. HideSuperAdmin leaves out the Super Admin role.
 type RoleListFilter struct {
-	Search    string
-	All       bool
-	BranchIDs []uuid.UUID
-	ForBranch *uuid.UUID
-	HideOwner bool
+	Search         string
+	All            bool
+	BranchIDs      []uuid.UUID
+	ForBranch      *uuid.UUID
+	HideSuperAdmin bool
 }
 
 // List returns the roles; search (optional) matches the name, code or description.
@@ -197,8 +198,8 @@ func (s *RoleService) List(ctx context.Context, f RoleListFilter) ([]models.Role
 	case !f.All:
 		q = q.Where("1 = 0")
 	}
-	if f.HideOwner {
-		q = q.Where("code <> ?", OwnerRoleCode)
+	if f.HideSuperAdmin {
+		q = q.Where("code <> ?", SuperAdminRoleCode)
 	}
 	if strings.TrimSpace(search) != "" {
 		like := textsearch.Contains(search)

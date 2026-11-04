@@ -26,7 +26,8 @@ func TestRoleVisible(t *testing.T) {
 	branchRole := &models.Role{Code: "cashier-bt", BranchID: &mine}
 	otherRole := &models.Role{Code: "cashier-pp", BranchID: &other}
 	builtIn := &models.Role{Code: "manager", IsSystem: true}
-	owner := &models.Role{Code: services.OwnerRoleCode, IsSystem: true}
+	owner := &models.Role{Code: "owner", IsSystem: true}
+	superRole := &models.Role{Code: services.SuperAdminRoleCode, IsSystem: true}
 
 	branchUser := &accessScope{BranchIDs: []uuid.UUID{mine}, branchSet: map[uuid.UUID]bool{mine: true}}
 	ownerUser := &accessScope{Full: true, AllBranches: true}
@@ -42,10 +43,13 @@ func TestRoleVisible(t *testing.T) {
 		{"branch user doesn't see another branch's role", branchUser, otherRole, false},
 		{"branch user doesn't see a built-in role", branchUser, builtIn, false},
 		{"branch user doesn't see the Owner role", branchUser, owner, false},
+		{"branch user doesn't see the Super Admin role", branchUser, superRole, false},
 		{"owner sees a built-in role", ownerUser, builtIn, true},
 		{"owner sees any branch's role", ownerUser, otherRole, true},
-		{"owner doesn't see the Owner role", ownerUser, owner, false},
+		{"owner sees the Owner role", ownerUser, owner, true},
+		{"owner doesn't see the Super Admin role", ownerUser, superRole, false},
 		{"Super Admin sees the Owner role", superAdmin, owner, true},
+		{"Super Admin sees the Super Admin role", superAdmin, superRole, true},
 	}
 	for _, tc := range cases {
 		if got := roleVisible(tc.scope, tc.role); got != tc.want {

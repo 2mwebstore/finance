@@ -28,10 +28,10 @@ func NewRoleController(svc *services.RoleService, db *gorm.DB) *RoleController {
 const msgRoleTooWide = "you can only give a role the permissions you have yourself"
 
 // roleVisible says whether the actor may see (and so give) the role. The owner/admin see every role,
-// others only their branches' roles, so the built-in ones stay out of the branches' sight. The Owner
-// role itself is for a Super Admin to give.
+// others only their branches' roles, so the built-in ones stay out of the branches' sight. The Super
+// Admin role itself only a Super Admin sees.
 func roleVisible(scope *accessScope, role *models.Role) bool {
-	if role.Code == services.OwnerRoleCode && !scope.superAdmin {
+	if role.Code == services.SuperAdminRoleCode && !scope.superAdmin {
 		return false
 	}
 	return scope.Full || (role.BranchID != nil && scope.HasBranch(*role.BranchID))
@@ -213,7 +213,7 @@ func (rc *RoleController) List(c *gin.Context) {
 	if !ok {
 		return
 	}
-	f := services.RoleListFilter{Search: c.Query("search"), All: scope.Full, BranchIDs: scope.BranchIDs, HideOwner: !scope.superAdmin}
+	f := services.RoleListFilter{Search: c.Query("search"), All: scope.Full, BranchIDs: scope.BranchIDs, HideSuperAdmin: !scope.superAdmin}
 	if raw := c.Query("branch_id"); raw != "" {
 		id, err := uuid.Parse(raw)
 		if err != nil || !scope.HasBranch(id) {
