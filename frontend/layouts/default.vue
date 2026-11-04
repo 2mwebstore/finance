@@ -151,7 +151,6 @@
 import type { Component } from 'vue'
 import { onClickOutside, useResizeObserver } from '@vueuse/core'
 import { useCurrency } from '~/composables/useCurrency'
-import type { PosCart } from '~/composables/usePosCart'
 import {
   ArrowLeftRight,
   Boxes,
@@ -390,21 +389,9 @@ const profileMenuEl = ref<HTMLElement | null>(null)
 onClickOutside(profileMenuEl, () => { profileMenuOpen.value = false })
 
 const pageKey = ref(0)
-// Changing branch reopens the page, which loses what a form holds. The POS cart stays while the
-// person is on other pages, but belongs to one branch: POS empties it when opened in another.
-const FORM_PAGE = /\/(new|edit)$|^\/winlose\/entry$|^\/admin\/platform-assignments\/[^/]+$/
-const posCart = useState<PosCart | undefined>('pos-cart')
-function lossWarning(id: string) {
-  if (FORM_PAGE.test(route.path)) return 'Change branch? Anything not saved on this page will be lost.'
-  const cart = posCart.value
-  if (id && cart?.lines.length && cart.branch_id !== id) return 'Change branch? The POS cart will be emptied.'
-  return ''
-}
 function chooseBranch(id: string) {
   branchMenuOpen.value = false
   if (id === activeBranchId.value) return
-  const warning = lossWarning(id)
-  if (warning && !window.confirm(warning)) return
   setActiveBranch(id)
   pageKey.value++
 }
