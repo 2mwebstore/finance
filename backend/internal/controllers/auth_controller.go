@@ -213,9 +213,11 @@ func (ac *AuthController) Me(c *gin.Context) {
 		"roles":          roleCodes(user),
 		"permissions":    perms,
 		"branches":       branches,
-		"all_branches":   allBranches,
-		"scope_branches": scopeBranches,
-		"last_login_at":  user.LastLoginAt,
+		// The branch the RP pages work in when they need one and the person may not see them all.
+		"default_branch_id": user.DefaultBranchID,
+		"all_branches":      allBranches,
+		"scope_branches":    scopeBranches,
+		"last_login_at":     user.LastLoginAt,
 	})
 }
 

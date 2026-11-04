@@ -1,10 +1,5 @@
 <template>
   <div>
-    <div class="login-heading">
-      <p class="login-eyebrow">WELCOME BACK</p>
-      <h2>Sign in to your workspace</h2>
-      <p>Use your account credentials to continue.</p>
-    </div>
     <form class="bg-white rounded-2xl shadow-xl p-6 space-y-4" novalidate @submit.prevent="onSubmit">
       <div>
         <label class="block text-sm font-medium text-navy mb-1">Username or email</label>

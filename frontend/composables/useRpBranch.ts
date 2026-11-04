@@ -1,34 +1,27 @@
 import { useBranchOptions } from '~/composables/useBranchOptions'
 
-const STORAGE_KEY = 'rp-branch'
-
 /**
- * The branch the RP pages (Data Entry, Report, Group Summary, Group Agent Assignments) work in.
- * It is chosen once and kept for all four, and is only offered to people who work in more than one
- * branch: with one, the API takes it by itself and no page shows a branch choice.
+ * The branch an RP page (Data Entry, Report, Group Summary, Group Agent Assignments) works in.
+ * The branch picked in the top bar decides, and the page then offers no choice of its own. With
+ * "All branches" there, people with several branches get a Branch filter on the page, which starts
+ * from the top bar each time (like every other page's filters); with one branch the API takes it.
  *
  * `''` is "every branch I work in" where a page can show that (lists, reports for those with
- * consolidated access); anywhere that needs one branch (a new entry, a new group) `effective` is
- * the chosen branch, else the person's default one. A branch picked in the top bar decides for all
- * of these, and the pages then offer no choice of their own.
+ * consolidated access); anywhere that needs one branch (a new entry, a new group, a report without
+ * consolidated access) `effective` is the chosen branch, else the person's default one.
  */
 export function useRpBranch() {
   const { user } = useAuth()
   const { activeBranchId } = useActiveBranch()
   const { branches } = useBranchOptions('All branches')
-  const chosen = useState<string>('rp-branch', () => {
-    try { return localStorage.getItem(STORAGE_KEY) || '' } catch { return '' }
-  })
+  const chosen = ref('')
 
   // Several branches to choose from.
   const show = computed(() => branches.value.length > 1)
-  // What was chosen, if the person still works in it.
+  // What was chosen on this page, if the person works in it.
   const branchId = computed({
     get: () => activeBranchId.value || (show.value && branches.value.some(b => b.id === chosen.value) ? chosen.value : ''),
-    set: (value: string) => {
-      chosen.value = value
-      try { localStorage.setItem(STORAGE_KEY, value) } catch { /* private window: it just isn't remembered */ }
-    },
+    set: (value: string) => { chosen.value = value },
   })
   // The person's own branch: their default if they work in it, else the first.
   const defaultBranchId = computed(() => {

@@ -71,29 +71,37 @@
           <kbd>↵</kbd>
         </form>
         <div class="topbar-spacer"></div>
-        <!-- Several branches: the branch being shown, and a menu to change it. One branch: just its name. -->
-        <div v-if="canSwitch" ref="branchMenuEl" class="topbar-user-wrap" @keydown.esc="branchMenuOpen = false">
-          <button type="button" class="topbar-user" aria-haspopup="menu" :aria-expanded="branchMenuOpen" :aria-label="`Showing ${branchLine}. Change branch`" @click="branchMenuOpen = !branchMenuOpen">
-            <div class="profile-avatar topbar-avatar">{{ initials }}</div>
-            <div class="topbar-user-copy"><strong>{{ user?.full_name || 'Account' }}</strong><small>{{ branchLine }}</small></div>
-            <ChevronDown :size="15" class="topbar-chevron" :class="{ 'is-open': branchMenuOpen }" />
-          </button>
-          <div v-if="branchMenuOpen" class="topbar-menu" role="menu" aria-label="Branch">
-            <p class="topbar-menu-caption">SHOW DATA FOR</p>
-            <div class="topbar-menu-list">
-              <button v-for="option in branchChoices" :key="option.value" type="button" role="menuitemradio" :aria-checked="option.value === activeBranchId" class="topbar-menu-item" :class="{ 'is-active': option.value === activeBranchId }" @click="chooseBranch(option.value)">
-                <span>{{ option.label }}</span>
-                <Check v-if="option.value === activeBranchId" :size="15" />
-              </button>
+        <div class="topbar-actions">
+          <!-- The branch being shown: with several, a menu to change it; with one, just its name. -->
+          <div v-if="canSwitch" ref="branchMenuEl" class="topbar-menu-wrap" @keydown.esc="branchMenuOpen = false">
+            <button type="button" class="topbar-branch" aria-haspopup="menu" :aria-expanded="branchMenuOpen" :aria-label="`Showing ${branchLine}. Change branch`" @click="branchMenuOpen = !branchMenuOpen">
+              <Building2 :size="15" /><span>{{ branchLine }}</span><ChevronDown :size="15" class="topbar-chevron" :class="{ 'is-open': branchMenuOpen }" />
+            </button>
+            <div v-if="branchMenuOpen" class="topbar-menu" role="menu" aria-label="Branch">
+              <p class="topbar-menu-caption">SHOW DATA FOR</p>
+              <div class="topbar-menu-list">
+                <button v-for="option in branchChoices" :key="option.value" type="button" role="menuitemradio" :aria-checked="option.value === activeBranchId" class="topbar-menu-item" :class="{ 'is-active': option.value === activeBranchId }" @click="chooseBranch(option.value)">
+                  <span>{{ option.label }}</span>
+                  <Check v-if="option.value === activeBranchId" :size="15" />
+                </button>
+              </div>
             </div>
-            <NuxtLink to="/profile" role="menuitem" class="topbar-menu-item topbar-menu-profile"><UserRound :size="15" /><span>My profile</span></NuxtLink>
+          </div>
+          <span v-else-if="branchLine" class="topbar-branch is-static"><Building2 :size="15" /><span>{{ branchLine }}</span></span>
+
+          <div ref="profileMenuEl" class="topbar-menu-wrap" @keydown.esc="profileMenuOpen = false">
+            <button type="button" class="topbar-user" aria-haspopup="menu" :aria-expanded="profileMenuOpen" aria-label="Your account" @click="profileMenuOpen = !profileMenuOpen">
+              <div class="profile-avatar topbar-avatar">{{ initials }}</div>
+              <div class="topbar-user-copy"><strong>{{ user?.full_name || 'Account' }}</strong><small>{{ profileRole }}</small></div>
+              <ChevronDown :size="15" class="topbar-chevron" :class="{ 'is-open': profileMenuOpen }" />
+            </button>
+            <div v-if="profileMenuOpen" class="topbar-menu topbar-account-menu" role="menu" aria-label="Account">
+              <div class="topbar-menu-head"><strong>{{ user?.full_name || 'Account' }}</strong><small>{{ profileRole }}</small></div>
+              <NuxtLink to="/profile" role="menuitem" class="topbar-menu-item"><UserRound :size="15" /><span>My profile</span></NuxtLink>
+              <button type="button" role="menuitem" class="topbar-menu-item" @click="profileMenuOpen = false; onLogout()"><LogOut :size="15" /><span>Sign out</span></button>
+            </div>
           </div>
         </div>
-        <NuxtLink v-else to="/profile" class="topbar-user" aria-label="Open your profile">
-          <div class="profile-avatar topbar-avatar">{{ initials }}</div>
-          <div class="topbar-user-copy"><strong>{{ user?.full_name || 'Account' }}</strong><small>{{ branchLine }}</small></div>
-        </NuxtLink>
-        <button class="mobile-logout" aria-label="Sign out" @click="onLogout"><LogOut :size="17" /></button>
       </header>
 
       <!-- Changing branch reopens the page, so everything on it loads again for that branch. -->
@@ -361,15 +369,15 @@ onBeforeUnmount(() => {
   if (popTimer) clearTimeout(popTimer)
 })
 
-watch(() => route.fullPath, () => { mobileMenuOpen.value = false; branchMenuOpen.value = false })
+watch(() => route.fullPath, () => { mobileMenuOpen.value = false; branchMenuOpen.value = false; profileMenuOpen.value = false })
 
 const initials = computed(() => (user.value?.full_name || user.value?.username || 'A')
   .split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join(''))
 const profileRole = computed(() => isSuperAdmin.value ? 'Super Administrator' : user.value?.roles?.[0] || 'Administrator')
 
-// The line under the name: the one branch being shown, or all of them.
+// The branch shown in the top bar: the one picked, or all of them ('' without any branch).
 const { myBranches, canSwitch, activeBranch, activeBranchId, setActiveBranch } = useActiveBranch()
-const branchLine = computed(() => activeBranch.value?.name || (canSwitch.value ? 'All branches' : myBranches.value[0]?.name) || profileRole.value)
+const branchLine = computed(() => activeBranch.value?.name || (canSwitch.value ? 'All branches' : myBranches.value[0]?.name || ''))
 const branchChoices = computed(() => [
   { value: '', label: 'All branches' },
   ...myBranches.value.map(branch => ({ value: branch.id, label: `${branch.code} — ${branch.name}` })),
@@ -377,6 +385,9 @@ const branchChoices = computed(() => [
 const branchMenuOpen = ref(false)
 const branchMenuEl = ref<HTMLElement | null>(null)
 onClickOutside(branchMenuEl, () => { branchMenuOpen.value = false })
+const profileMenuOpen = ref(false)
+const profileMenuEl = ref<HTMLElement | null>(null)
+onClickOutside(profileMenuEl, () => { profileMenuOpen.value = false })
 
 const pageKey = ref(0)
 // Changing branch reopens the page, which loses what a form holds. The POS cart stays while the
@@ -455,7 +466,14 @@ async function onLogout() {
 .global-search input::placeholder { color: #899bb5; }
 .global-search kbd { padding: 2px 5px; border: 1px solid #e4eaf3; border-radius: 4px; color: #91a1b7; font-size: 10px; }
 .topbar-spacer { flex: 1; }
-.topbar-user-wrap { position: relative; min-width: 0; }
+.topbar-actions { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.topbar-menu-wrap { position: relative; min-width: 0; }
+.topbar-branch { display: inline-flex; align-items: center; gap: 7px; height: 36px; min-width: 0; max-width: 230px; padding: 0 10px; border: 1px solid #dfe7f2; border-radius: 9px; color: #1b3156; background: #fff; font: inherit; font-size: 12px; font-weight: 650; cursor: pointer; transition: background .15s ease, border-color .15s ease; }
+.topbar-branch > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topbar-branch > svg { flex: 0 0 auto; color: #607898; }
+.topbar-branch:hover, .topbar-branch[aria-expanded="true"] { border-color: #bdd5f7; background: #f5f8fd; }
+.topbar-branch.is-static { cursor: default; }
+.topbar-branch.is-static:hover { border-color: #dfe7f2; background: #fff; }
 .topbar-user { display: flex; align-items: center; gap: 9px; min-width: 0; padding: 4px 8px 4px 4px; border: 0; border-radius: 10px; color: inherit; background: transparent; font: inherit; text-align: left; text-decoration: none; cursor: pointer; transition: background .15s ease; }
 .topbar-user:hover, .topbar-user[aria-expanded="true"] { background: #f5f8fd; }
 .topbar-user:hover .topbar-avatar { box-shadow: 0 0 0 3px #e6effe; }
@@ -473,8 +491,12 @@ async function onLogout() {
 .topbar-menu-item > svg { flex: 0 0 auto; }
 .topbar-menu-item:hover { background: #f2f6fc; }
 .topbar-menu-item.is-active { color: #1769e8; background: #eef5ff; }
-.topbar-menu-profile { justify-content: flex-start; margin-top: 6px; border-top: 1px solid #edf1f7; border-radius: 0 0 8px 8px; color: #4e658a; }
-.mobile-brand, .mobile-logout{ display: none; }
+.topbar-account-menu { width: 220px; }
+.topbar-account-menu .topbar-menu-item { justify-content: flex-start; }
+.topbar-menu-head { display: flex; flex-direction: column; gap: 3px; margin: 2px 2px 6px; padding: 4px 7px 9px; border-bottom: 1px solid #edf1f7; }
+.topbar-menu-head strong { overflow: hidden; color: #1b3156; font-size: 12.5px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.topbar-menu-head small { color: #8293ad; font-size: 11px; }
+.mobile-brand { display: none; }
 .mobile-menu-backdrop { display: none; }
 .mobile-sheet { display: none; }
 .page-content { width: 100%; max-width: 1700px; margin: 0 auto; padding: 26px 28px 36px; }
@@ -490,12 +512,12 @@ async function onLogout() {
   .mobile-brand strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .small-brand-mark { width: 31px; height: 31px; border-radius: 9px; }
   .global-search { display: none; }
-  .topbar-spacer, .topbar-user-copy strong { display: none; }
-  .topbar-user-copy small { max-width: 96px; color: #31517f; font-size: 11px; font-weight: 650; }
-  .topbar-user, .topbar-user-wrap { margin-left: auto; border: 0; }
-  .topbar-user-wrap .topbar-user { margin-left: 0; }
+  .topbar-spacer, .topbar-user-copy, .topbar-user .topbar-chevron { display: none; }
+  /* The app name gives way first: the branch shown matters more. */
+  .topbar-actions { flex: 0 0 auto; margin-left: auto; gap: 8px; }
+  .topbar-branch { max-width: 140px; height: 34px; padding: 0 8px; gap: 5px; }
+  .topbar-user { padding: 2px; }
   .topbar-avatar { width: 33px; height: 33px; }
-  .mobile-logout { display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; border: 1px solid #e1e9f4; border-radius: 10px; color: #607898; background: #fff; cursor: pointer; }
   .page-content { padding: 18px 14px calc(96px + env(safe-area-inset-bottom)); }
   /* Floating glass capsule, like a native app's tab bar: content stays visible (blurred) behind it. */
   .mobile-nav { position: fixed; right: 12px; bottom: calc(10px + env(safe-area-inset-bottom)); left: 12px; z-index: 40; display: flex; justify-content: space-around; gap: 3px; padding: 7px; border: 1px solid rgb(255 255 255 / 70%); border-radius: 999px; background: linear-gradient(180deg, rgb(255 255 255 / 72%), rgb(242 247 255 / 58%)); box-shadow: inset 0 1px 0 rgb(255 255 255 / 90%), inset 0 -1px 0 rgb(255 255 255 / 30%), 0 0 0 .5px rgb(20 48 86 / 10%), 0 12px 32px rgb(26 58 100 / 18%); -webkit-backdrop-filter: blur(22px) saturate(180%); backdrop-filter: blur(22px) saturate(180%); }
