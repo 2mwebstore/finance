@@ -21,10 +21,21 @@ func NewRoleController(svc *services.RoleService, db *gorm.DB) *RoleController {
 	return &RoleController{svc: svc, db: db}
 }
 
-// Roles are shared by every branch. The owner/admin (full access) may change any of them. Anyone
-// else with roles.manage may add roles and change the ones that are theirs to change (see
-// blockedReason), and never give a role a permission they don't have themselves.
+// Every role a person adds belongs to one branch; only the built-in roles have none. The owner/admin
+// (full access) may change any role. Anyone else with roles.manage may add roles for their branches
+// and change the ones that are theirs to change (see blockedReason), and never give a role a
+// permission they don't have themselves.
 const msgRoleTooWide = "you can only give a role the permissions you have yourself"
+
+// roleVisible says whether the actor may see (and so give) the role. The owner/admin see every role,
+// others only their branches' roles, so the built-in ones stay out of the branches' sight. The Owner
+// role itself is for a Super Admin to give.
+func roleVisible(scope *accessScope, role *models.Role) bool {
+	if role.Code == services.OwnerRoleCode && !scope.superAdmin {
+		return false
+	}
+	return scope.Full || (role.BranchID != nil && scope.HasBranch(*role.BranchID))
+}
 
 // specRole is a role with these permissions, for CoversPermissions.
 func specRole(codes []string) models.Role {
@@ -93,14 +104,11 @@ func (rc *RoleController) loadChangeable(c *gin.Context, scope *accessScope, id 
 	return role, true
 }
 
-// branchOrDeny checks the branch a role is for ("" = shared): the owner/admin may pick any
-// branch or none; others must pick one of their own branches.
+// branchOrDeny checks the branch a role is for. Roles aren't shared between branches: the owner/admin
+// may pick any branch, others one of their own.
 func branchOrDeny(c *gin.Context, scope *accessScope, raw string) bool {
 	if strings.TrimSpace(raw) == "" {
-		if scope.Full {
-			return true
-		}
-		c.JSON(http.StatusBadRequest, gin.H{"error": "choose your branch for this role", "fields": gin.H{"branch_id": "choose your branch for this role"}})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "choose the branch for this role", "fields": gin.H{"branch_id": "choose the branch for this role"}})
 		return false
 	}
 	id, err := uuid.Parse(raw)
@@ -158,13 +166,14 @@ func (rc *RoleController) Update(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if _, ok := rc.loadChangeable(c, scope, id); !ok {
+	existing, ok := rc.loadChangeable(c, scope, id)
+	if !ok {
 		return
 	}
 	if in.PermissionCodes != nil && !coversOrDeny(c, scope, specRole(in.PermissionCodes)) {
 		return
 	}
-	if in.BranchID != nil && !branchOrDeny(c, scope, *in.BranchID) {
+	if in.BranchID != nil && !existing.IsSystem && !branchOrDeny(c, scope, *in.BranchID) {
 		return
 	}
 	role, err := rc.svc.Update(c.Request.Context(), id, in)
@@ -181,22 +190,30 @@ func (rc *RoleController) Get(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
 	}
+	scope, ok := loadScope(c, rc.db)
+	if !ok {
+		return
+	}
 	role, err := rc.svc.GetByID(c.Request.Context(), id)
 	if err != nil {
 		writeServiceError(c, err)
 		return
 	}
+	if !roleVisible(scope, role) {
+		writeServiceError(c, services.ErrRoleNotFound)
+		return
+	}
 	c.JSON(http.StatusOK, roleJSON(role))
 }
 
-// List: the owner/admin see every role; others see shared roles and their branches' roles.
-// branch_id narrows to shared roles and that branch's roles (e.g. for a user of that branch).
+// List: what roleVisible allows. branch_id narrows to that branch's roles (with the built-in ones
+// for the owner/admin), e.g. for a user of that branch.
 func (rc *RoleController) List(c *gin.Context) {
 	scope, ok := loadScope(c, rc.db)
 	if !ok {
 		return
 	}
-	f := services.RoleListFilter{Search: c.Query("search"), All: scope.Full || scope.AllBranches, BranchIDs: scope.BranchIDs}
+	f := services.RoleListFilter{Search: c.Query("search"), All: scope.Full, BranchIDs: scope.BranchIDs, HideOwner: !scope.superAdmin}
 	if raw := c.Query("branch_id"); raw != "" {
 		id, err := uuid.Parse(raw)
 		if err != nil || !scope.HasBranch(id) {

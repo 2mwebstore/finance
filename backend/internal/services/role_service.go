@@ -32,7 +32,7 @@ type CreateRoleInput struct {
 	Name            string   `json:"name" binding:"required,min=2,max=128"`
 	Description     string   `json:"description"`
 	PermissionCodes []string `json:"permission_codes"`
-	// BranchID: the branch this role is for; empty = shared by every branch.
+	// BranchID: the branch this role is for (the controller requires one; see branchOrDeny).
 	BranchID string `json:"branch_id"`
 }
 
@@ -40,10 +40,10 @@ type UpdateRoleInput struct {
 	Name            *string  `json:"name" binding:"omitempty,min=2,max=128"`
 	Description     *string  `json:"description"`
 	PermissionCodes []string `json:"permission_codes"`
-	BranchID        *string  `json:"branch_id"` // "" makes it shared
+	BranchID        *string  `json:"branch_id"`
 }
 
-// roleBranch checks a role's branch ("" = shared).
+// roleBranch checks a role's branch ("" = none: only built-in roles stay without one).
 func (s *RoleService) roleBranch(tx *gorm.DB, raw string) (*uuid.UUID, error) {
 	if strings.TrimSpace(raw) == "" {
 		return nil, nil
@@ -169,13 +169,18 @@ func (s *RoleService) GetByID(ctx context.Context, id uuid.UUID) (*models.Role, 
 	return &role, nil
 }
 
-// RoleListFilter: which roles a list shows. Without All, only shared roles and the roles of
-// BranchIDs; ForBranch narrows to shared roles and that branch's roles.
+// OwnerRoleCode is the built-in Owner role, which role lists leave out for all but a Super Admin.
+const OwnerRoleCode = "owner"
+
+// RoleListFilter: which roles a list shows. All adds the roles without a branch (the built-in ones)
+// to the branch roles; without it, only the roles of BranchIDs. ForBranch narrows the branch roles
+// to that branch. HideOwner leaves out the Owner role.
 type RoleListFilter struct {
 	Search    string
 	All       bool
 	BranchIDs []uuid.UUID
 	ForBranch *uuid.UUID
+	HideOwner bool
 }
 
 // List returns the roles; search (optional) matches the name, code or description.
@@ -183,12 +188,17 @@ func (s *RoleService) List(ctx context.Context, f RoleListFilter) ([]models.Role
 	search := f.Search
 	q := s.db.WithContext(ctx).Preload("Permissions")
 	switch {
-	case f.ForBranch != nil:
+	case f.ForBranch != nil && f.All:
 		q = q.Where("branch_id IS NULL OR branch_id = ?", *f.ForBranch)
+	case f.ForBranch != nil:
+		q = q.Where("branch_id = ?", *f.ForBranch)
 	case !f.All && len(f.BranchIDs) > 0:
-		q = q.Where("branch_id IS NULL OR branch_id IN ?", f.BranchIDs)
+		q = q.Where("branch_id IN ?", f.BranchIDs)
 	case !f.All:
-		q = q.Where("branch_id IS NULL")
+		q = q.Where("1 = 0")
+	}
+	if f.HideOwner {
+		q = q.Where("code <> ?", OwnerRoleCode)
 	}
 	if strings.TrimSpace(search) != "" {
 		like := textsearch.Contains(search)

@@ -18,8 +18,8 @@
             <div class="flex flex-wrap items-center gap-2"><h2 class="text-sm font-semibold text-navy">{{ role.name }}</h2><span v-if="role.is_system" class="rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-bold uppercase text-muted">System</span></div>
             <p class="mt-1 font-mono text-[10px] text-muted">{{ role.code }}</p>
             <div class="mt-2 flex flex-wrap gap-1.5">
-              <span class="inline-flex max-w-full items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold" :class="role.branch_id ? 'bg-amber-50 text-amber-800' : 'bg-indigo-50 text-indigo-600'" :title="role.branch_id ? 'A role for this branch only' : 'Shared by every branch'">
-                <span class="truncate">{{ role.branch_id ? `For ${role.branch?.code || 'one branch'}` : 'Shared' }}</span>
+              <span v-if="role.branch_id || !role.is_system" class="inline-flex max-w-full items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold" :class="role.branch_id ? 'bg-amber-50 text-amber-800' : 'bg-indigo-50 text-indigo-600'" :title="role.branch_id ? 'A role for this branch only' : 'Made before roles belonged to one branch: edit it to choose its branch'">
+                <span class="truncate">{{ role.branch_id ? `For ${role.branch?.code || 'one branch'}` : 'No branch yet' }}</span>
               </span>
               <span class="inline-flex max-w-full items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold" :class="scopeTone(role)" :title="scopeHint(role)">
                 <Building2 :size="11" class="shrink-0" /><span class="truncate">{{ scopeLabel(role) }}</span>
@@ -67,7 +67,7 @@
             <div class="space-y-1.5 text-xs font-semibold text-navy sm:col-span-2">
               Applies to
               <SearchSelect v-model="form.branch_id" :options="appliesOptions" :disabled="!!editingRole?.is_system" placeholder="Choose a branch" aria-label="Role applies to" :aria-invalid="formCheck.invalid('branch_id')" />
-              <small class="block font-normal text-muted">{{ editingRole?.is_system ? 'Built-in roles are shared by every branch.' : form.branch_id ? 'Only this branch sees the role, and only its users can be given it.' : 'Every branch can use this role.' }}</small>
+              <small class="block font-normal text-muted">{{ editingRole?.is_system ? 'Built-in roles belong to no branch, and only the owner or an admin can see and give them.' : 'Only this branch sees the role, and only its users can be given it.' }}</small>
             </div>
             <label class="space-y-1.5 text-xs font-semibold text-navy sm:col-span-2">Description<textarea v-model.trim="form.description" rows="2" maxlength="512" class="w-full rounded-lg border border-border px-3 py-2.5 text-sm font-normal" /></label>
           </div>
@@ -129,25 +129,22 @@ const editingRole = ref<Role | null>(null)
 const deleteTarget = ref<Role | null>(null)
 const form = reactive({ code: '', name: '', description: '', permission_codes: [] as string[], branch_id: '' })
 // Same rules as the API (CreateRoleInput / UpdateRoleInput); the code is set only when creating.
-// Branch-level managers make roles for one of their branches; the owner/admin may share them.
+// Every role but the built-in ones is for one branch.
 const formCheck = reactive(useFormErrors(
   () => ({ ...form }),
   () => ({
     name: [rule.required('name'), rule.minLength('name', 2), rule.maxLength('name', 128)],
     ...(formMode.value === 'create' ? { code: [rule.required('code'), rule.minLength('code', 2), rule.maxLength('code', 64)] } : {}),
-    ...(!hasFullAccess.value && !editingRole.value?.is_system ? { branch_id: [rule.required('branch')] } : {}),
+    ...(!editingRole.value?.is_system ? { branch_id: [rule.required('branch')] } : {}),
   }),
 ))
 
-// Roles are shared or for one branch.
 const { branches } = useBranchOptions()
 const branchChoices = computed(() => branches.value.map(b => ({ value: b.id, label: `${b.code} — ${b.name}` })))
-const appliesOptions = computed(() => [...(hasFullAccess.value || editingRole.value?.is_system ? [{ value: '', label: 'Shared — every branch' }] : []), ...branchChoices.value])
-const SHARED_ONLY = 'shared'
+const appliesOptions = computed(() => [...(editingRole.value?.is_system ? [{ value: '', label: 'Built-in role' }] : []), ...branchChoices.value])
 const appliesFilter = ref('')
-const appliesFilterOptions = computed(() => [{ value: '', label: 'All roles' }, { value: SHARED_ONLY, label: 'Shared roles' }, ...branchChoices.value])
-const visibleRoles = computed(() => roles.value.filter(role => !appliesFilter.value
-  || (appliesFilter.value === SHARED_ONLY ? !role.branch_id : role.branch_id === appliesFilter.value)))
+const appliesFilterOptions = computed(() => [{ value: '', label: 'All roles' }, ...branchChoices.value])
+const visibleRoles = computed(() => roles.value.filter(role => !appliesFilter.value || role.branch_id === appliesFilter.value))
 
 // Without full access a role can only get permissions the signed-in user has (the API checks too).
 const grantablePermissions = computed(() => hasFullAccess.value ? permissions.value : permissions.value.filter(permission => can(permission.code)))
@@ -201,7 +198,7 @@ watch(search, () => load())
 function openCreate() {
   formMode.value = 'create'
   editingRole.value = null
-  Object.assign(form, { code: '', name: '', description: '', permission_codes: [], branch_id: hasFullAccess.value ? '' : (branches.value.length === 1 ? branches.value[0]!.id : '') })
+  Object.assign(form, { code: '', name: '', description: '', permission_codes: [], branch_id: branches.value.length === 1 ? branches.value[0]!.id : '' })
   formError.value = ''
   formCheck.reset()
   modalOpen.value = true

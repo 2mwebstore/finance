@@ -189,7 +189,7 @@ export interface Role {
   permissions?: { id: string; code: string; name: string; module?: string }[]
   /** Always "assigned": users see only their own branches (Manage Branches sees every branch). */
   data_scope?: DataScope
-  /** A role for one branch (shown and given only there); empty = shared by every branch. */
+  /** A role for one branch (shown and given only there); empty = a built-in role, only for the owner/admin. */
   branch_id?: string | null
   branch?: { id: string; code: string; name: string }
   /** From the role list: whether the signed-in user may edit (and delete) this role. */

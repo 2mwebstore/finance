@@ -12,7 +12,7 @@
         <label class="space-y-1 text-xs font-medium text-muted">Email<input v-model.trim="createForm.email" type="email" required :aria-invalid="createCheck.invalid('email')" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" /></label>
         <label class="space-y-1 text-xs font-medium text-muted">Full name<input v-model.trim="createForm.full_name" required minlength="2" :aria-invalid="createCheck.invalid('full_name')" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" /></label>
         <label class="space-y-1 text-xs font-medium text-muted">Temporary PIN ({{ MIN_PIN_LENGTH }}–{{ MAX_PIN_LENGTH }} digits)<input v-model="createForm.password" type="password" inputmode="numeric" :pattern="`[0-9]{${MIN_PIN_LENGTH},${MAX_PIN_LENGTH}}`" :maxlength="MAX_PIN_LENGTH" :minlength="MIN_PIN_LENGTH" required autocomplete="new-password" :aria-invalid="createCheck.invalid('password')" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" :placeholder="`${MIN_PIN_LENGTH}–${MAX_PIN_LENGTH} digits`" /></label>
-        <div class="space-y-1 text-xs font-medium text-muted"><span class="block">Role</span><SearchSelect v-model="createForm.role_code" :options="createRoleOptions" placeholder="Select a role" search-placeholder="Search roles…" aria-label="User role" :aria-invalid="createCheck.invalid('role_codes')" /></div>
+        <div class="space-y-1 text-xs font-medium text-muted"><span class="block">Role</span><SearchSelect v-model="createForm.role_code" :options="createRoleOptions" placeholder="Select a role" search-placeholder="Search roles…" :empty-text="createRoleOptions.length ? undefined : createForm.branch_id ? 'No roles for this branch yet: add one in Roles & Permissions' : 'Choose a branch first'" aria-label="User role" :aria-invalid="createCheck.invalid('role_codes')" /></div>
         <div class="space-y-1 text-xs font-medium text-muted"><span class="block">Branch</span><SearchSelect v-model="createForm.branch_id" :options="branchOptions" placeholder="Select a branch" search-placeholder="Search branches…" aria-label="User branch" :aria-invalid="createCheck.invalid('branch_ids')" /></div>
         <div class="space-y-1 text-xs font-medium text-muted sm:col-span-2">
           <span class="block">Managers <small>(approve or reject this user's transactions · optional)</small></span>
@@ -182,14 +182,24 @@ const assignableRoles = computed(() => roles.value.filter((role) => {
   if (hasFullAccess.value || !role.permissions) return true
   return role.permissions.every(permission => permissions.value.includes(permission.code))
 }))
-// Shared roles, and roles for the branches the user is in (a branch role is only for its branch).
+// A new user's branch: the one picked in the top bar, or the only one there is.
+function defaultBranchId() {
+  return activeBranchId.value || (branches.value.length === 1 ? branches.value[0]!.id : '')
+}
+// Built-in roles (only the owner/admin get them from the API), and roles for the branches the user
+// is in (a branch role is only for its branch).
 function roleOptionsFor(branchIds: string[]) {
   return assignableRoles.value
     .filter(role => !role.branch_id || branchIds.includes(role.branch_id))
     .map(role => ({ value: role.code, label: role.branch_id ? `${role.name} (${role.branch?.code || 'branch'})` : role.name }))
 }
 const createRoleOptions = computed(() => roleOptionsFor(createForm.branch_id ? [createForm.branch_id] : []))
-const editRoleOptions = computed(() => roleOptionsFor(editForm.branch_ids))
+// A role the editor can't give stays on the list for someone who already has it, so it still shows.
+const editRoleOptions = computed(() => {
+  const options = roleOptionsFor(editForm.branch_ids)
+  const held = (editingUser.value?.roles || []).filter(role => !options.some(option => option.value === role.code))
+  return [...options, ...held.map(role => ({ value: role.code, label: role.name }))]
+})
 // A branch role no longer fits once its branch is taken off the user.
 // Only branch roles are dropped; other roles the editor can't hand out stay as they are.
 function fitsBranches(code: string, branchIds: string[]) {
@@ -276,6 +286,7 @@ async function load() {
     items.value = userResult.items || []
     roles.value = roleResult.items || []
     branches.value = branchResult.items || []
+    if (!createForm.branch_id) createForm.branch_id = defaultBranchId()
     allUsers.value = everyone.items || []
   } catch (e: any) {
     error.value = e?.data?.error || 'Could not load users.'
@@ -359,7 +370,7 @@ async function create() {
       manager_ids: createForm.manager_ids,
     } })
     const name = createForm.full_name.trim() || createForm.username.trim()
-    Object.assign(createForm, { username: '', email: '', full_name: '', password: '', role_code: '', branch_id: activeBranchId.value, manager_ids: [] })
+    Object.assign(createForm, { username: '', email: '', full_name: '', password: '', role_code: '', branch_id: defaultBranchId(), manager_ids: [] })
     showCreate.value = false
     toast.success(`${name} can sign in with their username and PIN.`, { title: 'User created' })
     await load()

@@ -48,8 +48,9 @@ func (uc *UserController) manageableUser(c *gin.Context, scope *accessScope) (*m
 }
 
 // checkAssignableRoles rejects roles that would give the target more power than the actor has,
-// and branch roles of a branch the user isn't in.
-func (uc *UserController) checkAssignableRoles(c *gin.Context, scope *accessScope, codes []string, userBranches []uuid.UUID) bool {
+// branch roles of a branch the user isn't in, and roles hidden from the actor (roleVisible) unless
+// the user already holds them: editing someone doesn't take away a role the editor can't see.
+func (uc *UserController) checkAssignableRoles(c *gin.Context, scope *accessScope, codes []string, userBranches []uuid.UUID, held []models.Role) bool {
 	if len(codes) == 0 {
 		return true
 	}
@@ -62,10 +63,19 @@ func (uc *UserController) checkAssignableRoles(c *gin.Context, scope *accessScop
 	for _, id := range userBranches {
 		in[id] = true
 	}
-	for _, r := range roles {
+	holds := map[string]bool{}
+	for _, r := range held {
+		holds[r.Code] = true
+	}
+	for i := range roles {
+		r := &roles[i]
 		if r.BranchID != nil && !in[*r.BranchID] {
 			msg := "the role " + r.Name + " is for another branch; add the user to that branch first"
 			c.JSON(http.StatusBadRequest, gin.H{"error": msg, "fields": gin.H{"role_codes": msg}})
+			return false
+		}
+		if !holds[r.Code] && !roleVisible(scope, r) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "you can't give the role " + r.Name})
 			return false
 		}
 	}
@@ -200,7 +210,7 @@ func (uc *UserController) Create(c *gin.Context) {
 			newBranches = append(newBranches, id)
 		}
 	}
-	if !uc.checkAssignableRoles(c, scope, in.RoleCodes, newBranches) {
+	if !uc.checkAssignableRoles(c, scope, in.RoleCodes, newBranches, nil) {
 		return
 	}
 	managerIDs, ok := uc.checkManagers(c, scope, uuid.Nil, newBranches, in.ManagerIDs)
@@ -398,7 +408,7 @@ func (uc *UserController) AssignRoles(c *gin.Context) {
 	for _, b := range target.Branches {
 		userBranches = append(userBranches, b.ID)
 	}
-	if !uc.checkAssignableRoles(c, scope, body.RoleCodes, userBranches) {
+	if !uc.checkAssignableRoles(c, scope, body.RoleCodes, userBranches, target.Roles) {
 		return
 	}
 	if err := uc.svc.AssignRoles(c.Request.Context(), target.ID, body.RoleCodes, actorIsSuperAdmin(c, uc.db)); err != nil {
