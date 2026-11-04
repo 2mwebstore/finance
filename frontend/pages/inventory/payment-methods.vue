@@ -1,5 +1,5 @@
 <template>
-  <section class="mx-auto max-w-3xl space-y-4">
+  <section class="space-y-4">
     <header class="flex flex-wrap items-center justify-between gap-3">
       <div>
         <p class="text-[10px] font-bold tracking-[0.14em] text-slate-400">INVENTORY</p>

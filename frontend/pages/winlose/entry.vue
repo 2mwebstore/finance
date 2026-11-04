@@ -1,5 +1,5 @@
 <template>
-  <section class="rp-compact mx-auto max-w-5xl space-y-4">
+  <section class="rp-compact space-y-4">
     <!-- The entries: when each was made and its title -->
     <template v-if="!form">
       <header class="flex flex-wrap items-center justify-between gap-3">

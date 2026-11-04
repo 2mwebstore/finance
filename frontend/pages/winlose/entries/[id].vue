@@ -1,5 +1,5 @@
 <template>
-  <section class="rp-compact mx-auto max-w-5xl space-y-4">
+  <section class="rp-compact space-y-4">
     <header class="space-y-2">
       <button type="button" class="inline-flex items-center gap-1 rounded-lg border border-border bg-white px-3 py-1.5 text-xs font-semibold text-navy hover:bg-canvas" @click="goBack"><ChevronLeft :size="14" /> Back</button>
       <h1 class="text-xl font-bold text-navy">{{ sheet?.entry?.title || 'Entry' }}</h1>
