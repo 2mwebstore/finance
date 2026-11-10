@@ -598,6 +598,8 @@ export interface AssignmentGroup {
   partners: AssignmentPartner[]
   /** Weeks entered under its agents (taken-out ones too); a group with weeks can't be deleted. */
   weeks: number
+  /** On a save only: weeks saved before an agent was put in the group that count in it now. */
+  counted_weeks?: number
 }
 
 export interface WinLoseFormula {

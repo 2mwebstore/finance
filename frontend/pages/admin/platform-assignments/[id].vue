@@ -99,9 +99,9 @@
         <div class="space-y-1 text-xs font-medium text-muted">From<DatePicker v-model="startsOn" aria-label="First day" /></div>
       </div>
 
-      <p v-if="!isNew" class="text-[11px] text-muted">An agent taken out is ended if weeks were entered for it (they stay), else removed. An agent put in starts today.</p>
+      <p v-if="!isNew" class="text-[11px] text-muted">An agent taken out is ended if weeks were entered for it (they stay), else removed. An agent put in starts today; its weeks already saved for this week count in the group too.</p>
       <AppAlert v-if="group?.partners.length" type="warning" title="This group still has partners" :message="`${group.partners.map(p => `${p.partner_name} ${formatRate(p.commission_rate)}`).join(', ')}. Saving takes them off: from then on each agent’s rate above is used. Weeks already saved keep their partner shares.`" />
-      <p v-else-if="isNew" class="text-[11px] text-muted">An agent can be in more than one group, at its own rate in each. Results are entered once a week; the first day can be in the past to enter earlier weeks.</p>
+      <p v-else-if="isNew" class="text-[11px] text-muted">An agent can be in more than one group, at its own rate in each. Results are entered once a week; the first day can be in the past to enter earlier weeks. Weeks already saved from the first day on count in the group too (finalized weeks stay as they are).</p>
 
       <AppAlert v-if="formError" title="Couldn’t save the group" :message="formError" dismissible @dismiss="formError = ''" />
       <div class="flex flex-wrap items-center justify-end gap-2 border-t border-border pt-4">
@@ -253,7 +253,8 @@ async function save() {
       ? await api<AssignmentGroup>('/platform-groups', { method: 'POST', body })
       : await api<AssignmentGroup>(`/platform-groups/${route.params.id}`, { method: 'PATCH', body })
     saved.value = true
-    toast.success(`${g.agents.length} ${g.agents.length === 1 ? 'agent' : 'agents'}; new weeks use these types and rates.`, { title: `“${g.title}” ${isNew.value ? 'made' : 'updated'}` })
+    const counted = g.counted_weeks ? ` ${g.counted_weeks} ${g.counted_weeks === 1 ? 'week' : 'weeks'} saved before now count in it.` : ''
+    toast.success(`${g.agents.length} ${g.agents.length === 1 ? 'agent' : 'agents'}; new weeks use these types and rates.${counted}`, { title: `“${g.title}” ${isNew.value ? 'made' : 'updated'}` })
     await navigateTo('/admin/platform-assignments')
   } catch (e: any) {
     formError.value = e?.data?.error || 'Could not save the group.'

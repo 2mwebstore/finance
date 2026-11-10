@@ -76,7 +76,7 @@
       <div class="space-y-1">
         <label for="entry-title" class="block text-xs font-medium text-muted">Title</label>
         <div class="flex items-center gap-2">
-          <input id="entry-title" v-model="title" maxlength="128" :disabled="!canSave" :aria-invalid="titleMissing ? 'true' : undefined" class="h-10 min-w-0 flex-1 rounded-lg border border-border px-3 text-sm text-navy disabled:bg-canvas disabled:text-muted" placeholder="e.g. Week 44 Phnom Penh" />
+          <input id="entry-title" v-model="title" maxlength="128" :disabled="!canSave" :aria-invalid="titleMissing ? 'true' : undefined" class="h-10 min-w-0 flex-1 rounded-lg border border-border px-3 text-sm text-navy disabled:bg-canvas disabled:text-muted" placeholder="e.g. Week (01-06)" />
           <button v-if="canSave && titleChanged && title.trim()" type="button" class="action-chip action-success" :disabled="saving" @click="trySave(null)"><Save :size="13" /> {{ saving && !only ? 'Saving…' : 'Save' }}</button>
         </div>
       </div>
@@ -85,6 +85,8 @@
       <AppAlert v-else-if="error" title="Couldn’t load the week" :message="error"><template #action><button type="button" @click="load">Try again</button></template></AppAlert>
       <template v-else-if="sheet">
         <AppAlert v-if="sheet.locked" type="warning" title="This week is finalized" :message="`The week of ${formatDocDate(sheet.week_start)} – ${formatDocDate(sheet.week_end)} is settled. Reopen it on the Report to change it.`" />
+        <!-- Finds an agent by user or name; what was typed in the others stays -->
+        <div v-if="sheet.rows.length" class="sm:max-w-sm"><ListSearch v-model="agentSearch" :delay="150" placeholder="Search agent…" /></div>
         <div class="overflow-hidden rounded-xl border border-border bg-white">
           <table class="wl-table w-full text-left text-sm">
             <thead class="bg-canvas text-[10px] uppercase tracking-wide text-slate-500">
@@ -97,11 +99,12 @@
               </tr>
             </thead>
             <tbody class="divide-y divide-border">
-              <tr v-for="(row, i) in sheet.rows" :key="row.platform_id" :class="changed(row) ? 'bg-amber-50/40' : ''">
-                <td class="row-no px-3 py-2.5 text-center text-sm tabular-nums text-muted">{{ i + 1 }}</td>
+              <tr v-for="{ row, no } in shownRows" :key="row.platform_id" :class="changed(row) ? 'bg-amber-50/40' : ''">
+                <td class="row-no px-3 py-2.5 text-center text-sm tabular-nums text-muted">{{ no }}</td>
                 <td class="px-3 py-2.5">
                   <!-- The currency the amounts are entered in (on phones the row's number comes first) -->
-                  <p class="font-mono text-sm font-semibold text-navy"><span class="row-no-inline font-sans text-muted">{{ i + 1 }}. </span>{{ row.platform_code }} <span class="font-sans text-xs font-normal text-muted">· {{ row.currency }}</span></p>
+                  <p class="font-mono text-sm font-semibold text-navy"><span class="row-no-inline font-sans text-muted">{{ no }}. </span>{{ row.platform_code }} <span class="font-sans text-xs font-normal text-muted">· {{ row.currency }}</span></p>
+                  <p v-if="row.platform_name && row.platform_name !== row.platform_code" class="text-[11px] text-muted">{{ row.platform_name }}</p>
                   <p class="text-[11px]" :class="changed(row) ? 'font-semibold text-amber-700' : 'text-muted'">{{ statusOf(row) }}</p>
                   <!-- ✅ / ❌ on this agent in the entry, once saved -->
                   <div v-if="row.result_id" class="mt-1"><WinloseEntryReactions :url="`/winlose/results/${row.result_id}/reactions`" :reactions="row.reactions || []" /></div>
@@ -118,6 +121,7 @@
                 </td>
               </tr>
               <tr v-if="!sheet.rows.length" class="empty-row"><td :colspan="canSave ? 5 : 4" class="px-3 py-8 text-center text-sm text-muted">No agents are turned on.<NuxtLink v-if="can('platforms.create')" to="/admin/platforms" class="ml-1 font-semibold text-primary">Agents</NuxtLink></td></tr>
+              <tr v-else-if="!shownRows.length" class="empty-row"><td :colspan="canSave ? 5 : 4" class="px-3 py-8 text-center text-sm text-muted">No agent matches “{{ agentSearch }}”.</td></tr>
             </tbody>
           </table>
         </div>
@@ -208,15 +212,25 @@ const loading = ref(false)
 const error = ref('')
 const title = ref('')
 const edits = reactive<Record<string, { win_lose: string; commission: string }>>({})
+// The agents shown: those matching the search by user or name, each keeping its number.
+const agentSearch = ref('')
+const shownRows = computed(() => {
+  const rows = (sheet.value?.rows || []).map((row, i) => ({ row, no: i + 1 }))
+  const q = agentSearch.value.trim().toLowerCase()
+  if (!q) return rows
+  return rows.filter(({ row }) => row.platform_code.toLowerCase().includes(q) || (row.platform_name || '').toLowerCase().includes(q))
+})
 
 function openNew() {
   // A new entry is in the branch chosen (else the person's own; with one branch the API picks it).
+  agentSearch.value = ''
   form.value = { mode: 'new', week_start: mondayOf(today), entry_id: '', branch_id: rp.effective.value }
   load()
 }
 // Another branch for a new entry has other agents: the sheet is loaded again.
 watch(() => form.value?.branch_id, () => { if (form.value?.mode === 'new' && !form.value.entry_id) load() })
 function openEdit(e: WinLoseEntry) {
+  agentSearch.value = ''
   form.value = { mode: 'edit', week_start: e.week_start, entry_id: e.id, branch_id: e.branch_id }
   load()
 }

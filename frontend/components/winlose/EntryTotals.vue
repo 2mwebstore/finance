@@ -21,7 +21,7 @@
                 <NuxtLink v-else-if="e.id" :to="`/winlose/entries/${e.id}`" class="font-semibold text-primary hover:underline">{{ e.title }}</NuxtLink>
                 <span v-else class="font-semibold">{{ e.title }}</span>
                 <span v-if="e.created_at" class="block text-muted">{{ formatDocDate(e.created_at) }}<template v-if="e.created_by"> · {{ e.created_by }}</template></span>
-                <WinloseEntryReactions v-if="e.id" class="mt-1" :url="`/winlose/entries/${e.id}/reactions`" :reactions="e.reactions || []" />
+                <WinloseEntryReactions v-if="e.id && reactions" class="mt-1" :url="`/winlose/entries/${e.id}/reactions`" :reactions="e.reactions || []" />
               </template>
               <span class="block text-muted sm:hidden">{{ t.currency }}</span>
             </td>
@@ -43,10 +43,11 @@ import { formatDocDate } from '~/utils/inventory'
 import { formatAmount } from '~/utils/winlose'
 
 /**
- * A report's totals for each data entry (by_entry), per currency, with its ✅ / ❌. An entry's title
- * opens its page or, selectable, its detail in the report (`select` with the entry).
+ * A report's totals for each data entry (by_entry), per currency (with its ✅ / ❌ when reactions is
+ * set: Group summary). An entry's title opens its page or, selectable, its detail in the report
+ * (`select` with the entry).
  */
-withDefaults(defineProps<{ entries: WinLoseReportEntry[]; title?: string; selectable?: boolean }>(), { title: 'By data entry', selectable: false })
+withDefaults(defineProps<{ entries: WinLoseReportEntry[]; title?: string; selectable?: boolean; reactions?: boolean }>(), { title: 'By data entry', selectable: false, reactions: false })
 const emit = defineEmits<{ select: [entry: WinLoseReportEntry] }>()
 
 function tone(value: string) {
