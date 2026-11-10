@@ -723,6 +723,9 @@ export interface WinLoseReportLine extends WinLoseSums {
   formula: string
   /** Who shared the Total, by name (partner_id null: weeks with no partner); empty when no week had partners. */
   partners: { partner_id: string | null; partner_name: string; rate_min: string; rate_max: string; jame_ps: string; entries: number }[]
+  /** An entry's line (by_entry): the agent's one result in it, with people's ✅ / ❌ on it (the same as on its row in Data entry). Not on lines that add results up. */
+  result_id?: string
+  reactions?: EntryReaction[]
 }
 
 export interface WinLoseReport {

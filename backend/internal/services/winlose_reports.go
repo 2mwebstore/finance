@@ -79,6 +79,10 @@ type ReportLine struct {
 	Partners []LineShare `json:"partners"`
 	// Formula: the version every week of the line was worked out with ("" when they differ).
 	Formula string `json:"formula"`
+	// ResultID: an entry's line is the agent's one result in it (by_entry), with people's ✅ and ❌
+	// on it, the same as on the agent's row in Data entry. Left out of lines that add results up.
+	ResultID  *uuid.UUID      `json:"result_id,omitempty"`
+	Reactions []EntryReaction `json:"reactions,omitempty"`
 	Sums
 }
 
@@ -296,6 +300,9 @@ func (s *PlatformService) Report(ctx context.Context, f ReportFilter, scope Bran
 	if f.ByEntry {
 		entryLines, _, _, err := s.reportLines(ctx, results, "r.entry_id, "+group, rate, jame, formula, f.PartnerID)
 		if err != nil {
+			return nil, err
+		}
+		if err := s.withResultReactions(ctx, results, entryLines); err != nil {
 			return nil, err
 		}
 		if out.Entries, err = s.reportEntries(ctx, entryLines); err != nil {
@@ -537,6 +544,38 @@ func (s *PlatformService) reportEntries(ctx context.Context, lines []ReportLine)
 		out = append(out, ReportEntry{Title: "Saved before entries", Totals: sortedSums(none), Lines: linesOf[""], Reactions: []EntryReaction{}})
 	}
 	return out, nil
+}
+
+// withResultReactions gives each line of a data entry its result (an agent has one in an entry)
+// and people's ✅ and ❌ on it. Lines of results saved before entries can add up several weeks, so
+// they get none.
+func (s *PlatformService) withResultReactions(ctx context.Context, results func() *gorm.DB, lines []ReportLine) error {
+	var rows []struct {
+		ID, EntryID, PlatformID uuid.UUID
+	}
+	if err := results().Where("r.entry_id IS NOT NULL").Select("r.id, r.entry_id, r.platform_id").Scan(&rows).Error; err != nil {
+		return err
+	}
+	resultOf := make(map[string]uuid.UUID, len(rows))
+	ids := make([]uuid.UUID, len(rows))
+	for i, r := range rows {
+		resultOf[r.EntryID.String()+"|"+r.PlatformID.String()] = r.ID
+		ids[i] = r.ID
+	}
+	reactions, err := s.reactionsOf(ctx, resultReactions, ids)
+	if err != nil {
+		return err
+	}
+	for i := range lines {
+		l := &lines[i]
+		if l.EntryID == nil || l.Entries != 1 {
+			continue
+		}
+		if id, ok := resultOf[l.EntryID.String()+"|"+l.PlatformID.String()]; ok {
+			l.ResultID, l.Reactions = &id, orNone(reactions[id])
+		}
+	}
+	return nil
 }
 
 // weekTotals adds the results up by week and currency (jame: the Total's column).

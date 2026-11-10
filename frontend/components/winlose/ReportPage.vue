@@ -57,17 +57,18 @@
                 </template>
               </div>
             </div>
-            <WinloseReportTable :report="{ lines: e.lines || [], totals: e.totals }" by-group selectable @select="openAgent" />
+            <WinloseReportTable :report="{ lines: e.lines || [], totals: e.totals }" by-group selectable :reactions="summary" @select="openAgent" />
           </article>
         </template>
         <!-- One group over the dates: every agent in one card (on Group summary with an Image button:
-             one picture of all of them) -->
+             one picture of all of them, and each agent's ✅ / ❌ when the dates hold one entry) -->
         <article v-else-if="groupId" id="group-card" class="space-y-1.5">
           <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-1">
             <h3 class="text-sm font-semibold text-navy">{{ formatDocDate(range.from) }} – {{ formatDocDate(range.to) }}</h3>
             <WinloseEntryImage v-if="summary" target-id="group-card" :title="`${groupTitle} ${range.from} to ${range.to}`" :group="groupTitle" />
           </div>
-          <WinloseReportTable :report="report" by-group selectable @select="openAgent" />
+          <WinloseReportTable :report="groupCard || report" by-group selectable :reactions="summary" @select="openAgent" />
+          <p v-if="summary && (report.entries?.length || 0) > 1 && can('winlose.react')" class="px-1 text-[11px] text-muted">To give an agent ✅ / ❌, open its week in By week.</p>
         </article>
         <!-- Group summary: each agent's totals in each currency (an agent opens its groups) -->
         <article v-else-if="summary" class="overflow-x-auto rounded-xl border border-border bg-white">
@@ -125,8 +126,9 @@ import { downloadCsv, formatAmount, mondayOf, plusDays, weekLabel } from '~/util
 /**
  * The win/lose Report and the Group summary: totals by group and by agent over the dates, where a
  * group opens its agents, an agent its groups and a week of a detail (By week) that week of it.
- * Report (default) has the week's settlement; Group summary (summary) has each entry's ✅ / ❌ and
- * the Image button (a picture of an entry or of a group over the dates).
+ * Report (default) has the week's settlement; Group summary (summary) has each entry's ✅ / ❌, each
+ * agent's in an entry (its result's, as in Data entry) and the Image button (a picture of an entry
+ * or of a group over the dates).
  */
 const props = withDefaults(defineProps<{ summary?: boolean }>(), { summary: false })
 
@@ -196,6 +198,20 @@ watch(weekStart, (week) => {
     rangeBefore = null
   }
 }, { immediate: true })
+
+// The dates hold one data entry: the group card's agents are their results in it, so they get their
+// ✅ / ❌ there too (over more entries an agent's line adds them up: its week in By week has them).
+const { can } = usePermissions()
+const groupCard = computed(() => {
+  const r = report.value
+  const only = r?.entries?.length === 1 ? r.entries[0] : undefined
+  if (!r || !props.summary || !only?.id) return r
+  const inEntry = new Map((only.lines || []).map(l => [`${l.platform_id}|${l.currency}`, l]))
+  return { ...r, lines: r.lines.map((l) => {
+    const e = inEntry.get(`${l.platform_id}|${l.currency}`)
+    return e?.result_id ? { ...l, result_id: e.result_id, reactions: e.reactions } : l
+  }) }
+})
 
 const isWholeWeek = computed(() => !!range.value.from && mondayOf(range.value.from) === range.value.from && plusDays(range.value.from, 6) === range.value.to)
 

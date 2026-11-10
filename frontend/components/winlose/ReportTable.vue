@@ -16,7 +16,10 @@
           <tr class="text-navy">
             <td class="name">
               <button v-if="selectable" type="button" class="code font-mono font-semibold text-primary hover:underline" @click="emit('select', line.platform_id)">{{ line.platform_code }}</button>
-              <span v-else class="code font-mono font-semibold">{{ line.platform_code }}</span> <span class="block text-muted sm:inline"><span class="hidden sm:inline">· </span>{{ line.currency }}<span v-if="showRates" class="sm:hidden"> · {{ usedRate(line.rate_min, line.rate_max, line.formula) }}</span></span></td>
+              <span v-else class="code font-mono font-semibold">{{ line.platform_code }}</span> <span class="block text-muted sm:inline"><span class="hidden sm:inline">· </span>{{ line.currency }}<span v-if="showRates" class="sm:hidden"> · {{ usedRate(line.rate_min, line.rate_max, line.formula) }}</span></span>
+              <!-- The agent's result in an entry: its ✅ / ❌ (left out of the picture) -->
+              <div v-if="reactions && line.result_id" class="mt-1" data-capture-skip><WinloseEntryReactions :url="`/winlose/results/${line.result_id}/reactions`" :reactions="line.reactions || []" /></div>
+            </td>
             <td class="amount" :class="tone(line.win_lose)">{{ formatAmount(line.win_lose, line.currency) }}</td>
             <td class="amount">{{ formatAmount(line.commission, line.currency) }}</td>
             <td v-if="showRates" class="amount hidden sm:table-cell">{{ usedRate(line.rate_min, line.rate_max, line.formula) }}</td>
@@ -44,9 +47,10 @@ import { formatAmount, usedRate } from '~/utils/winlose'
 /**
  * A win/lose report's lines by agent, with the total per currency (`jame_ps` is the Total). For one
  * group (byGroup) each agent also shows the rate its Total is at (an agent at 60%: 40%).
- * Selectable: an agent's code opens its detail (`select` with its id).
+ * Selectable: an agent's code opens its detail (`select` with its id). With reactions, an agent's
+ * line that is its result in an entry (result_id) has its ✅ / ❌ under it.
  */
-const props = withDefaults(defineProps<{ report: Pick<WinLoseReport, 'lines' | 'totals'>; byGroup?: boolean; selectable?: boolean }>(), { byGroup: false, selectable: false })
+const props = withDefaults(defineProps<{ report: Pick<WinLoseReport, 'lines' | 'totals'>; byGroup?: boolean; selectable?: boolean; reactions?: boolean }>(), { byGroup: false, selectable: false, reactions: false })
 // Rates need View Rates in Reports (the API leaves them out without it).
 const { can } = usePermissions()
 const showRates = computed(() => props.byGroup && can('winlose-reports.rates'))

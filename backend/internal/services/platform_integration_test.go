@@ -263,6 +263,9 @@ func TestAgentReactions(t *testing.T) {
 	if list, _ := f.svc.ListEntries(f.ctx, EntryFilter{}, all); len(list) != 1 || len(list[0].Reactions) != 0 {
 		t.Errorf("the entry itself has none: %+v", list)
 	}
+	// The reports by entry show them on the agent's line in the entry; lines that add results up
+	// have none.
+	checkReportReactions(t, f, nil, sheet.Entry.ID, *r1.ResultID, "TWL Other no, TWL Tester yes")
 	// A correction keeps them; deleting the entry removes them.
 	if _, _, err := f.save(f.week, 0, canAll, "typo", row(f.p1, "1100", "200")); err != nil {
 		t.Fatal(err)
@@ -278,6 +281,62 @@ func TestAgentReactions(t *testing.T) {
 	if left != 0 {
 		t.Errorf("%d agent reactions left after deleting the entry", left)
 	}
+}
+
+// checkReportReactions: in the reports by entry (all of it, and one entry; for one group with
+// groupID) the agent's line in the entry is its result with these reactions, and the lines that
+// add results up have none.
+func checkReportReactions(t *testing.T, f *wlFixture, groupID *uuid.UUID, entryID, resultID uuid.UUID, want string) {
+	t.Helper()
+	for name, filter := range map[string]ReportFilter{
+		"all":      {ByEntry: true, GroupID: groupID},
+		"an entry": {ByEntry: true, GroupID: groupID, EntryID: &entryID},
+	} {
+		filter.DateFrom, filter.DateTo = dayString(f.week), dayString(f.week.AddDate(0, 0, 6))
+		rep, err := f.svc.Report(f.ctx, filter, all, true, f.actor)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if len(rep.Lines) != 1 || rep.Lines[0].ResultID != nil || rep.Lines[0].Reactions != nil {
+			t.Errorf("%s: the added-up line has no result or reactions: %+v", name, rep.Lines)
+		}
+		if len(rep.Entries) != 1 || len(rep.Entries[0].Lines) != 1 {
+			t.Fatalf("%s: one entry with p1: %+v", name, rep.Entries)
+		}
+		l := rep.Entries[0].Lines[0]
+		got := []string{}
+		for _, r := range l.Reactions {
+			got = append(got, r.UserName+" "+r.Reaction)
+		}
+		sort.Strings(got)
+		if l.ResultID == nil || *l.ResultID != resultID || strings.Join(got, ", ") != want {
+			t.Errorf("%s: the entry's line has the agent's result and its reactions: %v %v", name, l.ResultID, got)
+		}
+	}
+}
+
+// Group summary's group: its agents in an entry have their ✅ and ❌ (the same as in Data entry).
+func TestAgentReactionsInAGroup(t *testing.T) {
+	f := newWLFixture(t)
+	f.db.Model(&models.User{}).Where("id = ?", f.actor).Update("default_branch_id", f.hq[0].ID)
+	defer f.db.Model(&models.User{}).Where("id = ?", f.actor).Update("default_branch_id", nil)
+	g, err := f.svc.CreateGroup(f.ctx, GroupInput{Title: "Reacted", Agents: []GroupAgentInput{{PlatformID: f.p1.ID.String(), CommissionRate: "10"}}, StartsOn: dayString(f.week)}, all, f.actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sheet, _, err := f.save(f.week, 0, canAll, "", row(f.p1, "1000", "200"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r1 := sheetRow(t, sheet, f.p1)
+	if r1.ResultID == nil || len(r1.Groups) != 1 {
+		t.Fatalf("p1 is saved in the group: %+v", r1)
+	}
+	checkReportReactions(t, f, &g.ID, sheet.Entry.ID, *r1.ResultID, "")
+	if _, _, _, err := f.svc.ReactToResult(f.ctx, *r1.ResultID, "yes", all, f.actor); err != nil {
+		t.Fatal(err)
+	}
+	checkReportReactions(t, f, &g.ID, sheet.Entry.ID, *r1.ResultID, "TWL Tester yes")
 }
 
 func TestDeletingAnAgent(t *testing.T) {

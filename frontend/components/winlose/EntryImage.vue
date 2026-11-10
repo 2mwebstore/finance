@@ -64,9 +64,15 @@ async function capture() {
     const scrollers = Array.from(node.querySelectorAll<HTMLElement>('.overflow-x-auto, .overflow-auto'))
     const overflows = scrollers.map(el => el.style.overflow)
     scrollers.forEach(el => { el.style.overflow = 'visible' })
+    // What is left out of the table (agents' ✅ / ❌) is hidden while the picture is taken, so its
+    // rows are as tall as without it.
+    const hidden = Array.from(node.querySelectorAll<HTMLElement>('table [data-capture-skip]'))
+    const displays = hidden.map(el => el.style.display)
+    hidden.forEach(el => { el.style.display = 'none' })
     restore = () => {
       label.remove()
       scrollers.forEach((el, i) => { el.style.overflow = overflows[i] ?? '' })
+      hidden.forEach((el, i) => { el.style.display = displays[i] ?? '' })
     }
     const width = node.offsetWidth, height = node.offsetHeight, margin = 16
     // Sharp (2x) unless the picture would be huge (100 agents): phone browsers refuse canvases
