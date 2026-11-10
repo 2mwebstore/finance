@@ -152,7 +152,7 @@ func (pc *PlatformController) ListPlatforms(c *gin.Context) {
 }
 
 func (pc *PlatformController) SavePlatform(c *gin.Context) {
-	_, scope, ok := pc.scope(c)
+	access, scope, ok := pc.scope(c)
 	if !ok {
 		return
 	}
@@ -173,13 +173,22 @@ func (pc *PlatformController) SavePlatform(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
-	p, err := pc.svc.SavePlatformIn(c.Request.Context(), id, in, scope, actor)
+	// Putting the agent in groups or taking it out changes those groups: it needs Update Group
+	// Agent Assignments too.
+	if in.Groups != nil && !access.Can(permissions.PlatformAssignmentsEdit) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "changing an agent’s groups needs Update Group Agent Assignments"})
+		return
+	}
+	p, groups, err := pc.svc.SavePlatformWithGroups(c.Request.Context(), id, in, scope, actor)
 	if err != nil {
 		writePlatformError(c, err)
 		return
 	}
 	details := map[string]interface{}{
 		"code": p.Code, "name": p.Name, "default_rate": p.DefaultRate.String(), "default_currency": p.DefaultCurrency, "is_active": p.IsActive,
+	}
+	if groups.Any() {
+		details["groups"] = groups
 	}
 	if p.BranchID != nil {
 		details["branch_id"] = p.BranchID.String()
@@ -192,7 +201,11 @@ func (pc *PlatformController) SavePlatform(c *gin.Context) {
 	if id == nil {
 		status = http.StatusCreated
 	}
-	c.JSON(status, p)
+	// counted_weeks: weeks saved before it was put in a group that count in it now.
+	c.JSON(status, struct {
+		*models.Platform
+		CountedWeeks int `json:"counted_weeks,omitempty"`
+	}{p, groups.Weeks})
 }
 
 // DeletePlatform removes an agent that was never used (a used one can only be turned off).
@@ -409,7 +422,12 @@ func groupDetails(g *services.GroupRow) map[string]interface{} {
 	for i, p := range g.Partners {
 		partners[i] = p.PartnerID.String() + ": " + p.CommissionRate.String()
 	}
-	return map[string]interface{}{"title": g.Title, "agents": agents, "partners": partners, "currency": g.Currency, "is_active": g.IsActive}
+	details := map[string]interface{}{"title": g.Title, "agents": agents, "partners": partners, "currency": g.Currency, "is_active": g.IsActive}
+	// Weeks saved before an agent was put in the group that count in it now.
+	if g.CountedWeeks > 0 {
+		details["counted_weeks"] = g.CountedWeeks
+	}
+	return details
 }
 
 func (pc *PlatformController) ListGroups(c *gin.Context) {

@@ -1302,3 +1302,218 @@ func TestRestWithPartners(t *testing.T) {
 		t.Errorf("total %s, shares %v %v: %v", r.JamePS, shares[0].JamePS, shares[1].JamePS, err)
 	}
 }
+
+// An agent's groups set from its own form (Agents → Add/Edit): put in, rate and type changed and
+// taken out as a group's page would, all or nothing with the agent itself.
+func TestAgentGroupsFromItsForm(t *testing.T) {
+	f := newWLFixture(t)
+	f.db.Model(&models.User{}).Where("id = ?", f.actor).Update("default_branch_id", f.hq[0].ID)
+	defer f.db.Model(&models.User{}).Where("id = ?", f.actor).Update("default_branch_id", nil)
+	start := dayString(f.week.AddDate(0, 0, -21))
+	group := func(title string, hq int) *GroupRow {
+		t.Helper()
+		g, err := f.svc.CreateGroup(f.ctx, GroupInput{Title: title, Agents: []GroupAgentInput{{PlatformID: f.p2.ID.String(), CommissionRate: "10"}}, StartsOn: start, BranchID: f.hq[hq].ID.String()}, all, f.actor)
+		if err != nil {
+			t.Fatalf("group %s: %v", title, err)
+		}
+		return g
+	}
+	a, b, c := group("A", 0), group("B", 0), group("C", 1)
+	in := func(id *uuid.UUID, code string, groups ...PlatformGroupInput) PlatformInput {
+		list := append([]PlatformGroupInput{}, groups...)
+		return PlatformInput{Code: code, DefaultCurrency: "USD", BranchID: f.hq[0].ID.String(), Groups: &list}
+	}
+	put := func(g *GroupRow, rate, kind string) PlatformGroupInput {
+		return PlatformGroupInput{GroupID: g.ID.String(), CommissionRate: rate, CalcType: kind}
+	}
+	mine := func(g *GroupRow, p uuid.UUID) *GroupAgent {
+		t.Helper()
+		row, err := f.svc.GroupByID(f.ctx, g.ID, all)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i := range row.Agents {
+			if row.Agents[i].PlatformID == p {
+				return &row.Agents[i]
+			}
+		}
+		return nil
+	}
+	scope0 := f.scope(0)
+
+	// A bad rate saves nothing: not even the agent.
+	if _, _, err := f.svc.SavePlatformWithGroups(f.ctx, nil, in(nil, "TWL_FORM", put(a, "15", "GI"), put(b, "", "")), scope0, f.actor); err == nil || !strings.Contains(err.Error(), "rate") {
+		t.Fatalf("an empty rate is refused: %v", err)
+	}
+	var made int64
+	f.db.Model(&models.Platform{}).Where("code = ?", "TWL_FORM").Count(&made)
+	if made != 0 {
+		t.Fatalf("the agent was saved without its groups")
+	}
+	if _, _, err := f.svc.SavePlatformWithGroups(f.ctx, nil, in(nil, "TWL_FORM", put(a, "15", ""), put(a, "20", "")), scope0, f.actor); err == nil || !strings.Contains(err.Error(), "twice") {
+		t.Fatalf("a group listed twice is refused: %v", err)
+	}
+	// Another branch's group is refused for a branch's agent.
+	if _, _, err := f.svc.SavePlatformWithGroups(f.ctx, nil, in(nil, "TWL_FORM", put(c, "15", "")), all, f.actor); err == nil || !strings.Contains(err.Error(), "another branch") {
+		t.Fatalf("another branch's group is refused: %v", err)
+	}
+	// Put in A (GI 15%) and B (PO 0%), from today.
+	p, changes, err := f.svc.SavePlatformWithGroups(f.ctx, nil, in(nil, "TWL_FORM", put(a, "15", "gi"), put(b, "0", "")), scope0, f.actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(changes.Added, ",") != "A,B" || len(changes.Removed)+len(changes.Changed) != 0 {
+		t.Errorf("added to A and B: %+v", changes)
+	}
+	if got := mine(a, p.ID); got == nil || got.CalcType != "GI" || !got.CommissionRate.Equal(decimal.NewFromInt(15)) || got.StartsOn != dayString(f.svc.today()) || got.Currency != "USD" {
+		t.Errorf("in A at GI 15%% from today: %+v", got)
+	}
+	if got := mine(b, p.ID); got == nil || got.CalcType != "PO" || !got.CommissionRate.IsZero() {
+		t.Errorf("in B at PO 0%%: %+v", got)
+	}
+	// Not sending groups leaves them as they are.
+	same := PlatformInput{Code: "TWL_FORM", Name: "Renamed", DefaultCurrency: "USD"}
+	if _, changes, err := f.svc.SavePlatformWithGroups(f.ctx, &p.ID, same, scope0, f.actor); err != nil || changes.Any() || mine(a, p.ID) == nil || mine(b, p.ID) == nil {
+		t.Fatalf("groups not sent stay: %v %+v", err, changes)
+	}
+	// A's rate changed, B taken out: no week entered there, so it's removed for good.
+	if _, changes, err = f.svc.SavePlatformWithGroups(f.ctx, &p.ID, in(&p.ID, "TWL_FORM", put(a, "20", "PO")), scope0, f.actor); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(changes.Changed, ",") != "A" || strings.Join(changes.Removed, ",") != "B" || len(changes.Added) != 0 {
+		t.Errorf("A changed, B taken out: %+v", changes)
+	}
+	if got := mine(a, p.ID); got == nil || got.CalcType != "PO" || !got.CommissionRate.Equal(decimal.NewFromInt(20)) {
+		t.Errorf("A at PO 20%%: %+v", got)
+	}
+	var inB int64
+	f.db.Unscoped().Model(&models.HQPlatformAssignment{}).Where("platform_id = ? AND group_id = ?", p.ID, b.ID).Count(&inB)
+	if inB != 0 {
+		t.Errorf("B's unused assignment is removed, %d left", inB)
+	}
+	// With a week entered, taking it out of A ends the assignment (the week stays).
+	if _, _, err := f.save(weekStart(f.svc.today()), 0, canAll, "", row(*p, "1000", "0")); err != nil {
+		t.Fatal(err)
+	}
+	if _, changes, err = f.svc.SavePlatformWithGroups(f.ctx, &p.ID, in(&p.ID, "TWL_FORM"), scope0, f.actor); err != nil || strings.Join(changes.Removed, ",") != "A" {
+		t.Fatalf("taken out of A: %v %+v", err, changes)
+	}
+	var ended models.HQPlatformAssignment
+	if err := f.db.Where("platform_id = ? AND group_id = ?", p.ID, a.ID).First(&ended).Error; err != nil || ended.IsActive || ended.EndsOn == nil {
+		t.Errorf("A's assignment is ended, not removed: %v %+v", err, ended)
+	}
+	// A turned-off agent can't be put in a group.
+	off := false
+	if _, _, err := f.svc.SavePlatformWithGroups(f.ctx, &p.ID, PlatformInput{Code: "TWL_FORM", DefaultCurrency: "USD", IsActive: &off, Reason: "test"}, scope0, f.actor); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := f.svc.SavePlatformWithGroups(f.ctx, &p.ID, in(&p.ID, "TWL_FORM", put(b, "5", "")), scope0, f.actor); err == nil || !strings.Contains(err.Error(), "turn the agent on") {
+		t.Errorf("a turned-off agent is refused: %v", err)
+	}
+}
+
+// A week saved before its agent was put in a group counts in the group once it is, from the
+// group's first day on (as saving it then would): older weeks and finalized weeks stay as they were.
+func TestWeeksSavedBeforeTheGroup(t *testing.T) {
+	f := newWLFixture(t)
+	f.db.Model(&models.User{}).Where("id = ?", f.actor).Update("default_branch_id", f.hq[0].ID)
+	defer f.db.Model(&models.User{}).Where("id = ?", f.actor).Update("default_branch_id", nil)
+	n := func(v int64) decimal.Decimal { return decimal.NewFromInt(v) }
+	older, settled, now := f.week, f.week.AddDate(0, 0, 7), weekStart(f.svc.today())
+	// p1 is in no group yet: its weeks are saved with no Total.
+	for _, w := range []time.Time{older, settled, now} {
+		if _, _, err := f.save(w, 0, canAll, "", row(f.p1, "1000", "0")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if r := sheetRow(t, f.sheet(t, now, 0), f.p1); len(r.Groups) != 0 || !r.JamePS.IsZero() {
+		t.Fatalf("no group yet, no Total: %+v", r)
+	}
+	if _, err := f.svc.FinalizeWeek(f.ctx, FinalizeInput{BranchID: f.hq[0].ID.String(), WeekStart: dayString(settled)}, all, f.actor); err != nil {
+		t.Fatal(err)
+	}
+
+	// The group starts on the settled week's Monday: this week counts in it now, the settled week
+	// (finalized) and the older one (before its first day) don't.
+	g, err := f.svc.CreateGroup(f.ctx, GroupInput{Title: "Later", Agents: []GroupAgentInput{{PlatformID: f.p1.ID.String(), CommissionRate: "10"}}, StartsOn: dayString(settled)}, all, f.actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g.CountedWeeks != 1 {
+		t.Errorf("one week counted, got %d", g.CountedWeeks)
+	}
+	r := sheetRow(t, f.sheet(t, now, 0), f.p1)
+	if len(r.Groups) != 1 || r.Groups[0].GroupTitle != "Later" || r.Groups[0].JamePS == nil || !r.Groups[0].JamePS.Equal(n(100)) || !r.JamePS.Equal(n(100)) || !r.CommissionRate.Equal(n(10)) {
+		t.Fatalf("this week: 100 in Later: %+v", r)
+	}
+	for _, w := range []time.Time{older, settled} {
+		if r := sheetRow(t, f.sheet(t, w, 0), f.p1); len(r.Groups) != 0 || !r.JamePS.IsZero() {
+			t.Errorf("week of %s stays with no group: %+v", dayString(w), r)
+		}
+	}
+	// The reports: the group has this week; the other two are still "no group".
+	span := ReportFilter{DateFrom: dayString(older), DateTo: dayString(f.svc.today())}
+	inGroup := span
+	inGroup.GroupID = &g.ID
+	rep, err := f.svc.Report(f.ctx, inGroup, all, true, f.actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Totals) != 1 || rep.Totals[0].Entries != 1 || !rep.Totals[0].JamePS.Equal(n(100)) {
+		t.Errorf("the group's report has this week, 100: %+v", rep.Totals)
+	}
+	rep, err = f.svc.Report(f.ctx, span, all, true, f.actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	groups := map[string]Sums{}
+	for _, row := range rep.Groups {
+		groups[row.Title] = row.Totals[0]
+	}
+	if groups["Later"].Entries != 1 || !groups["Later"].JamePS.Equal(n(100)) || groups[""].Entries != 2 || !groups[""].JamePS.IsZero() {
+		t.Errorf("by group: Later 1 week 100, no group 2 weeks: %+v", groups)
+	}
+	var st models.WeeklySettlement
+	f.db.Where("branch_id = ? AND week_start = ?", f.hq[0].ID, dayString(settled)).First(&st)
+	var settledTotal models.WeeklySettlementTotal
+	f.db.Where("settlement_id = ?", st.ID).First(&settledTotal)
+	if !settledTotal.JamePS.IsZero() {
+		t.Errorf("the finalized week's totals stay: %+v", settledTotal)
+	}
+
+	// Saving the group again counts nothing twice; an agent put in it later brings its week too.
+	if _, _, err := f.save(now, 0, canAll, "", row(f.p2, "1000", "0")); err != nil {
+		t.Fatal(err)
+	}
+	_, after, err := f.svc.UpdateGroup(f.ctx, g.ID, GroupUpdateInput{Title: "Later", Agents: []GroupAgentInput{{PlatformID: f.p1.ID.String(), CommissionRate: "10"}, {PlatformID: f.p2.ID.String(), CommissionRate: "20"}}}, all, f.actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.CountedWeeks != 1 {
+		t.Errorf("p2's week counted, got %d", after.CountedWeeks)
+	}
+	sheet := f.sheet(t, now, 0)
+	if r := sheetRow(t, sheet, f.p1); len(r.Groups) != 1 || !r.JamePS.Equal(n(100)) {
+		t.Errorf("p1 not counted twice: %+v", r)
+	}
+	if r := sheetRow(t, sheet, f.p2); len(r.Groups) != 1 || !r.JamePS.Equal(n(200)) {
+		t.Errorf("p2: 200 in Later: %+v", r)
+	}
+
+	// The same from an agent's own form.
+	late, _, err := f.svc.SavePlatformWithGroups(f.ctx, nil, PlatformInput{Code: "TWL_LATE", DefaultCurrency: "USD", BranchID: f.hq[0].ID.String()}, all, f.actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := f.save(now, 0, canAll, "", row(*late, "1000", "0")); err != nil {
+		t.Fatal(err)
+	}
+	groupsIn := []PlatformGroupInput{{GroupID: g.ID.String(), CommissionRate: "30"}}
+	_, changes, err := f.svc.SavePlatformWithGroups(f.ctx, &late.ID, PlatformInput{Code: "TWL_LATE", DefaultCurrency: "USD", Groups: &groupsIn}, all, f.actor)
+	if err != nil || changes.Weeks != 1 {
+		t.Fatalf("its week counted from the agent form: %v %+v", err, changes)
+	}
+	if r := sheetRow(t, f.sheet(t, now, 0), *late); len(r.Groups) != 1 || !r.JamePS.Equal(n(300)) {
+		t.Errorf("TWL_LATE: 300 in Later: %+v", r)
+	}
+}

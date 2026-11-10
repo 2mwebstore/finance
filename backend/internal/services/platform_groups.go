@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -109,6 +110,9 @@ type GroupRow struct {
 	// Weeks is how many weekly results were entered under its agents (taken-out ones too).
 	Weeks     int64  `json:"weeks"`
 	CreatedBy string `json:"created_by"`
+	// CountedWeeks (on a save only): weeks saved before an agent was put in the group that count
+	// in it now (see countSavedWeeks).
+	CountedWeeks int `json:"counted_weeks,omitempty"`
 }
 
 type GroupFilter struct {
@@ -278,17 +282,27 @@ func (s *PlatformService) CreateGroup(ctx context.Context, in GroupInput, scope 
 	}
 	plan.rates, plan.kinds = rates, kinds
 	g := models.AssignmentGroup{ID: uuid.New(), BranchID: plan.branchIDs[0], Title: title, Currency: plan.currency, StartsOn: plan.starts, IsActive: true, CreatedByID: actor}
+	counted := 0
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&g).Error; err != nil {
 			return err
 		}
-		_, err := s.applyAssign(tx, plan, actor, &g.ID)
+		made, err := s.applyAssign(tx, plan, actor, &g.ID)
+		if err != nil {
+			return err
+		}
+		counted, err = countSavedWeeks(tx, made)
 		return err
 	})
 	if err != nil {
 		return nil, err
 	}
-	return s.groupRow(ctx, g.ID)
+	row, err := s.groupRow(ctx, g.ID)
+	if err != nil {
+		return nil, err
+	}
+	row.CountedWeeks = counted
+	return row, nil
 }
 
 // GroupByID is one group (in scope) for its edit page.
@@ -323,6 +337,7 @@ func (s *PlatformService) UpdateGroup(ctx context.Context, id uuid.UUID, in Grou
 	if before, err = s.groupRow(ctx, id); err != nil {
 		return nil, nil, err
 	}
+	counted := 0
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		g, err := lockGroup(tx, id, scope)
 		if err != nil {
@@ -375,7 +390,11 @@ func (s *PlatformService) UpdateGroup(ctx context.Context, id uuid.UUID, in Grou
 			if plan.branches, err = s.branchesIn(ctx, plan.branchIDs); err != nil {
 				return err
 			}
-			if _, err := s.applyAssign(tx, plan, actor, &g.ID); err != nil {
+			made, err := s.applyAssign(tx, plan, actor, &g.ID)
+			if err != nil {
+				return err
+			}
+			if counted, err = countSavedWeeks(tx, made); err != nil {
 				return err
 			}
 		}
@@ -384,8 +403,11 @@ func (s *PlatformService) UpdateGroup(ctx context.Context, id uuid.UUID, in Grou
 	if err != nil {
 		return nil, nil, err
 	}
-	after, err = s.groupRow(ctx, id)
-	return before, after, err
+	if after, err = s.groupRow(ctx, id); err != nil {
+		return nil, nil, err
+	}
+	after.CountedWeeks = counted
+	return before, after, nil
 }
 
 // takeOut removes an agent from its group: ended on the given day when weeks were entered for it
@@ -446,4 +468,173 @@ func (s *PlatformService) DeleteGroup(ctx context.Context, id uuid.UUID, scope B
 		return nil, err
 	}
 	return row, nil
+}
+
+// GroupChanges says what saving an agent changed in its groups (by title), for the audit log.
+type GroupChanges struct {
+	Added   []string `json:"added,omitempty"`
+	Removed []string `json:"removed,omitempty"`
+	Changed []string `json:"changed,omitempty"`
+	// Weeks: weeks saved before it was put in a group that count in it now (see countSavedWeeks).
+	Weeks int `json:"weeks,omitempty"`
+}
+
+// Any reports whether the agent's groups changed.
+func (c *GroupChanges) Any() bool {
+	return c != nil && len(c.Added)+len(c.Removed)+len(c.Changed) > 0
+}
+
+// setPlatformGroups puts an agent in exactly the groups given, as a group's page would: one taken
+// out is ended if weeks were entered for it (they stay), else removed; one put in starts today (or
+// on the group's first day, if later) in the group's currency (else the agent's own); one it stays
+// in gets the rate and type given. Only the person's groups count: another branch's group a shared
+// agent is in stays as it is.
+func (s *PlatformService) setPlatformGroups(ctx context.Context, tx *gorm.DB, p *models.Platform, groups []PlatformGroupInput, scope BranchScope, actor uuid.UUID) (*GroupChanges, error) {
+	type want struct {
+		rate decimal.Decimal
+		kind string
+	}
+	wanted := map[uuid.UUID]want{}
+	order := make([]uuid.UUID, 0, len(groups))
+	for _, g := range groups {
+		id := uuid.MustParse(g.GroupID)
+		if _, twice := wanted[id]; twice {
+			return nil, fieldError("groups", "a group is listed twice")
+		}
+		rate, err := parseRate("groups", g.CommissionRate)
+		if err != nil {
+			return nil, fieldError("groups", "give each group a rate from 0 to 100 (at most 4 decimals)")
+		}
+		kind, err := calcType(g.CalcType)
+		if err != nil {
+			return nil, fieldError("groups", "choose PO or GI for each group")
+		}
+		wanted[id] = want{rate: rate, kind: kind}
+		order = append(order, id)
+	}
+	var current []models.HQPlatformAssignment
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("platform_id = ? AND is_active = ? AND group_id IS NOT NULL", p.ID, true).
+		Order("created_at").Find(&current).Error; err != nil {
+		return nil, err
+	}
+	changes := &GroupChanges{}
+	today, now := s.today(), time.Now()
+	have := map[uuid.UUID]bool{}
+	for i := range current {
+		a := &current[i]
+		if !scope.Has(a.BranchID) {
+			continue
+		}
+		g, err := lockGroup(tx, *a.GroupID, scope)
+		if err != nil {
+			return nil, err
+		}
+		have[g.ID] = true
+		w, keep := wanted[g.ID]
+		if !keep {
+			if err := takeOut(tx, a, today, actor); err != nil {
+				return nil, err
+			}
+			changes.Removed = append(changes.Removed, g.Title)
+			continue
+		}
+		if !a.CommissionRate.Equal(w.rate) || a.CalcType != w.kind {
+			if err := tx.Model(a).Updates(map[string]interface{}{"commission_rate": w.rate, "calc_type": w.kind, "updated_at": now}).Error; err != nil {
+				return nil, err
+			}
+			changes.Changed = append(changes.Changed, g.Title)
+		}
+	}
+	for _, id := range order {
+		if have[id] {
+			continue
+		}
+		g, err := lockGroup(tx, id, scope)
+		if err != nil {
+			return nil, err
+		}
+		if !p.IsActive {
+			return nil, fieldError("groups", "turn the agent on before putting it in a group")
+		}
+		// An agent of one branch goes only in that branch's groups (a shared one in any).
+		if p.BranchID != nil && *p.BranchID != g.BranchID {
+			return nil, fieldError("groups", fmt.Sprintf("“%s” is another branch’s group; %s can only go in its own branch’s groups", g.Title, p.Code))
+		}
+		w := wanted[id]
+		plan := &assignPlan{branchIDs: []uuid.UUID{g.BranchID}, platformIDs: []uuid.UUID{p.ID}, platforms: map[uuid.UUID]models.Platform{p.ID: *p},
+			rates: map[uuid.UUID]decimal.Decimal{p.ID: w.rate}, kinds: map[uuid.UUID]string{p.ID: w.kind}, currency: g.Currency, starts: today}
+		if g.StartsOn.After(plan.starts) {
+			plan.starts = g.StartsOn
+		}
+		if plan.branches, err = s.branchesIn(ctx, plan.branchIDs); err != nil {
+			return nil, err
+		}
+		made, err := s.applyAssign(tx, plan, actor, &g.ID)
+		if err != nil {
+			return nil, err
+		}
+		counted, err := countSavedWeeks(tx, made)
+		if err != nil {
+			return nil, err
+		}
+		changes.Added, changes.Weeks = append(changes.Added, g.Title), changes.Weeks+counted
+	}
+	return changes, nil
+}
+
+// countSavedWeeks makes the weeks already saved for agents just put in groups count there, as
+// saving them now would (an agent counts in every switched-on group it was in on any day of the
+// week): each week from the assignment's first day on, saved while the agent wasn't in that group,
+// gets its Total in the group at the assignment's rate and type (with the formula the week was
+// saved with), and the result's Total and rate become its groups' added up again. Older weeks,
+// finalized weeks, weeks of a group that is turned off and weeks saved under an assignment from
+// before groups are left as they are. It returns how many weeks now count in a group.
+func countSavedWeeks(tx *gorm.DB, made []Assignment) (int, error) {
+	counted := 0
+	now := time.Now()
+	for _, a := range made {
+		if a.GroupID == nil {
+			continue
+		}
+		var g models.AssignmentGroup
+		if err := tx.First(&g, "id = ?", *a.GroupID).Error; err != nil {
+			return counted, err
+		}
+		if !g.IsActive {
+			continue
+		}
+		q := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("branch_id = ? AND platform_id = ? AND week_end >= ?", a.BranchID, a.PlatformID, dayString(a.StartsOn)).
+			Where("NOT EXISTS (SELECT 1 FROM weekly_group_results g WHERE g.result_id = weekly_platform_results.id AND (g.group_id = ? OR g.group_id IS NULL))", *a.GroupID).
+			Where(`NOT EXISTS (SELECT 1 FROM weekly_settlements st WHERE st.branch_id = weekly_platform_results.branch_id
+				AND st.week_start = weekly_platform_results.week_start AND st.status = ? AND st.deleted_at IS NULL)`, models.SettlementFinalized)
+		if a.EndsOn != nil {
+			q = q.Where("week_start <= ?", dayString(*a.EndsOn))
+		}
+		var results []models.WeeklyPlatformResult
+		if err := q.Find(&results).Error; err != nil {
+			return counted, err
+		}
+		kind := winlose.PO
+		if winlose.Kind(a.CalcType) == winlose.GI {
+			kind = winlose.GI
+		}
+		for _, r := range results {
+			res, err := workOut(r.FormulaVersion, kind, r.WinLose, r.Commission, a.CommissionRate, nil)
+			if err != nil {
+				return counted, err
+			}
+			if err := tx.Create(&models.WeeklyGroupResult{ID: uuid.New(), ResultID: r.ID, GroupID: a.GroupID, AssignmentID: a.ID,
+				CommissionRate: a.CommissionRate, CalcType: string(kind), JamePS: res.JamePS}).Error; err != nil {
+				return counted, err
+			}
+			if err := tx.Model(&models.WeeklyPlatformResult{}).Where("id = ?", r.ID).UpdateColumns(map[string]interface{}{
+				"commission_rate": r.CommissionRate.Add(a.CommissionRate), "jame_ps": r.JamePS.Add(res.JamePS), "updated_at": now,
+			}).Error; err != nil {
+				return counted, err
+			}
+			counted++
+		}
+	}
+	return counted, nil
 }

@@ -166,6 +166,17 @@ type PlatformInput struct {
 	// group (an owner/admin with no group of their own makes a shared one); an agent being changed
 	// keeps its branch unless an owner/admin gives another.
 	BranchID string `json:"branch_id" binding:"omitempty,uuid"`
+	// Groups (optional): the groups the agent is in, each at its rate and type. Missing: they stay
+	// as they are; empty: it is taken out of every group (see setPlatformGroups).
+	Groups *[]PlatformGroupInput `json:"groups" binding:"omitempty,max=100,dive"`
+}
+
+// PlatformGroupInput is one group an agent is in, with its rate there (percent: 35 = 35%) and its
+// type, PO (the default) or GI.
+type PlatformGroupInput struct {
+	GroupID        string `json:"group_id" binding:"required,uuid"`
+	CommissionRate string `json:"commission_rate"`
+	CalcType       string `json:"calc_type"`
 }
 
 type PlatformRow struct {
@@ -354,6 +365,40 @@ func (s *PlatformService) platformBranch(ctx context.Context, p *models.Platform
 // agent belongs to the branch chosen (their own group when none is), one of another branch is not
 // found, and a shared agent is changed only by an owner/admin.
 func (s *PlatformService) SavePlatformIn(ctx context.Context, id *uuid.UUID, in PlatformInput, scope BranchScope, actor uuid.UUID) (*models.Platform, error) {
+	p, _, err := s.SavePlatformWithGroups(ctx, id, in, scope, actor)
+	return p, err
+}
+
+// SavePlatformWithGroups is SavePlatformIn that also puts the agent in the groups given (when
+// in.Groups is set), all or nothing, and says what changed in its groups.
+func (s *PlatformService) SavePlatformWithGroups(ctx context.Context, id *uuid.UUID, in PlatformInput, scope BranchScope, actor uuid.UUID) (*models.Platform, *GroupChanges, error) {
+	p, err := s.checkPlatform(ctx, id, in, scope, actor)
+	if err != nil {
+		return nil, nil, err
+	}
+	changes := &GroupChanges{}
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Save(p).Error; err != nil {
+			if isDuplicate(err) {
+				return fieldError("code", "another agent already has this user")
+			}
+			return err
+		}
+		if in.Groups == nil {
+			return nil
+		}
+		changes, err = s.setPlatformGroups(ctx, tx, p, *in.Groups, scope, actor)
+		return err
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return p, changes, nil
+}
+
+// checkPlatform checks an agent being made or changed and returns it with the changes applied (not
+// saved yet).
+func (s *PlatformService) checkPlatform(ctx context.Context, id *uuid.UUID, in PlatformInput, scope BranchScope, actor uuid.UUID) (*models.Platform, error) {
 	var p models.Platform
 	if id != nil {
 		if err := s.db.WithContext(ctx).First(&p, "id = ?", *id).Error; err != nil {
@@ -415,12 +460,6 @@ func (s *PlatformService) SavePlatformIn(ctx context.Context, id *uuid.UUID, in 
 	p.Code, p.Name, p.DefaultRate, p.DefaultCurrency, p.BranchID = code, name, rate, currency, branch
 	if in.IsActive != nil {
 		p.IsActive = *in.IsActive
-	}
-	if err := s.db.WithContext(ctx).Save(&p).Error; err != nil {
-		if isDuplicate(err) {
-			return nil, fieldError("code", "another agent already has this user")
-		}
-		return nil, err
 	}
 	return &p, nil
 }
