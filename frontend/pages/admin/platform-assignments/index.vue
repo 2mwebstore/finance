@@ -53,7 +53,7 @@
     </template>
 
     <!-- Delete: only while no week has been entered -->
-    <AppModal :model-value="!!deleting" form :title="deleting ? `Delete “${deleting.title}”?` : ''" eyebrow="DELETE GROUP" :subtitle="deleting && deleting.weeks ? 'Weeks are already entered for this group, so it can’t be deleted. Turn it off instead: new results stop counting in it and the weeks stay.' : 'The group and its agents’ assignments are removed.'" :busy="saving" width="460px" @update:model-value="(open) => { if (!open && !saving) deleting = null }" @submit="saveDelete">
+    <AppModal :model-value="!!deleting" form :title="deleting ? `Delete “${deleting.title}”?` : ''" eyebrow="DELETE GROUP" :subtitle="deleting && deleting.weeks ? 'Weeks are already entered for this group, so it can’t be deleted. Turn it off instead: it and its weeks are hidden from Data entry and the reports, and nothing is deleted.' : 'The group and its agents’ assignments are removed.'" :busy="saving" width="460px" @update:model-value="(open) => { if (!open && !saving) deleting = null }" @submit="saveDelete">
       <AppAlert v-if="formError" compact :message="formError" />
       <template #footer>
         <button type="button" class="border border-border bg-white text-muted" :disabled="saving" @click="deleting = null">Cancel</button>
@@ -121,7 +121,7 @@ async function toggle(g: AssignmentGroup) {
   busyId.value = g.id
   try {
     const updated = await api<AssignmentGroup>(`/platform-groups/${g.id}/active`, { method: 'POST', body: { is_active: !g.is_active } })
-    toast.success(updated.is_active ? 'New results count in it again.' : 'New results no longer count in it; saved weeks stay.', { title: `“${g.title}” turned ${updated.is_active ? 'on' : 'off'}` })
+    toast.success(updated.is_active ? 'It and its weeks show in Data entry and the reports again.' : 'It and its weeks are hidden from Data entry and the reports; nothing is deleted.', { title: `“${g.title}” turned ${updated.is_active ? 'on' : 'off'}` })
     await load()
   } catch (e: any) {
     toast.error(e?.data?.error || 'Could not change this group.')

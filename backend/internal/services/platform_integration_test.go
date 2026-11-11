@@ -169,6 +169,16 @@ func sheetRow(t *testing.T, s *WeekSheet, p models.Platform) WeekSheetRow {
 	return WeekSheetRow{}
 }
 
+// onSheet: the agent is listed on the sheet.
+func onSheet(s *WeekSheet, p models.Platform) bool {
+	for _, r := range s.Rows {
+		if r.PlatformID == p.ID {
+			return true
+		}
+	}
+	return false
+}
+
 func TestEntryReactions(t *testing.T) {
 	f := newWLFixture(t)
 	f.assign(t, []models.Platform{f.p1}, 0)
@@ -1104,15 +1114,16 @@ func TestAssignmentGroups(t *testing.T) {
 		t.Errorf("only the group's agents: %v %+v", err, r)
 	}
 
-	// Off: its agents leave Data Entry (the saved week stays) and the Agents page's count.
+	// Off: its agents leave Data Entry, their saved weeks too (nothing is deleted), and the
+	// Agents page's count.
 	if _, err := f.svc.SetGroupActive(f.ctx, g.ID, false, all); err != nil {
 		t.Fatal(err)
 	}
-	if r := sheetRow(t, f.sheet(t, f.week, 0), f.p1); !r.Saved || len(r.Groups) != 1 {
-		t.Errorf("off: the saved week stays as it was: %+v", r)
+	if onSheet(f.sheet(t, f.week, 0), f.p1) {
+		t.Error("off: the saved week of its agent is left out of the entry")
 	}
-	if r := sheetRow(t, f.sheet(t, f.week.AddDate(0, 0, 7), 0), f.p2); len(r.Groups) != 0 {
-		t.Errorf("off: its agents count in no group on a new week, got %d", len(r.Groups))
+	if onSheet(f.sheet(t, f.week.AddDate(0, 0, 7), 0), f.p2) {
+		t.Error("off: its agents are left out of a new week")
 	}
 	agents, _ := f.svc.ListPlatforms(f.ctx, true)
 	for _, a := range agents {
@@ -1575,4 +1586,134 @@ func TestWeeksSavedBeforeTheGroup(t *testing.T) {
 	if r := sheetRow(t, f.sheet(t, now, 0), *late); len(r.Groups) != 1 || !r.JamePS.Equal(n(300)) {
 		t.Errorf("TWL_LATE: 300 in Later: %+v", r)
 	}
+}
+
+// Switched off: a group with its weeks, and an agent, are left out of the reports and Data entry
+// (nothing is deleted: switched on again, they are back). Settlements still count them.
+func TestSwitchedOffAreHidden(t *testing.T) {
+	f := newWLFixture(t)
+	f.db.Model(&models.User{}).Where("id = ?", f.actor).Update("default_branch_id", f.hq[0].ID)
+	t.Cleanup(func() {
+		f.db.Model(&models.User{}).Where("id = ?", f.actor).Update("default_branch_id", nil)
+		f.db.Model(&models.Platform{}).Where("id IN ?", []uuid.UUID{f.p1.ID, f.p2.ID}).Update("is_active", true)
+	})
+	// p1 is in A and B, p2 only in B.
+	a, err := f.svc.CreateGroup(f.ctx, GroupInput{Title: "On A", Agents: []GroupAgentInput{{PlatformID: f.p1.ID.String(), CommissionRate: "10"}}, StartsOn: dayString(f.week)}, all, f.actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := f.svc.CreateGroup(f.ctx, GroupInput{Title: "Off B", Agents: []GroupAgentInput{{PlatformID: f.p1.ID.String(), CommissionRate: "20"}, {PlatformID: f.p2.ID.String(), CommissionRate: "30"}}, StartsOn: dayString(f.week)}, all, f.actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sheet, _, err := f.save(f.week, 0, canAll, "", row(f.p1, "1000", "0"), row(f.p2, "1000", "0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var partA, partB decimal.Decimal
+	for _, g := range sheetRow(t, sheet, f.p1).Groups {
+		switch g.GroupTitle {
+		case "On A":
+			partA = *g.JamePS
+		case "Off B":
+			partB = *g.JamePS
+		}
+	}
+	if partA.IsZero() || partB.IsZero() {
+		t.Fatalf("p1 has a part in A and B: %+v", sheetRow(t, sheet, f.p1).Groups)
+	}
+	span := ReportFilter{DateFrom: dayString(f.week), DateTo: dayString(f.week.AddDate(0, 0, 6)), ByEntry: true}
+	report := func(fl ReportFilter) *WinLoseReport {
+		t.Helper()
+		rep, err := f.svc.Report(f.ctx, fl, all, true, f.actor)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return rep
+	}
+	titles := func(rep *WinLoseReport) string {
+		var out []string
+		for _, g := range rep.Groups {
+			out = append(out, g.Title)
+		}
+		sort.Strings(out)
+		return strings.Join(out, ", ")
+	}
+	codes := func(s *WeekSheet) string {
+		var out []string
+		for _, r := range s.Rows {
+			out = append(out, r.PlatformCode)
+		}
+		sort.Strings(out)
+		return strings.Join(out, ", ")
+	}
+	if rep := report(span); len(rep.Lines) != 2 || titles(rep) != "Off B, On A" {
+		t.Fatalf("both on: two agents in both groups: %+v %s", rep.Lines, titles(rep))
+	}
+
+	// B off: p2 (only in B) is gone; p1 shows with its part in A only; B's own report is empty.
+	if _, err := f.svc.SetGroupActive(f.ctx, b.ID, false, all); err != nil {
+		t.Fatal(err)
+	}
+	rep := report(span)
+	if len(rep.Lines) != 1 || rep.Lines[0].PlatformID != f.p1.ID || !rep.Lines[0].JamePS.Equal(partA) || titles(rep) != "On A" {
+		t.Errorf("B off: p1 alone at its part in A (%s): %+v groups %s", partA, rep.Lines, titles(rep))
+	}
+	if len(rep.Totals) != 1 || !rep.Totals[0].JamePS.Equal(partA) || len(rep.Platforms) != 1 || len(rep.Weeks) != 1 || !rep.Weeks[0].Totals[0].JamePS.Equal(partA) {
+		t.Errorf("B off: totals are p1's part in A: %+v %+v", rep.Totals, rep.Weeks)
+	}
+	if len(rep.Entries) != 1 || len(rep.Entries[0].Lines) != 1 || !rep.Entries[0].Lines[0].JamePS.Equal(partA) {
+		t.Errorf("B off: the entry has p1 at its part in A: %+v", rep.Entries)
+	}
+	inB := span
+	inB.GroupID = &b.ID
+	if rep := report(inB); len(rep.Lines) != 0 || len(rep.Totals) != 0 || len(rep.Entries) != 0 {
+		t.Errorf("B off: its report is empty: %+v", rep)
+	}
+	onlyP2 := span
+	onlyP2.PlatformID = &f.p2.ID
+	if rep := report(onlyP2); len(rep.Lines) != 0 || len(rep.Groups) != 0 {
+		t.Errorf("B off: p2's report is empty: %+v", rep)
+	}
+	// Data entry: p2's saved row is left out, and so is p2 in a new week; saving it is refused.
+	if s := f.sheet(t, f.week, 0); !onSheet(s, f.p1) || onSheet(s, f.p2) {
+		t.Errorf("B off: the entry lists p1, not p2: %s", codes(s))
+	}
+	if s := f.sheet(t, f.week.AddDate(0, 0, 7), 0); !onSheet(s, f.p1) || onSheet(s, f.p2) {
+		t.Errorf("B off: a new week lists p1, not p2: %s", codes(s))
+	}
+	if _, _, err := f.save(f.week, 0, canAll, "typo", row(f.p2, "1100", "0")); err == nil || !strings.Contains(err.Error(), "switched-off groups") {
+		t.Errorf("B off: saving p2 is refused, got %v", err)
+	}
+
+	// B on again: everything is back.
+	if _, err := f.svc.SetGroupActive(f.ctx, b.ID, true, all); err != nil {
+		t.Fatal(err)
+	}
+	if rep := report(span); len(rep.Lines) != 2 || titles(rep) != "Off B, On A" || !rep.Lines[0].JamePS.Add(rep.Lines[1].JamePS).Equal(partA.Add(partB).Add(sheetRow(t, sheet, f.p2).JamePS.Copy())) {
+		t.Errorf("B on: both agents in both groups again: %+v %s", rep.Lines, titles(rep))
+	}
+
+	// p2 switched off: out of the reports and Data entry although B is on.
+	f.db.Model(&models.Platform{}).Where("id = ?", f.p2.ID).Update("is_active", false)
+	rep = report(span)
+	if len(rep.Lines) != 1 || rep.Lines[0].PlatformID != f.p1.ID || !rep.Lines[0].JamePS.Equal(partA.Add(partB)) || titles(rep) != "Off B, On A" {
+		t.Errorf("p2 off: p1 alone in both groups: %+v %s", rep.Lines, titles(rep))
+	}
+	if s := f.sheet(t, f.week, 0); !onSheet(s, f.p1) || onSheet(s, f.p2) {
+		t.Errorf("p2 off: the entry lists p1, not p2: %s", codes(s))
+	}
+	if _, _, err := f.save(f.week, 0, canAll, "typo", row(f.p2, "1100", "0")); err == nil {
+		t.Error("p2 off: saving it is refused")
+	}
+
+	// Settlements add up every result of the week, p2 too.
+	st, err := f.svc.FinalizeWeek(f.ctx, FinalizeInput{BranchID: f.hq[0].ID.String(), WeekStart: dayString(f.week)}, all, f.actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Totals) != 2 {
+		t.Errorf("the settlement has both agents' currencies: %+v", st.Totals)
+	}
+	_ = a
 }

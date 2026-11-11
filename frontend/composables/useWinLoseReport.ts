@@ -25,19 +25,19 @@ export function useWinLoseReport(range: () => { from: string; to: string }, opti
   /** '' = the API's own choice (every branch in scope, or the person's own group). */
   const branch = computed(() => (showBranch.value ? branchModel.value : rp.effective.value))
 
-  // The groups (turned-off ones too: their weeks still count).
+  // The switched-on groups (a switched-off one's weeks are left out of the reports).
   const groups = ref<AssignmentGroup[]>([])
   const groupId = ref(String(route.query.group || ''))
   // One agent: its part in each of its groups.
   const agentId = ref(String(route.query.agent || ''))
   const groupOptions = computed(() => [
     { value: '', label: 'All groups' },
-    ...groups.value.map(g => ({ value: g.id, label: g.is_active ? g.title : `${g.title} (off)` })),
+    ...groups.value.map(g => ({ value: g.id, label: g.title })),
   ])
   async function loadGroups() {
     // The branch's groups; with every branch chosen, those of all of them.
     const branchQuery = branch.value || (showBranch.value ? 'all' : undefined)
-    try { groups.value = (await api<{ items: AssignmentGroup[] }>('/platform-groups', { query: { status: 'all', branch_id: branchQuery } })).items || [] } catch { groups.value = [] }
+    try { groups.value = (await api<{ items: AssignmentGroup[] }>('/platform-groups', { query: { status: 'active', branch_id: branchQuery } })).items || [] } catch { groups.value = [] }
     if (groupId.value && !groups.value.some(g => g.id === groupId.value)) groupId.value = ''
   }
   onMounted(loadGroups)

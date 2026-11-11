@@ -67,7 +67,7 @@
     </AppModal>
 
     <!-- Turning an agent off needs a reason (the audit log keeps it); turning on doesn't -->
-    <InventoryReasonDialog :model-value="!!turningOff" :title="turningOff ? `Turn off ${turningOff.code}?` : ''" eyebrow="TURN OFF AGENT" subtitle="It leaves Data entry; weeks already saved stay. The audit log keeps your reason." label="Reason for turning off" confirm-label="Turn off" danger :busy="!!turningOff && busyId === turningOff.id" :server-error="turnOffError" @update:model-value="(open) => { if (!open) { turningOff = null; turnOffError = '' } }" @confirm="(reason) => turningOff && setActive(turningOff, false, reason)" />
+    <InventoryReasonDialog :model-value="!!turningOff" :title="turningOff ? `Turn off ${turningOff.code}?` : ''" eyebrow="TURN OFF AGENT" subtitle="It and its weeks are hidden from Data entry and the reports until it is turned on again; nothing is deleted. The audit log keeps your reason." label="Reason for turning off" confirm-label="Turn off" danger :busy="!!turningOff && busyId === turningOff.id" :server-error="turnOffError" @update:model-value="(open) => { if (!open) { turningOff = null; turnOffError = '' } }" @confirm="(reason) => turningOff && setActive(turningOff, false, reason)" />
 
     <AppModal :model-value="formOpen" form :title="editing ? `Edit ${editing.code}` : 'Add agent'" eyebrow="AGENT" subtitle="The user is required and must be unique; the name and groups are optional." :busy="saving" width="540px" @update:model-value="(open) => { if (!open && !saving) formOpen = false }" @submit="save">
       <template #icon><Layers :size="20" /></template>

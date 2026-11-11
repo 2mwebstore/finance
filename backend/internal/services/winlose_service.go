@@ -128,17 +128,19 @@ type share struct {
 // entryParts are what an entry needs: its results with their groups, and the groups each agent
 // is in that week (for the agents not entered yet).
 type entryParts struct {
-	branch     models.Branch
-	start      time.Time
-	entry      *models.WeeklyEntry                         // nil: a new entry
-	results    map[uuid.UUID]models.WeeklyPlatformResult   // by platform
-	saved      map[uuid.UUID][]models.WeeklyGroupResult    // by result
-	partnerOf  map[uuid.UUID][]models.WeeklyPartnerResult  // by result
-	ofAgent    map[uuid.UUID][]models.HQPlatformAssignment // by platform: the assignments it counts in
-	links      map[uuid.UUID][]models.AssignmentPartner    // by assignment
-	groups     map[uuid.UUID]models.AssignmentGroup
-	partners   map[uuid.UUID]models.Partner
-	platforms  map[uuid.UUID]models.Platform // every agent that is on, and those saved
+	branch    models.Branch
+	start     time.Time
+	entry     *models.WeeklyEntry                         // nil: a new entry
+	results   map[uuid.UUID]models.WeeklyPlatformResult   // by platform
+	saved     map[uuid.UUID][]models.WeeklyGroupResult    // by result
+	partnerOf map[uuid.UUID][]models.WeeklyPartnerResult  // by result
+	ofAgent   map[uuid.UUID][]models.HQPlatformAssignment // by platform: the assignments it counts in
+	links     map[uuid.UUID][]models.AssignmentPartner    // by assignment
+	groups    map[uuid.UUID]models.AssignmentGroup
+	partners  map[uuid.UUID]models.Partner
+	platforms map[uuid.UUID]models.Platform // every agent that is on, and those saved
+	// offOnly: agents in groups that week, all of them switched off (left out of the entry).
+	offOnly    map[uuid.UUID]bool
 	settlement *models.WeeklySettlement
 }
 
@@ -149,7 +151,8 @@ type entryParts struct {
 func (s *PlatformService) loadEntry(tx *gorm.DB, branchID uuid.UUID, start time.Time, entry *models.WeeklyEntry, lock bool) (*entryParts, error) {
 	end := start.AddDate(0, 0, 6)
 	p := &entryParts{start: start, entry: entry, results: map[uuid.UUID]models.WeeklyPlatformResult{}, saved: map[uuid.UUID][]models.WeeklyGroupResult{},
-		partnerOf: map[uuid.UUID][]models.WeeklyPartnerResult{}, ofAgent: map[uuid.UUID][]models.HQPlatformAssignment{}, groups: map[uuid.UUID]models.AssignmentGroup{}}
+		partnerOf: map[uuid.UUID][]models.WeeklyPartnerResult{}, ofAgent: map[uuid.UUID][]models.HQPlatformAssignment{}, groups: map[uuid.UUID]models.AssignmentGroup{},
+		offOnly: map[uuid.UUID]bool{}}
 	if err := tx.First(&p.branch, "id = ?", branchID).Error; err != nil {
 		return nil, fieldError("branch_id", "this group was not found")
 	}
@@ -208,15 +211,23 @@ func (s *PlatformService) loadEntry(tx *gorm.DB, branchID uuid.UUID, start time.
 	}
 	inGroup := map[[2]uuid.UUID]models.HQPlatformAssignment{} // by agent and group
 	before := map[uuid.UUID]models.HQPlatformAssignment{}     // by agent: made before groups
+	inOff := map[uuid.UUID]bool{}                             // by agent: in a switched-off group
 	for _, a := range assignments {
 		if a.GroupID == nil {
 			before[a.PlatformID] = a
 		} else if g, ok := p.groups[*a.GroupID]; ok && g.IsActive {
 			inGroup[[2]uuid.UUID{a.PlatformID, g.ID}] = a
+		} else if ok {
+			inOff[a.PlatformID] = true
 		}
 	}
 	for key, a := range inGroup {
 		p.ofAgent[key[0]] = append(p.ofAgent[key[0]], a)
+	}
+	for platformID := range inOff {
+		if !hasGroup(p.ofAgent[platformID]) {
+			p.offOnly[platformID] = true
+		}
 	}
 	for platformID, a := range before {
 		if len(p.ofAgent[platformID]) == 0 {
@@ -266,6 +277,37 @@ func (s *PlatformService) loadEntry(tx *gorm.DB, branchID uuid.UUID, start time.
 		return nil, err
 	}
 	return p, nil
+}
+
+// hasGroup: one of the assignments is in a group (not one made before groups).
+func hasGroup(list []models.HQPlatformAssignment) bool {
+	for _, a := range list {
+		if a.GroupID != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// hidden: an agent left out of the entry (and the reports): switched off, or only in switched-off
+// groups (a saved result: in groups, none of them switched on; one not entered yet: in groups that
+// week, all switched off). An agent in no group is listed.
+func (p *entryParts) hidden(platformID uuid.UUID) bool {
+	if pl, ok := p.platforms[platformID]; !ok || !pl.IsActive {
+		return true
+	}
+	r, saved := p.results[platformID]
+	if !saved {
+		return p.offOnly[platformID]
+	}
+	inGroups, on := false, false
+	for _, g := range p.saved[r.ID] {
+		if g.GroupID != nil {
+			inGroups = true
+			on = on || p.groups[*g.GroupID].IsActive
+		}
+	}
+	return inGroups && !on
 }
 
 func (p *entryParts) locked() bool {
@@ -500,6 +542,9 @@ func (s *PlatformService) sheet(ctx context.Context, p *entryParts, formula winl
 		out.Entry = &EntryState{ID: p.entry.ID, Title: p.entry.Title, CreatedAt: p.entry.CreatedAt, CreatedBy: names[p.entry.CreatedByID]}
 	}
 	for platformID, pl := range p.platforms {
+		if p.hidden(platformID) {
+			continue
+		}
 		row := WeekSheetRow{PlatformID: platformID, PlatformCode: pl.Code, PlatformName: pl.Name}
 		if r, ok := p.results[platformID]; ok {
 			wl, cm, jp, at := r.WinLose, r.Commission, r.JamePS, r.UpdatedAt
@@ -511,15 +556,13 @@ func (s *PlatformService) sheet(ctx context.Context, p *entryParts, formula winl
 			if r.UpdatedByID != nil {
 				row.UpdatedBy = names[*r.UpdatedByID]
 			}
-		} else if pl.IsActive {
+		} else {
 			shares := p.newShares(platformID)
 			row.Currency, row.FormulaVersion = pl.DefaultCurrency, formula.Version
 			row.Groups, row.Partners = p.groupShares(shares), p.partnerShares(nil, shares)
 			for _, sh := range shares {
 				row.CommissionRate = row.CommissionRate.Add(sh.rate)
 			}
-		} else {
-			continue
 		}
 		out.Rows = append(out.Rows, row)
 	}
@@ -649,13 +692,14 @@ func (s *PlatformService) plan(p *entryParts, rows []WeekEntryRow, formula winlo
 		}
 		plan := rowPlan{platform: platformID, winLose: wl, commis: cm}
 		version := formula.Version
+		if !known || p.hidden(platformID) {
+			return nil, fieldError("rows", name+" was not found, is turned off or is only in switched-off groups")
+		}
 		if r, ok := p.results[platformID]; ok {
 			r := r
 			plan.existing, plan.currency, plan.shares = &r, r.Currency, p.savedShares(r)
-		} else if known && pl.IsActive {
-			plan.currency, plan.shares = pl.DefaultCurrency, p.newShares(platformID)
 		} else {
-			return nil, fieldError("rows", name+" was not found or is turned off")
+			plan.currency, plan.shares = pl.DefaultCurrency, p.newShares(platformID)
 		}
 		base, err := winlose.Calculate(version, winlose.Input{WinLose: wl, Commission: cm})
 		if err != nil {

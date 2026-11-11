@@ -231,12 +231,15 @@ func (s *PlatformService) Report(ctx context.Context, f ReportFilter, scope Bran
 	}
 	results := func() *gorm.DB {
 		q := scope.where(s.db.WithContext(ctx).Table("weekly_platform_results r"), "r.branch_id").
-			Where("r.deleted_at IS NULL AND r.week_start BETWEEN ? AND ?", dayString(weekStart(from)), dayString(to))
+			Where("r.deleted_at IS NULL AND r.week_start BETWEEN ? AND ?", dayString(weekStart(from)), dayString(to)).
+			Where(shownResult)
 		if branchID != nil {
 			q = q.Where("r.branch_id = ?", *branchID)
 		}
 		if f.GroupID != nil {
-			q = q.Joins("JOIN weekly_group_results gf ON gf.result_id = r.id AND gf.group_id = ?", *f.GroupID)
+			// A switched-off group shows nothing.
+			q = q.Joins("JOIN weekly_group_results gf ON gf.result_id = r.id AND gf.group_id = ?", *f.GroupID).
+				Joins("JOIN assignment_groups gfa ON gfa.id = gf.group_id AND gfa.is_active = 1")
 		}
 		if f.PlatformID != nil {
 			q = q.Where("r.platform_id = ?", *f.PlatformID)
@@ -246,8 +249,9 @@ func (s *PlatformService) Report(ctx context.Context, f ReportFilter, scope Bran
 		}
 		return q
 	}
-	// A result's Total is its groups' added up; for one group, its part in that group.
-	rate, jame, formula := "r.commission_rate", "r.jame_ps", "r.formula_version"
+	// A result's Total is its switched-on groups' parts added up; for one group, its part in that
+	// group.
+	rate, jame, formula := shownRate, shownTotal, "r.formula_version"
 	if f.GroupID != nil {
 		rate, jame, formula = "gf.commission_rate", "gf.jame_ps", kindFormula("gf")
 	}
@@ -328,6 +332,20 @@ func (s *PlatformService) Report(ctx context.Context, f ReportFilter, scope Bran
 	sort.Slice(out.Platforms, func(i, j int) bool { return agentBefore(out.Platforms[i].PlatformCode, out.Platforms[j].PlatformCode) })
 	return out, nil
 }
+
+// Switched off: an agent, and a group with everything in it, are left out of the reports (and
+// Data entry) until switched on again; nothing is deleted. A result is shown when its agent is on
+// and it is in no group or in a switched-on one, and its Total and rate are its switched-on groups'
+// parts (a result in no group: its own). Settlements still add up every result of the week.
+const (
+	shownResult = "r.platform_id IN (SELECT id FROM platforms WHERE is_active = 1) AND (" +
+		"NOT EXISTS (SELECT 1 FROM weekly_group_results vg WHERE vg.result_id = r.id AND vg.group_id IS NOT NULL) OR " +
+		"EXISTS (SELECT 1 FROM weekly_group_results vg JOIN assignment_groups vag ON vag.id = vg.group_id WHERE vg.result_id = r.id AND vag.is_active = 1))"
+	shownTotal = "COALESCE((SELECT SUM(vg.jame_ps) FROM weekly_group_results vg JOIN assignment_groups vag ON vag.id = vg.group_id " +
+		"WHERE vg.result_id = r.id AND vag.is_active = 1), r.jame_ps)"
+	shownRate = "COALESCE((SELECT SUM(vg.commission_rate) FROM weekly_group_results vg JOIN assignment_groups vag ON vag.id = vg.group_id " +
+		"WHERE vg.result_id = r.id AND vag.is_active = 1), r.commission_rate)"
+)
 
 // kindFormula is the SQL for the formula a group's part was worked out with: "gi" for a GI group,
 // else the result's version. The report shows the rate the Total is at from it (utils/winlose.ts).
@@ -428,7 +446,8 @@ func (s *PlatformService) reportLines(ctx context.Context, results func() *gorm.
 }
 
 // groupTotals adds the results up by titled group, each at its part in the group (an agent in two
-// groups counts in both): by title, weeks of agents in no group last.
+// groups counts in both): by title, weeks of agents in no group last. Switched-off groups are left
+// out.
 func (s *PlatformService) groupTotals(ctx context.Context, results *gorm.DB) ([]GroupTotalsRow, error) {
 	var rows []struct {
 		GroupID                                                       *uuid.UUID
@@ -438,6 +457,7 @@ func (s *PlatformService) groupTotals(ctx context.Context, results *gorm.DB) ([]
 		Entries                                                       int64
 	}
 	if err := results.Joins("LEFT JOIN weekly_group_results g ON g.result_id = r.id").
+		Joins("LEFT JOIN assignment_groups ga ON ga.id = g.group_id").Where("g.group_id IS NULL OR ga.is_active = 1").
 		Select("g.group_id, r.currency, SUM(r.win_lose) AS win_lose, SUM(r.commission) AS commission, SUM(r.adjusted_amount) AS adjusted_amount, SUM(COALESCE(g.jame_ps, r.jame_ps)) AS jame_ps, " +
 			"COALESCE(MIN(g.commission_rate), 0) AS rate_min, COALESCE(MAX(g.commission_rate), 0) AS rate_max, MIN(" + kindFormula("g") + ") AS formula_min, MAX(" + kindFormula("g") + ") AS formula_max, COUNT(*) AS entries").
 		Group("g.group_id, r.currency").Scan(&rows).Error; err != nil {

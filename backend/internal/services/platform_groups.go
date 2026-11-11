@@ -423,8 +423,8 @@ func takeOut(tx *gorm.DB, a *models.HQPlatformAssignment, day time.Time, actor u
 	return endOn(tx, a, day, "taken out of the group", actor)
 }
 
-// SetGroupActive switches a group on or off. Off, its agents leave Data Entry (they stay in the
-// group).
+// SetGroupActive switches a group on or off. Off, it and its weeks are left out of the reports, and
+// agents only in switched-off groups out of Data Entry (they stay in the group; nothing is deleted).
 func (s *PlatformService) SetGroupActive(ctx context.Context, id uuid.UUID, active bool, scope BranchScope) (*GroupRow, error) {
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		g, err := lockGroup(tx, id, scope)
