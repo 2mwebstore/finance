@@ -11,7 +11,7 @@
         <label class="space-y-1 text-xs font-medium text-muted">Username<input v-model.trim="createForm.username" required minlength="3" maxlength="64" :aria-invalid="createCheck.invalid('username')" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" /></label>
         <label class="space-y-1 text-xs font-medium text-muted">Email<input v-model.trim="createForm.email" type="email" required :aria-invalid="createCheck.invalid('email')" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" /></label>
         <label class="space-y-1 text-xs font-medium text-muted">Full name<input v-model.trim="createForm.full_name" required minlength="2" :aria-invalid="createCheck.invalid('full_name')" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" /></label>
-        <label class="space-y-1 text-xs font-medium text-muted">Temporary PIN ({{ MIN_PIN_LENGTH }}–{{ MAX_PIN_LENGTH }} digits)<input v-model="createForm.password" type="password" inputmode="numeric" :pattern="`[0-9]{${MIN_PIN_LENGTH},${MAX_PIN_LENGTH}}`" :maxlength="MAX_PIN_LENGTH" :minlength="MIN_PIN_LENGTH" required autocomplete="new-password" :aria-invalid="createCheck.invalid('password')" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" :placeholder="`${MIN_PIN_LENGTH}–${MAX_PIN_LENGTH} digits`" /></label>
+        <label class="space-y-1 text-xs font-medium text-muted">Temporary password ({{ MIN_PASSWORD_LENGTH }}–{{ MAX_PASSWORD_LENGTH }} characters)<input v-model="createForm.password" type="password" :maxlength="MAX_PASSWORD_LENGTH" :minlength="MIN_PASSWORD_LENGTH" required autocomplete="new-password" autocapitalize="off" autocorrect="off" spellcheck="false" :aria-invalid="createCheck.invalid('password')" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" placeholder="Letters, digits or signs" /></label>
         <div class="space-y-1 text-xs font-medium text-muted"><span class="block">Role</span><SearchSelect v-model="createForm.role_code" :options="createRoleOptions" placeholder="Select a role" search-placeholder="Search roles…" :empty-text="createRoleOptions.length ? undefined : createForm.branch_id ? 'No roles for this branch yet: add one in Roles & Permissions' : 'Choose a branch first'" aria-label="User role" :aria-invalid="createCheck.invalid('role_codes')" /></div>
         <div class="space-y-1 text-xs font-medium text-muted"><span class="block">Branch</span><SearchSelect v-model="createForm.branch_id" :options="branchOptions" placeholder="Select a branch" search-placeholder="Search branches…" aria-label="User branch" :aria-invalid="createCheck.invalid('branch_ids')" /></div>
         <div class="space-y-1 text-xs font-medium text-muted sm:col-span-2">
@@ -91,7 +91,7 @@
         <!-- Phones: one row of equal buttons under the details. Wider screens: a column on the right. -->
         <div class="user-actions mt-3 grid grid-cols-3 gap-1.5 sm:mt-0 sm:flex sm:shrink-0 sm:flex-col sm:items-end">
           <button v-if="canEditUser && item.can_manage !== false" class="action-chip action-edit" @click="beginEdit(item)"><Pencil :size="13" /> Edit</button>
-          <button v-if="canManageUsers && item.can_manage !== false && item.id !== currentUserId" class="action-chip action-pin" @click="openPasswordChange(item)"><KeyRound :size="13" /> Change PIN</button>
+          <button v-if="canManageUsers && item.can_manage !== false && item.id !== currentUserId" class="action-chip action-pin" @click="openPasswordChange(item)"><KeyRound :size="13" /> Password</button>
           <button v-if="canManageUsers && item.can_manage !== false && item.id !== currentUserId" class="action-chip" :class="item.is_active ? 'action-danger' : 'action-success'" :disabled="saving" @click="toggleActive(item)"><Power :size="13" /> {{ item.is_active ? 'Deactivate' : 'Activate' }}</button>
         </div>
       </li>
@@ -101,15 +101,15 @@
     <div v-if="passwordTarget" class="fixed inset-0 z-[100] flex items-end justify-center bg-slate-950/55 p-0 backdrop-blur-sm sm:items-center sm:p-4" @click.self="closePasswordChange">
       <section class="w-full max-w-md rounded-t-2xl border border-border bg-white p-5 shadow-2xl sm:rounded-2xl" role="dialog" aria-modal="true" aria-labelledby="change-user-pin-title">
         <header class="mb-4 flex items-start justify-between gap-3">
-          <div><h2 id="change-user-pin-title" class="text-base font-bold text-navy">Change {{ passwordTarget.full_name }}’s PIN</h2><p class="mt-1 text-xs text-muted">Enter a new PIN of {{ MIN_PIN_LENGTH }} to {{ MAX_PIN_LENGTH }} digits. Their active sessions will be revoked.</p></div>
+          <div><h2 id="change-user-pin-title" class="text-base font-bold text-navy">Change {{ passwordTarget.full_name }}’s password</h2><p class="mt-1 text-xs text-muted">Enter a new password of {{ MIN_PASSWORD_LENGTH }} to {{ MAX_PASSWORD_LENGTH }} characters: letters, digits and signs. Their active sessions will be revoked.</p></div>
           <button type="button" class="text-xs text-muted" :disabled="saving" @click="closePasswordChange">Close</button>
         </header>
         <form class="space-y-3" novalidate @submit.prevent="changeUserPassword">
-          <div class="block space-y-1 text-xs font-medium text-muted"><span>New PIN</span><PinInput v-model="passwordForm.password" aria-label="New PIN" :aria-invalid="passwordCheck.invalid('password')" /></div>
+          <div class="block space-y-1 text-xs font-medium text-muted"><span>New password</span><PasswordInput v-model="passwordForm.password" aria-label="New password" :aria-invalid="passwordCheck.invalid('password')" /></div>
           <AppAlert v-if="passwordError || passwordCheck.messages.length" compact :message="passwordError || passwordCheck.messages[0]" />
           <footer class="flex flex-col-reverse gap-2 border-t border-border pt-3 sm:flex-row sm:justify-end">
             <button type="button" class="rounded-lg border border-border px-4 py-2 text-xs font-semibold text-muted" :disabled="saving" @click="closePasswordChange">Cancel</button>
-            <button type="submit" class="rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-white disabled:opacity-60" :disabled="saving">{{ saving ? 'Saving…' : 'Update PIN' }}</button>
+            <button type="submit" class="rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-white disabled:opacity-60" :disabled="saving">{{ saving ? 'Saving…' : 'Update password' }}</button>
           </footer>
         </form>
       </section>
@@ -121,7 +121,7 @@
 import { KeyRound, Pencil, Power, RotateCcw, UserPen, UserPlus } from 'lucide-vue-next'
 import type { AdminUser, Branch, Role } from '~/types/api'
 import { useToast } from '~/composables/useToast'
-import { MAX_PIN_LENGTH, MIN_PIN_LENGTH, rule } from '~/utils/validation'
+import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH, rule } from '~/utils/validation'
 import { useFormErrors } from '~/composables/useFormErrors'
 
 const { api } = useApi()
@@ -151,14 +151,14 @@ const createForm = reactive({ username: '', email: '', full_name: '', password: 
 const editForm = reactive({ email: '', full_name: '', role_codes: [] as string[], branch_ids: [] as string[], manager_ids: [] as string[] })
 const passwordForm = reactive({ password: '' })
 
-// Same rules as the API (CreateUserInput, UpdateUserInput, the roles/branches and PIN endpoints).
+// Same rules as the API (CreateUserInput, UpdateUserInput, the roles/branches and password endpoints).
 const createCheck = reactive(useFormErrors(
   () => ({ ...createForm, role_codes: createForm.role_code, branch_ids: createForm.branch_id }),
   () => ({
     username: [rule.required('username'), rule.minLength('username', 3), rule.maxLength('username', 64)],
     email: [rule.required('email'), rule.email('email')],
     full_name: [rule.required('full name'), rule.minLength('full name', 2)],
-    password: [rule.required('PIN'), rule.pin('PIN')],
+    password: [rule.required('password'), rule.password('password')],
     role_codes: [rule.required('role')],
     branch_ids: [rule.required('branch')],
   }),
@@ -174,7 +174,7 @@ const editCheck = reactive(useFormErrors(
 ))
 const passwordCheck = reactive(useFormErrors(
   () => ({ ...passwordForm }),
-  () => ({ password: [rule.required('PIN'), rule.pin('PIN')] }),
+  () => ({ password: [rule.required('password'), rule.password('password')] }),
 ))
 // Branch-level managers can only hand out roles whose permissions they hold themselves (the API enforces this too).
 const assignableRoles = computed(() => roles.value.filter((role) => {
@@ -321,11 +321,11 @@ async function changeUserPassword() {
   saving.value = true
   try {
     await api(`/users/${passwordTarget.value.id}/password`, { method: 'POST', body: { password: passwordForm.password } })
-    toast.success(`${passwordTarget.value.full_name} can sign in with the new PIN.`, { title: 'PIN updated' })
+    toast.success(`${passwordTarget.value.full_name} can sign in with the new password.`, { title: 'Password updated' })
     passwordTarget.value = null
     passwordForm.password = ''
   } catch (e: any) {
-    if (!passwordCheck.fromApi(e)) passwordError.value = e?.data?.error || 'Could not change this user’s PIN.'
+    if (!passwordCheck.fromApi(e)) passwordError.value = e?.data?.error || 'Could not change this user’s password.'
   } finally {
     saving.value = false
   }
@@ -372,7 +372,7 @@ async function create() {
     const name = createForm.full_name.trim() || createForm.username.trim()
     Object.assign(createForm, { username: '', email: '', full_name: '', password: '', role_code: '', branch_id: defaultBranchId(), manager_ids: [] })
     showCreate.value = false
-    toast.success(`${name} can sign in with their username and PIN.`, { title: 'User created' })
+    toast.success(`${name} can sign in with their username and password.`, { title: 'User created' })
     await load()
   } catch (e: any) {
     if (!createCheck.fromApi(e)) createError.value = e?.data?.error || 'Could not create this user.'

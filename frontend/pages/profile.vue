@@ -3,7 +3,7 @@
     <header>
       <p class="text-[10px] font-bold tracking-[0.14em] text-slate-400">ACCOUNT</p>
       <h1 class="text-xl font-bold text-navy">Your profile</h1>
-      <p class="mt-1 text-sm text-muted">Manage your account details and sign-in PIN.</p>
+      <p class="mt-1 text-sm text-muted">Manage your account details and sign-in password.</p>
     </header>
 
     <article class="rounded-xl border border-border bg-white p-4 sm:p-5">
@@ -17,20 +17,20 @@
     </article>
 
     <form class="space-y-4 rounded-xl border border-border bg-white p-4 sm:p-5" novalidate @submit.prevent="changePassword">
-      <div><h2 class="text-sm font-semibold text-navy">Change PIN</h2><p class="mt-1 text-xs text-muted">Enter your current PIN, then a new PIN of {{ MIN_PIN_LENGTH }} to {{ MAX_PIN_LENGTH }} digits. Your other devices will be signed out.</p></div>
+      <div><h2 class="text-sm font-semibold text-navy">Change password</h2><p class="mt-1 text-xs text-muted">Enter your current password, then a new one of {{ MIN_PASSWORD_LENGTH }} to {{ MAX_PASSWORD_LENGTH }} characters: letters, digits and signs. Your other devices will be signed out.</p></div>
       <div class="grid max-w-md grid-cols-1 gap-3 sm:grid-cols-2">
-        <div class="block space-y-1 text-xs font-medium text-muted"><span>Current PIN</span><PinInput v-model="currentPin" existing aria-label="Current PIN" :aria-invalid="pinCheck.invalid('current_password')" /></div>
-        <div class="block space-y-1 text-xs font-medium text-muted"><span>New PIN</span><PinInput v-model="newPin" aria-label="New PIN" :aria-invalid="pinCheck.invalid('new_password')" /></div>
+        <div class="block space-y-1 text-xs font-medium text-muted"><span>Current password</span><PasswordInput v-model="currentPin" existing aria-label="Current password" :aria-invalid="pinCheck.invalid('current_password')" /></div>
+        <div class="block space-y-1 text-xs font-medium text-muted"><span>New password</span><PasswordInput v-model="newPin" aria-label="New password" :aria-invalid="pinCheck.invalid('new_password')" /></div>
       </div>
       <AppAlert v-if="error || pinCheck.messages.length" class="max-w-md" compact :message="error" :items="pinCheck.messages" />
-      <button type="submit" :disabled="saving" class="w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60 sm:w-auto">{{ saving ? 'Updating…' : 'Update PIN' }}</button>
+      <button type="submit" :disabled="saving" class="w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60 sm:w-auto">{{ saving ? 'Updating…' : 'Update password' }}</button>
     </form>
   </section>
 </template>
 
 <script setup lang="ts">
 import { useToast } from '~/composables/useToast'
-import { MAX_PIN_LENGTH, MIN_PIN_LENGTH, rule } from '~/utils/validation'
+import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH, rule } from '~/utils/validation'
 import { useFormErrors } from '~/composables/useFormErrors'
 const { api } = useApi()
 const { user, fetchMe } = useAuth()
@@ -39,12 +39,12 @@ const newPin = ref('')
 const saving = ref(false)
 const error = ref('')
 const toast = useToast()
-// Same rules as the API (changePasswordRequest: current PIN required, new PIN 6 digits).
+// Same rules as the API (changePasswordRequest: current password required, new one 4 to 64 characters).
 const pinCheck = reactive(useFormErrors(
   () => ({ current_password: currentPin.value, new_password: newPin.value }),
   () => ({
-    current_password: [rule.required('current PIN')],
-    new_password: [rule.required('new PIN'), rule.pin('new PIN')],
+    current_password: [rule.required('current password')],
+    new_password: [rule.required('new password'), rule.password('new password')],
   }),
 ))
 
@@ -57,11 +57,11 @@ async function changePassword() {
     currentPin.value = ''
     newPin.value = ''
     pinCheck.reset()
-    // Picks up the cleared PIN-upgrade flag, so the notice goes and the rest of the app opens again.
+    // Picks up the account as it is now.
     await fetchMe()
-    toast.success('Use it the next time you sign in. Your other devices were signed out.', { title: 'Your PIN was updated' })
+    toast.success('Use it the next time you sign in. Your other devices were signed out.', { title: 'Your password was updated' })
   } catch (e: any) {
-    if (!pinCheck.fromApi(e)) error.value = e?.data?.error || 'Could not change your PIN.'
+    if (!pinCheck.fromApi(e)) error.value = e?.data?.error || 'Could not change your password.'
   } finally {
     saving.value = false
   }

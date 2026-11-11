@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -31,15 +32,16 @@ func TestHashAndVerifyPassword(t *testing.T) {
 	}
 }
 
-func TestHashPasswordAcceptsFourToSixDigits(t *testing.T) {
-	for _, pin := range []string{"2468", "24681", "246810"} {
-		if _, err := HashPassword(pin); err != nil {
-			t.Errorf("HashPassword(%q) failed: %v", pin, err)
+func TestHashPasswordAcceptsLettersAndSigns(t *testing.T) {
+	ok := []string{"2468", "24681", "246810", "short", "1234567", "12a4", "Ab-+*_/:;()$&@\"x", "១២៣៤", "pass word", strings.Repeat("x", MaxPasswordLength)}
+	for _, pw := range ok {
+		if _, err := HashPassword(pw); err != nil {
+			t.Errorf("HashPassword(%q) failed: %v", pw, err)
 		}
 	}
-	for _, pin := range []string{"", "short", "123", "1234567", "12a4", "１２３４"} {
-		if _, err := HashPassword(pin); err == nil {
-			t.Errorf("HashPassword(%q) should fail", pin)
+	for _, pw := range []string{"", "123", "ab\tcd", "ab\ncd", strings.Repeat("x", MaxPasswordLength+1), "ab\xffcd"} {
+		if _, err := HashPassword(pw); err == nil {
+			t.Errorf("HashPassword(%q) should fail", pw)
 		}
 	}
 }
@@ -57,11 +59,25 @@ func TestVerifyPasswordFourDigitPIN(t *testing.T) {
 	}
 }
 
-func TestIsValidPIN(t *testing.T) {
-	cases := map[string]bool{"246810": true, "2468": true, "24681": true, "246": false, "2468100": false, "24681a": false}
-	for pin, want := range cases {
-		if got := IsValidPIN(pin); got != want {
-			t.Errorf("IsValidPIN(%q) = %v, want %v", pin, got, want)
+func TestIsValidPassword(t *testing.T) {
+	// Lengths are in characters: four Khmer digits are 12 bytes but 4 characters.
+	cases := map[string]bool{"246810": true, "2468": true, "24681a": true, "-+*_": true, "១២៣៤": true, "246": false, "១២៣": false, "a\u0000bcd": false}
+	for pw, want := range cases {
+		if got := IsValidPassword(pw); got != want {
+			t.Errorf("IsValidPassword(%q) = %v, want %v", pw, got, want)
 		}
+	}
+}
+
+func TestVerifyPasswordWithSigns(t *testing.T) {
+	hash, err := HashPassword("Ab-+*12")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := VerifyPassword("Ab-+*12", hash); err != nil || !ok {
+		t.Fatalf("password should verify, got ok=%v err=%v", ok, err)
+	}
+	if ok, _ := VerifyPassword("ab-+*12", hash); ok {
+		t.Fatal("letters' case counts")
 	}
 }

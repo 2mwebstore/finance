@@ -19,8 +19,10 @@
           <input
             v-model="password"
             :type="showPassword ? 'text' : 'password'"
-            inputmode="numeric"
             autocomplete="current-password"
+            autocapitalize="off"
+            autocorrect="off"
+            spellcheck="false"
             required
             :aria-invalid="loginCheck.invalid('password')"
             class="w-full rounded-lg border border-border py-2.5 pl-3 pr-11 text-base focus:outline-none focus:ring-2 focus:ring-primary"
@@ -39,7 +41,7 @@
         </div>
       </div>
       <p v-if="showDemoCredentials" class="text-center text-xs text-muted">
-        Demo login: <span class="font-medium text-navy">manager1</span> / PIN <span class="font-medium text-navy">246810</span>
+        Demo login: <span class="font-medium text-navy">manager1</span> / password <span class="font-medium text-navy">246810</span>
       </p>
       <AppAlert v-if="error || loginCheck.messages.length" title="Couldn’t sign you in" :message="error" :items="loginCheck.messages" />
       <button

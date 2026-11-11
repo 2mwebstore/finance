@@ -298,7 +298,7 @@ func (uc *UserController) SetPassword(c *gin.Context) {
 		return
 	}
 	var body struct {
-		Password string `json:"password" binding:"required,min=4,max=6,numeric"`
+		Password string `json:"password" binding:"required,min=4,max=64"`
 	}
 	if !bindJSON(c, &body) {
 		return

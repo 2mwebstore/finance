@@ -58,10 +58,9 @@ func TestBindJSONMessages(t *testing.T) {
 	}{
 		{"min length", &services.CreateBranchInput{}, `{"code":"A","name":"Main"}`, "code", "code must be at least 2 characters"},
 		{"email", &services.CreateUserInput{}, `{"username":"dara","email":"nope","password":"123456","full_name":"Dara"}`, "email", "email must be a valid email address"},
-		{"pin digits", &services.CreateUserInput{}, `{"username":"dara","email":"d@x.io","password":"12ab56","full_name":"Dara"}`, "password", "PIN must contain digits only"},
-		{"pin too short", &services.CreateUserInput{}, `{"username":"dara","email":"d@x.io","password":"123","full_name":"Dara"}`, "password", "PIN must be 4 to 6 digits"},
-		{"new pin too long", &changePasswordRequest{}, `{"current_password":"2468","new_password":"1234567"}`, "new_password", "new PIN must be 4 to 6 digits"},
-		{"setup pin digits", &setupRequest{}, `{"setup_token":"t","username":"admin","email":"a@x.io","password":"12345a","full_name":"Admin"}`, "password", "PIN must contain digits only"},
+		{"password too short", &services.CreateUserInput{}, `{"username":"dara","email":"d@x.io","password":"1a3","full_name":"Dara"}`, "password", "password must be 4 to 64 characters"},
+		{"new password too long", &changePasswordRequest{}, `{"current_password":"2468","new_password":"` + strings.Repeat("a", 65) + `"}`, "new_password", "new password must be 4 to 64 characters"},
+		{"setup password too short", &setupRequest{}, `{"setup_token":"t","username":"admin","email":"a@x.io","password":"12","full_name":"Admin"}`, "password", "password must be 4 to 64 characters"},
 		{"oneof", &services.CreateTransactionInput{}, `{"type":"gift","branch_id":"7a1f0c39-6c41-4f0e-9a52-2f3a9f6f4c11","currency":"USD","amount":"1"}`, "type", "type must be income or expense"},
 		{"blank update", &services.UpdateBranchInput{}, `{"name":""}`, "name", "name must be at least 2 characters"},
 		{"wrong type", &services.CreateTransactionInput{}, `{"amount":12}`, "amount", "amount is not valid"},
@@ -87,11 +86,20 @@ func TestBindJSONAcceptsValidBodyAndOmittedUpdates(t *testing.T) {
 	if code, out := bindResponse(t, &services.CreateBranchInput{}, `{"code":"PP","name":"Main","email":""}`); code != http.StatusOK {
 		t.Fatalf("status = %d (%v), want 200", code, out)
 	}
-	// PINs are 4 to 6 digits.
-	for _, pin := range []string{"1357", "13579", "135790"} {
-		if code, out := bindResponse(t, &changePasswordRequest{}, `{"current_password":"2468","new_password":"`+pin+`"}`); code != http.StatusOK {
-			t.Fatalf("new PIN %s: status = %d (%v), want 200", pin, code, out)
+	// Passwords are 4 to 64 characters: digits (a PIN), letters and signs.
+	for _, pw := range []string{"1357", "135790", "12ab56", "Ab-+*_/:;()$&@", "1234567", strings.Repeat("a", 64)} {
+		body, _ := json.Marshal(map[string]string{"current_password": "2468", "new_password": pw})
+		if code, out := bindResponse(t, &changePasswordRequest{}, string(body)); code != http.StatusOK {
+			t.Fatalf("new password %q: status = %d (%v), want 200", pw, code, out)
 		}
+	}
+	for _, body := range []string{`{"username":"dara","email":"d@x.io","password":"12ab56","full_name":"Dara"}`} {
+		if code, out := bindResponse(t, &services.CreateUserInput{}, body); code != http.StatusOK {
+			t.Fatalf("a password with letters: status = %d (%v), want 200", code, out)
+		}
+	}
+	if code, out := bindResponse(t, &setupRequest{}, `{"setup_token":"t","username":"admin","email":"a@x.io","password":"Owner-2026*","full_name":"Admin"}`); code != http.StatusOK {
+		t.Fatalf("setup with signs: status = %d (%v), want 200", code, out)
 	}
 }
 

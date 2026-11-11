@@ -35,9 +35,9 @@ var fieldLabels = map[string]string{
 	"category_id":      "category",
 	"transaction_date": "date",
 	"full_name":        "full name",
-	"password":         "PIN",
-	"new_password":     "new PIN",
-	"current_password": "current PIN",
+	"password":         "password",
+	"new_password":     "new password",
+	"current_password": "current password",
 	"identifier":       "username or email",
 	"setup_token":      "setup token",
 	"role_codes":       "roles",
@@ -99,7 +99,7 @@ func writeBindError(c *gin.Context, err error) {
 
 func validationMessage(fe validator.FieldError) string {
 	label := fieldLabel(fe.Field())
-	isPIN := fe.Field() == "password" || fe.Field() == "new_password"
+	isPassword := fe.Field() == "password" || fe.Field() == "new_password"
 	isList := fe.Kind() == reflect.Slice || fe.Kind() == reflect.Array || fe.Kind() == reflect.Map
 	switch fe.Tag() {
 	case "required":
@@ -108,8 +108,8 @@ func validationMessage(fe validator.FieldError) string {
 		}
 		return label + " is required"
 	case "min", "max":
-		if isPIN {
-			return fmt.Sprintf("%s must be %d to %d digits", label, auth.MinPINLength, auth.MaxPINLength)
+		if isPassword {
+			return fmt.Sprintf("%s must be %d to %d characters", label, auth.MinPasswordLength, auth.MaxPasswordLength)
 		}
 		bound := "at least "
 		if fe.Tag() == "max" {
@@ -120,14 +120,8 @@ func validationMessage(fe validator.FieldError) string {
 		}
 		return label + " must be " + bound + fe.Param() + " characters"
 	case "len":
-		if isPIN {
-			return label + " must be exactly " + fe.Param() + " digits"
-		}
 		return label + " must be exactly " + fe.Param() + " characters"
 	case "numeric":
-		if isPIN {
-			return label + " must contain digits only"
-		}
 		return label + " must be a number"
 	case "email":
 		return label + " must be a valid email address"

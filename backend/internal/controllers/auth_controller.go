@@ -33,14 +33,14 @@ type setupRequest struct {
 	SetupToken string `json:"setup_token" binding:"required"`
 	Username   string `json:"username" binding:"required,min=3,max=64"`
 	Email      string `json:"email" binding:"required,email"`
-	Password   string `json:"password" binding:"required,min=4,max=6,numeric"`
+	Password   string `json:"password" binding:"required,min=4,max=64"`
 	FullName   string `json:"full_name" binding:"required,min=2"`
 }
 
 type changePasswordRequest struct {
 	// Required so a stolen session can't quietly take over the account.
 	CurrentPassword string `json:"current_password" binding:"required"`
-	NewPassword     string `json:"new_password" binding:"required,min=4,max=6,numeric"`
+	NewPassword     string `json:"new_password" binding:"required,min=4,max=64"`
 }
 
 func (ac *AuthController) Login(c *gin.Context) {
@@ -276,11 +276,11 @@ func (ac *AuthController) ChangePassword(c *gin.Context) {
 	if err := ac.svc.ChangePassword(c.Request.Context(), userID, keep, req.CurrentPassword, req.NewPassword); err != nil {
 		switch err {
 		case auth.ErrInvalidCredentials:
-			// 400, not 401: the session is fine, only the PIN typed was wrong.
-			msg := "current PIN is incorrect"
+			// 400, not 401: the session is fine, only the password typed was wrong.
+			msg := "current password is incorrect"
 			c.JSON(http.StatusBadRequest, gin.H{"error": msg, "fields": gin.H{"current_password": msg}})
 		case auth.ErrAccountLocked:
-			c.JSON(http.StatusForbidden, gin.H{"error": "too many wrong PINs; the account is temporarily locked"})
+			c.JSON(http.StatusForbidden, gin.H{"error": "too many wrong passwords; the account is temporarily locked"})
 		default:
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		}

@@ -7,9 +7,9 @@ export type Schema = Record<string, Check[]>
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
-/** A PIN is 4 to 6 digits (API: auth.MinPINLength / MaxPINLength). */
-export const MIN_PIN_LENGTH = 4
-export const MAX_PIN_LENGTH = 6
+/** A password is 4 to 64 characters: letters, digits and signs (API: auth.MinPasswordLength / MaxPasswordLength). */
+export const MIN_PASSWORD_LENGTH = 4
+export const MAX_PASSWORD_LENGTH = 64
 
 function isBlank(value: unknown) {
   if (Array.isArray(value)) return value.length === 0
@@ -30,12 +30,13 @@ export const rule = {
     !isBlank(value) && String(value).trim().length > max ? `${label} must be at most ${max} characters` : '',
   email: (label: string): Check => value =>
     !isBlank(value) && !EMAIL.test(String(value).trim()) ? `${label} must be a valid email address` : '',
-  /** PIN of 4 to 6 digits (API: min=4,max=6,numeric, checked in that order). */
-  pin: (label: string): Check => (value) => {
+  /** Password of 4 to 64 characters, counted as the API does (API: min=4,max=64; no control characters). */
+  password: (label: string): Check => (value) => {
     if (isBlank(value)) return ''
-    const pin = String(value)
-    if (pin.length < MIN_PIN_LENGTH || pin.length > MAX_PIN_LENGTH) return `${label} must be ${MIN_PIN_LENGTH} to ${MAX_PIN_LENGTH} digits`
-    return /^\d+$/.test(pin) ? '' : `${label} must contain digits only`
+    const password = String(value)
+    const length = [...password].length
+    if (length < MIN_PASSWORD_LENGTH || length > MAX_PASSWORD_LENGTH) return `${label} must be ${MIN_PASSWORD_LENGTH} to ${MAX_PASSWORD_LENGTH} characters`
+    return /[\u0000-\u001f\u007f-\u009f]/.test(password) ? `${label} is not valid` : ''
   },
   positiveAmount: (label: string): Check => value =>
     !isBlank(value) && !(Number(value) > 0) ? `${label} must be greater than 0` : '',

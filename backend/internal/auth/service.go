@@ -170,7 +170,7 @@ var (
 // spendHashTime makes a login for an unknown username take as long as a real PIN check, so
 // response times don't reveal which usernames exist.
 func spendHashTime(pin string) {
-	unknownUserHashOnce.Do(func() { unknownUserHash, _ = HashPassword(strings.Repeat("0", MinPINLength)) })
+	unknownUserHashOnce.Do(func() { unknownUserHash, _ = HashPassword(strings.Repeat("0", MinPasswordLength)) })
 	if unknownUserHash != "" {
 		_, _ = VerifyPassword(pin, unknownUserHash)
 	}

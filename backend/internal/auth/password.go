@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"golang.org/x/crypto/argon2"
 )
@@ -29,31 +31,36 @@ func argonKey(password, salt []byte, time, memory uint32, threads uint8, keyLen 
 	return argon2.IDKey(password, salt, time, memory, threads, keyLen)
 }
 
-// A PIN is MinPINLength to MaxPINLength digits; longer is safer, so people may choose 6.
+// A password is MinPasswordLength to MaxPasswordLength characters: letters, digits and signs
+// (- + * …), so a PIN of 4 to 6 digits still is one. Longer is safer.
 const (
-	MinPINLength = 4
-	MaxPINLength = 6
+	MinPasswordLength = 4
+	MaxPasswordLength = 64
 )
 
-var errPINFormat = fmt.Errorf("PIN must be %d to %d digits", MinPINLength, MaxPINLength)
+var errPasswordFormat = fmt.Errorf("password must be %d to %d characters", MinPasswordLength, MaxPasswordLength)
 
-// IsValidPIN reports whether pin is MinPINLength to MaxPINLength digits.
-func IsValidPIN(pin string) bool {
-	if len(pin) < MinPINLength || len(pin) > MaxPINLength {
+// IsValidPassword reports whether password is MinPasswordLength to MaxPasswordLength characters
+// with no control characters (tabs, line breaks …).
+func IsValidPassword(password string) bool {
+	if !utf8.ValidString(password) {
 		return false
 	}
-	for _, digit := range pin {
-		if digit < '0' || digit > '9' {
+	if n := utf8.RuneCountInString(password); n < MinPasswordLength || n > MaxPasswordLength {
+		return false
+	}
+	for _, r := range password {
+		if unicode.IsControl(r) {
 			return false
 		}
 	}
 	return true
 }
 
-// HashPassword creates an Argon2id hash of a new PIN (MinPINLength to MaxPINLength digits).
+// HashPassword creates an Argon2id hash of a new password (see IsValidPassword).
 func HashPassword(password string) (string, error) {
-	if !IsValidPIN(password) {
-		return "", errPINFormat
+	if !IsValidPassword(password) {
+		return "", errPasswordFormat
 	}
 	return encodeHash(password)
 }
