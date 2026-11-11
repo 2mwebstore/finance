@@ -1,8 +1,9 @@
 <template>
   <div v-if="entries.length" class="space-y-3">
-    <!-- One table per currency (USD first): each entry's totals in it -->
-    <article v-for="part in tables" :key="part.currency" class="overflow-x-auto rounded-xl border border-border bg-white">
-      <h2 class="flex items-center gap-2 border-b border-border px-4 py-3 text-sm font-semibold text-navy"><FileText :size="15" /> {{ title }} · {{ part.currency }}<span v-if="selectable && part === tables[0]" class="ml-auto text-[11px] font-normal text-muted">Tap one for its detail</span></h2>
+    <!-- One table per currency (USD first): each entry's totals in it; merged (Group summary): one
+         table, the USD rows, then the KHR ones -->
+    <article v-for="part in tables" :key="part.currency || 'all'" class="overflow-x-auto rounded-xl border border-border bg-white">
+      <h2 class="flex items-center gap-2 border-b border-border px-4 py-3 text-sm font-semibold text-navy"><FileText :size="15" /> {{ title }}<template v-if="part.currency"> · {{ part.currency }}</template><span v-if="selectable && part === tables[0]" class="ml-auto text-[11px] font-normal text-muted">Tap one for its detail</span></h2>
       <table class="report-table">
         <thead class="bg-canvas uppercase text-slate-500">
           <tr>
@@ -13,7 +14,7 @@
           </tr>
         </thead>
         <tbody class="divide-y divide-border">
-          <tr v-for="{ item: e, t } in part.rows" :key="e.id || 'none'" class="text-navy">
+          <tr v-for="{ item: e, t } in part.rows" :key="`${e.id || 'none'}-${t.currency}`" class="text-navy">
             <td class="name">
               <button v-if="e.id && selectable" type="button" class="text-left font-semibold text-primary hover:underline" @click="emit('select', e)">{{ e.title }}</button>
               <NuxtLink v-else-if="e.id" :to="`/winlose/entries/${e.id}`" class="font-semibold text-primary hover:underline">{{ e.title }}</NuxtLink>
@@ -36,15 +37,16 @@
 import { FileText } from 'lucide-vue-next'
 import type { WinLoseReportEntry } from '~/types/api'
 import { formatDocDate } from '~/utils/inventory'
-import { currencyTables, formatAmount, totalsRows } from '~/utils/winlose'
+import { currencyTables, formatAmount, mergedTables, totalsRows } from '~/utils/winlose'
 
 /**
- * A report's totals for each data entry (by_entry), one table per currency (USD first), with its
+ * A report's totals for each data entry (by_entry), one table per currency (USD first; merged, as on
+ * Group summary, one table: the USD rows, then the KHR ones), with its
  * ✅ / ❌ when reactions is set (Group summary; in the entry's first currency's table). An entry's
  * title opens its page or, selectable, its detail in the report (`select` with the entry).
  */
-const props = withDefaults(defineProps<{ entries: WinLoseReportEntry[]; title?: string; selectable?: boolean; reactions?: boolean }>(), { title: 'By data entry', selectable: false, reactions: false })
-const tables = computed(() => currencyTables(totalsRows(props.entries), r => r.t.currency))
+const props = withDefaults(defineProps<{ entries: WinLoseReportEntry[]; title?: string; selectable?: boolean; reactions?: boolean; merged?: boolean }>(), { title: 'By data entry', selectable: false, reactions: false, merged: false })
+const tables = computed(() => mergedTables(currencyTables(totalsRows(props.entries), r => r.t.currency), props.merged))
 const emit = defineEmits<{ select: [entry: WinLoseReportEntry] }>()
 
 function tone(value: string) {

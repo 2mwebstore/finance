@@ -185,12 +185,17 @@ the report to one entry. The report's `weeks` still has each calendar week's tot
 The Report and the Group summary list every switched-on group and agent, at 0 when it has no
 results in the dates: the agents Data entry lists (the branch's own and the shared ones, not only
 in switched-off groups), each in its own currency, and the switched-on groups (a group with no
-results in its agents' currencies). A group's detail lists all its agents (each at its rate there),
+results in its agents' currencies; one with results in one currency is at 0 in its other agents'
+currencies, so a group with KHR results and USD agents is in the USD table too). A group's detail lists all its agents (each at its rate there),
 an agent's all its groups. The totals stay what was entered. (`GET /winlose/reports` with
-`everyone=true`; not with `partner_id`, `by_week` or `entry_id`.) USD and KHR are never in one
-table: By group, By agent, By week and a group's or an entry's agents are a table per currency, USD
-first, each A to Z (ignoring case; agents in no group last), and By agent and the agents' tables end
-with the currency's Total. Export CSV lists the USD agents, then the KHR ones. On Group summary, the
+`everyone=true`; not with `partner_id`, `by_week` or `entry_id`.) **By group** is one table on
+both: a row per group (A to Z ignoring case, agents in no group last) with its amounts in each of
+its agents' currencies in the same row, USD first (`$1,000.00 / -៛500,000`; on phones one under the
+other; USD and KHR are never added together). On the Report By agent, By week and a group's or an
+entry's agents are a table per currency, USD first, each A to Z (ignoring case), ending with the
+currency's Total. On **Group summary** each of them is one table: the USD rows first, then the KHR
+ones (each A to Z), and By agent and the agents' tables end with a Total for each currency
+(**Total USD**, **Total KHR**). Export CSV lists the USD agents, then the KHR ones. On Group summary, the
 **Image** of an entry or a group has the same tables, with the agent column titled **AG**.
 The group form (Assign agents) shows beside each rate what the Total is worked out at (60% → 40%).
 

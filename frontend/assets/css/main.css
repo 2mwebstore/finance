@@ -91,7 +91,7 @@ button { -webkit-tap-highlight-color: transparent; }
 .report-table td.empty { padding: 32px 12px; text-align: center; }
 @media (min-width: 640px) {
   .report-table { font-size: 12px; }
-  .report-table th, .report-table td, .report-table th:first-child, .report-table td:first-child, .report-table th:last-child, .report-table td:last-child { padding: 8px 12px; }
+  .report-table th, .report-table td, .report-table th:first-child, .report-table td:first-child, .report-table th:last-child, .report-table td:last-child { padding: 5px 12px; }
   .report-table thead th { font-size: 10px; letter-spacing: .025em; }
   .report-table .code { font-size: inherit; }
 }

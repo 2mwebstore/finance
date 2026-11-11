@@ -1,9 +1,10 @@
 <template>
   <div class="space-y-3">
-    <!-- One table per currency (USD first): its agents A to Z and its total -->
-    <div v-for="part in tables" :key="part.currency" class="overflow-x-auto rounded-xl border border-border bg-white">
-      <component :is="title ? 'h2' : 'h4'" class="flex items-center gap-2 border-b border-border px-4 font-semibold text-navy" :class="title ? 'py-3 text-sm' : 'py-2 text-xs'">
-        <Layers v-if="title" :size="15" />{{ title ? `${title} · ` : '' }}{{ part.currency }}
+    <!-- One table per currency (USD first): its agents A to Z and its total; merged (Group summary):
+         one table, the USD agents, then the KHR ones, and a Total for each currency -->
+    <div v-for="part in tables" :key="part.currency || 'all'" class="overflow-x-auto rounded-xl border border-border bg-white">
+      <component :is="title ? 'h2' : 'h4'" v-if="title || part.currency" class="flex items-center gap-2 border-b border-border px-4 font-semibold text-navy" :class="title ? 'py-3 text-sm' : 'py-2 text-xs'">
+        <Layers v-if="title" :size="15" />{{ [title, part.currency].filter(Boolean).join(' · ') }}
         <span v-if="hint && part === tables[0]" class="ml-auto text-[11px] font-normal text-muted" data-capture-skip>{{ hint }}</span>
       </component>
       <table class="report-table">
@@ -35,9 +36,9 @@
             <td v-if="showRates" class="amount hidden sm:table-cell">{{ usedRate(line.rate_min, line.rate_max, line.formula) }}</td>
             <td class="amount font-bold" :class="tone(line.jame_ps)">{{ formatAmount(line.jame_ps, line.currency) }}</td>
           </tr>
-          <!-- The currency's total -->
-          <tr v-for="t in [totalsIn(report.totals, part.currency)]" :key="`total-${t.currency}`" class="bg-canvas/60 font-semibold text-navy">
-            <td class="name">Total</td>
+          <!-- The currency's total (merged: one for each currency, "Total USD", "Total KHR") -->
+          <tr v-for="t in part.currencies.map(c => totalsIn(report.totals, c))" :key="`total-${t.currency}`" class="bg-canvas/60 font-semibold text-navy">
+            <td class="name">{{ part.currencies.length > 1 ? `Total ${t.currency}` : 'Total' }}</td>
             <td class="amount" :class="tone(t.win_lose)">{{ formatAmount(t.win_lose, t.currency) }}</td>
             <td class="amount">{{ formatAmount(t.commission, t.currency) }}</td>
             <td v-if="showRates" class="hidden sm:table-cell" />
@@ -53,21 +54,22 @@
 <script setup lang="ts">
 import { Layers } from 'lucide-vue-next'
 import type { WinLoseReport } from '~/types/api'
-import { currencyTables, formatAmount, totalsIn, usedRate } from '~/utils/winlose'
+import { currencyTables, formatAmount, mergedTables, totalsIn, usedRate } from '~/utils/winlose'
 
 /**
  * A win/lose report's lines by agent, one table per currency (USD first, each A to Z) with its
- * total (`jame_ps` is the Total). For one group (byGroup) each agent also shows the rate its Total
+ * total (`jame_ps` is the Total); merged (Group summary), one table: the USD agents, then the KHR
+ * ones, ending with each currency's total. For one group (byGroup) each agent also shows the rate its Total
  * is at (an agent at 60%: 40%). Selectable: an agent's code opens its detail (`select` with its id).
  * With reactions, an agent's line that is its result in an entry (result_id) has its ✅ / ❌ under
- * it. Title: each table is headed "<title> · USD" (else just the currency); hint goes beside the
- * first one.
+ * it. Title: each table is headed "<title> · USD" (else just the currency; a merged table of both,
+ * just the title); hint goes beside the first one.
  */
-const props = withDefaults(defineProps<{ report: Pick<WinLoseReport, 'lines' | 'totals'>; byGroup?: boolean; selectable?: boolean; reactions?: boolean; title?: string; hint?: string }>(), { byGroup: false, selectable: false, reactions: false, title: '', hint: '' })
+const props = withDefaults(defineProps<{ report: Pick<WinLoseReport, 'lines' | 'totals'>; byGroup?: boolean; selectable?: boolean; reactions?: boolean; title?: string; hint?: string; merged?: boolean }>(), { byGroup: false, selectable: false, reactions: false, title: '', hint: '', merged: false })
 // Rates need View Rates in Reports (the API leaves them out without it).
 const { can } = usePermissions()
 const showRates = computed(() => props.byGroup && can('winlose-reports.rates'))
-const tables = computed(() => currencyTables(props.report.lines, l => l.currency))
+const tables = computed(() => mergedTables(currencyTables(props.report.lines, l => l.currency), props.merged))
 const emit = defineEmits<{ select: [platformId: string] }>()
 
 function tone(value: string) {
