@@ -247,6 +247,7 @@ func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config, store storage.Store, 
 					permissions.PlatformAssignmentsCreate, permissions.PlatformAssignmentsEdit)
 				groupsAny := need(permissions.PlatformAssignmentsView, permissions.PlatformAssignmentsCreate, permissions.PlatformAssignmentsEdit, permissions.PlatformAssignmentsDelete)
 				api.GET("/platforms", agentsAny, platformCtrl.ListPlatforms)
+				api.GET("/platforms/:id", agentsAny, platformCtrl.GetPlatform)
 				api.POST("/platforms", need(permissions.PlatformsCreate), platformCtrl.SavePlatform)
 				// Turning an agent off or on is an update.
 				api.PATCH("/platforms/:id", need(permissions.PlatformsEdit), platformCtrl.SavePlatform)

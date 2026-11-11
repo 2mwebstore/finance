@@ -258,7 +258,8 @@ changed; a week can be finalized from its Sunday; ends and moves can't hide week
   **Report** (this month at first; by group, then by agent, and the own branch's weekly
   settlement for a whole week),
   **Group Summary** (`/winlose/reports/branch-summary`; this month at first; totals, by group, then by agent),
-  **Agents** (`/admin/platforms`), **Group Agent
+  **Agents** (`/admin/platforms`; **Add agent** (`/admin/platforms/new`) and **Update**
+  (`/admin/platforms/:id`, which loads the agent with `GET /platforms/:id`) are pages), **Group Agent
   Assignments** (`/admin/platform-assignments`: your branch's titled groups of agents with their
   rates, searchable by title, each with an **Active** switch, **Update** and **Delete**; **Assign
   agents** (`/admin/platform-assignments/new`) and Update (`/admin/platform-assignments/:id`) are

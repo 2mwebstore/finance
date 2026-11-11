@@ -369,6 +369,31 @@ func TestDeletingAnAgent(t *testing.T) {
 	}
 }
 
+// An agent's Update page loads it alone: one the person may see (turned off too, with its branch and
+// groups), not one of another branch.
+func TestGettingOneAgent(t *testing.T) {
+	f := newWLFixture(t)
+	own, err := f.svc.SavePlatform(f.ctx, nil, PlatformInput{Code: "TWL_OWN", Name: "Own", DefaultCurrency: "KHR", BranchID: f.hq[0].ID.String()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.db.Model(&models.Platform{}).Where("id = ?", own.ID).Update("is_active", false)
+	got, err := f.svc.GetPlatform(f.ctx, own.ID, f.scope(0))
+	if err != nil || got.Code != "TWL_OWN" || got.Name != "Own" || got.DefaultCurrency != "KHR" || got.BranchCode != "TWL1" || got.IsActive {
+		t.Fatalf("its own branch's agent, turned off: %+v %v", got, err)
+	}
+	if _, err := f.svc.GetPlatform(f.ctx, own.ID, f.scope(1)); !errors.Is(err, ErrPlatformNotFound) {
+		t.Errorf("another branch's agent is not found, got %v", err)
+	}
+	f.assign(t, []models.Platform{f.p1}, 0)
+	if got, err := f.svc.GetPlatform(f.ctx, f.p1.ID, f.scope(0)); err != nil || got.BranchCode != "" || got.ActiveHQs != 1 {
+		t.Errorf("a shared agent, in one group: %+v %v", got, err)
+	}
+	if _, err := f.svc.GetPlatform(f.ctx, uuid.New(), all); !errors.Is(err, ErrPlatformNotFound) {
+		t.Errorf("no such agent: %v", err)
+	}
+}
+
 // The RP permissions that took over from the two "manage" ones (and from Correct Win/Lose for
 // deleting) are given to the roles that had those, and the old ones are removed.
 func TestRPPermissionsTakeOver(t *testing.T) {

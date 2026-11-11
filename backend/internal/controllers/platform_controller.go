@@ -151,6 +151,24 @@ func (pc *PlatformController) ListPlatforms(c *gin.Context) {
 	pagedJSON(c, orEmpty(rows), total, page, size, on)
 }
 
+// GetPlatform is one agent the person may see (its Update page).
+func (pc *PlatformController) GetPlatform(c *gin.Context) {
+	_, scope, ok := pc.scope(c)
+	if !ok {
+		return
+	}
+	id, ok := paramID(c)
+	if !ok {
+		return
+	}
+	p, err := pc.svc.GetPlatform(c.Request.Context(), id, scope)
+	if err != nil {
+		writePlatformError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, p)
+}
+
 func (pc *PlatformController) SavePlatform(c *gin.Context) {
 	access, scope, ok := pc.scope(c)
 	if !ok {

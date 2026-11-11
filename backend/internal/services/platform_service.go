@@ -200,6 +200,8 @@ type PlatformFilter struct {
 	// BranchID: only this branch's agents, and the shared ones too when WithShared.
 	BranchID   *uuid.UUID
 	WithShared bool
+	// ID: only this agent (its Update page).
+	ID *uuid.UUID
 }
 
 // canUsePlatform: the agent is shared or belongs to a branch the person works in.
@@ -218,6 +220,19 @@ func (s *PlatformService) ListPlatforms(ctx context.Context, includeInactive boo
 	return rows, err
 }
 
+// GetPlatform is one agent the person may see (a turned-off one too), as the list shows it: one of
+// another branch is not found.
+func (s *PlatformService) GetPlatform(ctx context.Context, id uuid.UUID, scope BranchScope) (*PlatformRow, error) {
+	rows, _, err := s.ListPlatformsPage(ctx, PlatformFilter{ID: &id, IncludeInactive: true, Scope: &scope})
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, ErrPlatformNotFound
+	}
+	return &rows[0], nil
+}
+
 // ListPlatformsPage lists agents A to Z by code, with how many agents match in all.
 func (s *PlatformService) ListPlatformsPage(ctx context.Context, f PlatformFilter) ([]PlatformRow, int64, error) {
 	base := s.db.WithContext(ctx).Model(&models.Platform{})
@@ -233,6 +248,9 @@ func (s *PlatformService) ListPlatformsPage(ctx context.Context, f PlatformFilte
 		} else {
 			base = base.Where("(platforms.branch_id IN ? OR platforms.branch_id IS NULL)", f.Scope.IDs)
 		}
+	}
+	if f.ID != nil {
+		base = base.Where("platforms.id = ?", *f.ID)
 	}
 	if f.BranchID != nil {
 		if f.WithShared {

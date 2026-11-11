@@ -200,7 +200,9 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionCode[]> = {
   '/inventory/expense-categories': [P.InventoryManage],
   '/inventory/payment-methods': [P.InventoryManage, P.CategoriesManage],
   '/admin/currency': [P.CurrencySettingsManage],
+  // The agents and an agent's page (which itself needs Update; Add agent needs Add).
   '/admin/platforms': [P.PlatformsView, P.PlatformsCreate, P.PlatformsEdit, P.PlatformsDelete],
+  '/admin/platforms/new': [P.PlatformsCreate],
   // The groups and a group's page (which itself needs Update; Assign agents needs Add).
   '/admin/platform-assignments': [P.PlatformAssignmentsView, P.PlatformAssignmentsCreate, P.PlatformAssignmentsEdit, P.PlatformAssignmentsDelete],
   '/admin/platform-assignments/new': [P.PlatformAssignmentsCreate],
