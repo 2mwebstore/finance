@@ -85,9 +85,33 @@
       <AppAlert v-else-if="error" title="Couldn’t load the week" :message="error"><template #action><button type="button" @click="load">Try again</button></template></AppAlert>
       <template v-else-if="sheet">
         <AppAlert v-if="sheet.locked" type="warning" title="This week is finalized" :message="`The week of ${formatDocDate(sheet.week_start)} – ${formatDocDate(sheet.week_end)} is settled. Reopen it on the Report to change it.`" />
-        <!-- Finds an agent by user or name; what was typed in the others stays -->
-        <div v-if="sheet.rows.length" class="sm:max-w-sm"><ListSearch v-model="agentSearch" :delay="150" placeholder="Search agent…" /></div>
-        <div class="overflow-hidden rounded-xl border border-border bg-white">
+        <!-- Finds an agent by user or name, and puts each currency's agents A to Z or Z to A; what was
+             typed in the others stays -->
+        <div v-if="sheet.rows.length" class="flex flex-wrap items-center gap-2">
+          <div class="min-w-0 flex-1 sm:max-w-sm"><ListSearch v-model="agentSearch" :delay="150" placeholder="Search agent…" /></div>
+          <div class="flex items-center gap-0.5 rounded-lg bg-canvas p-1" role="radiogroup" aria-label="Sort agents">
+            <span class="px-1.5 text-[11px] font-semibold text-muted">Sort</span>
+            <button v-for="o in SORTS" :key="o.value" type="button" role="radio" :aria-checked="sort === o.value" class="rounded-md px-2.5 py-1 text-xs font-semibold" :class="sort === o.value ? 'bg-white text-primary shadow-sm' : 'text-muted hover:text-navy'" @click="sort = o.value">{{ o.label }}</button>
+          </div>
+        </div>
+        <!-- Only the agents in one currency, or whose code starts with SBK_, SBU_, 12K_ … (All: every one) -->
+        <div v-if="currencies.length || prefixes.length" class="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+          <div v-if="currencies.length" class="flex flex-wrap items-center gap-1.5" role="radiogroup" aria-label="Currency">
+            <button v-for="c in [{ value: '', label: 'All', count: sheet.rows.length }, ...currencies]" :key="c.value || 'all'" type="button" role="radio" :aria-checked="currency === c.value" class="inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-semibold" :class="currency === c.value ? 'border-primary bg-blue-50 text-primary' : 'border-border bg-white text-muted hover:text-navy'" @click="chosenCurrency = c.value">
+              <span>{{ c.label }}</span><span class="font-normal opacity-70">{{ c.count }}</span>
+            </button>
+          </div>
+          <span v-if="currencies.length && prefixes.length" class="h-5 w-px bg-border" aria-hidden="true" />
+          <div v-if="prefixes.length" class="flex flex-wrap items-center gap-1.5" role="radiogroup" aria-label="Agents">
+            <button v-for="p in [{ value: '', label: 'All', count: sheet.rows.length }, ...prefixes]" :key="p.value || 'all'" type="button" role="radio" :aria-checked="prefix === p.value" class="inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-semibold" :class="prefix === p.value ? 'border-primary bg-blue-50 text-primary' : 'border-border bg-white text-muted hover:text-navy'" @click="chosenPrefix = p.value">
+              <span :class="p.value ? 'font-mono' : ''">{{ p.label }}</span><span class="font-normal opacity-70">{{ p.count }}</span>
+            </button>
+          </div>
+        </div>
+        <!-- Like the Report: one table per currency, USD first then KHR, each numbered from 1 (one
+             table with the message when no agent is shown) -->
+        <div v-for="part in agentTables.length ? agentTables : [{ currency: '', rows: [] }]" :key="part.currency || 'none'" class="overflow-hidden rounded-xl border border-border bg-white">
+          <h2 v-if="part.currency" class="border-b border-border px-4 py-2.5 text-sm font-semibold text-navy">{{ part.currency }}</h2>
           <table class="wl-table w-full text-left text-sm">
             <thead class="bg-canvas text-[10px] uppercase tracking-wide text-slate-500">
               <tr>
@@ -99,7 +123,7 @@
               </tr>
             </thead>
             <tbody class="divide-y divide-border">
-              <tr v-for="{ row, no } in shownRows" :key="row.platform_id" :class="changed(row) ? 'bg-amber-50/40' : ''">
+              <tr v-for="{ row, no } in part.rows" :key="row.platform_id" :class="changed(row) ? 'bg-amber-50/40' : ''">
                 <td class="row-no px-3 py-2.5 text-center text-sm tabular-nums text-muted">{{ no }}</td>
                 <td class="px-3 py-2.5">
                   <!-- The currency the amounts are entered in (on phones the row's number comes first) -->
@@ -121,7 +145,7 @@
                 </td>
               </tr>
               <tr v-if="!sheet.rows.length" class="empty-row"><td :colspan="canSave ? 5 : 4" class="px-3 py-8 text-center text-sm text-muted">No agents are turned on.<NuxtLink v-if="can('platforms.create')" to="/admin/platforms" class="ml-1 font-semibold text-primary">Agents</NuxtLink></td></tr>
-              <tr v-else-if="!shownRows.length" class="empty-row"><td :colspan="canSave ? 5 : 4" class="px-3 py-8 text-center text-sm text-muted">No agent matches “{{ agentSearch }}”.</td></tr>
+              <tr v-else-if="!part.currency" class="empty-row"><td :colspan="canSave ? 5 : 4" class="px-3 py-8 text-center text-sm text-muted">{{ noMatch }}</td></tr>
             </tbody>
           </table>
         </div>
@@ -150,7 +174,7 @@ import { useInfiniteList } from '~/composables/useInfiniteList'
 import { useRpBranch } from '~/composables/useRpBranch'
 import { currentMonthRange } from '~/utils/dateRanges'
 import { formatDocDate, todayISO } from '~/utils/inventory'
-import { mondayOf } from '~/utils/winlose'
+import { byAgentCode, byCurrency, currencyTables, mondayOf } from '~/utils/winlose'
 
 const { api } = useApi()
 const { can } = usePermissions()
@@ -212,25 +236,78 @@ const loading = ref(false)
 const error = ref('')
 const title = ref('')
 const edits = reactive<Record<string, { win_lose: string; commission: string }>>({})
-// The agents shown: those matching the search by user or name, each keeping its number.
+// The agents shown, like the Report: a table per currency (USD first, then KHR), its agents in the
+// order chosen and numbered in it; then only those of the currency and the code start chosen (All:
+// every one) matching the search by user or name, each keeping its number.
 const agentSearch = ref('')
-const shownRows = computed(() => {
-  const rows = (sheet.value?.rows || []).map((row, i) => ({ row, no: i + 1 }))
-  const q = agentSearch.value.trim().toLowerCase()
-  if (!q) return rows
-  return rows.filter(({ row }) => row.platform_code.toLowerCase().includes(q) || (row.platform_name || '').toLowerCase().includes(q))
+const SORTS = [
+  { value: 'name', label: 'A to Z' },
+  { value: 'desc', label: 'Z to A' },
+] as const
+const sort = ref<(typeof SORTS)[number]['value']>('name')
+// The currencies the entry's agents are in (USD first), each with how many: buttons only with two.
+const currencies = computed(() => {
+  const counts = new Map<string, number>()
+  for (const row of sheet.value?.rows || []) counts.set(row.currency, (counts.get(row.currency) || 0) + 1)
+  if (counts.size < 2) return []
+  return [...counts].sort(([a], [b]) => byCurrency(a, b)).map(([value, count]) => ({ value, label: value, count }))
 })
+const chosenCurrency = ref('')
+const currency = computed(() => (currencies.value.some(c => c.value === chosenCurrency.value) ? chosenCurrency.value : ''))
+// A code's start: up to its first "_" (SBK_, SBU_, 12K_ …), in capitals; '' when it has none.
+const prefixOf = (code: string) => {
+  const at = code.indexOf('_')
+  return at > 0 ? code.slice(0, at + 1).toUpperCase() : ''
+}
+// The starts the entry's agents have, A to Z, each with how many: buttons only when they split the
+// agents (not when every agent has the same one).
+const prefixes = computed(() => {
+  const rows = sheet.value?.rows || []
+  const counts = new Map<string, number>()
+  for (const row of rows) {
+    const p = prefixOf(row.platform_code)
+    if (p) counts.set(p, (counts.get(p) || 0) + 1)
+  }
+  if (counts.size === 1 && [...counts.values()][0] === rows.length) return []
+  return [...counts].sort(([a], [b]) => byAgentCode(a, b)).map(([value, count]) => ({ value, label: value, count }))
+})
+const chosenPrefix = ref('')
+// What was chosen, while the entry's agents still have it.
+const prefix = computed(() => (prefixes.value.some(p => p.value === chosenPrefix.value) ? chosenPrefix.value : ''))
+const agentTables = computed(() => {
+  const list = [...(sheet.value?.rows || [])].sort((a, b) => byAgentCode(a.platform_code, b.platform_code))
+  if (sort.value === 'desc') list.reverse()
+  const q = agentSearch.value.trim().toLowerCase()
+  const shown = (row: WeekSheetRow) => (!currency.value || row.currency === currency.value)
+    && (!prefix.value || prefixOf(row.platform_code) === prefix.value)
+    && (!q || row.platform_code.toLowerCase().includes(q) || (row.platform_name || '').toLowerCase().includes(q))
+  return currencyTables(list, row => row.currency)
+    .map(t => ({ currency: t.currency, rows: t.rows.map((row, i) => ({ row, no: i + 1 })).filter(({ row }) => shown(row)) }))
+    .filter(t => t.rows.length)
+})
+const noMatch = computed(() => {
+  const q = agentSearch.value.trim()
+  const within = [currency.value, prefix.value].filter(Boolean).join(' · ')
+  return `No agent matches${q ? ` “${q}”` : ''}${within ? ` in ${within}` : ''}.`
+})
+// Each New entry or Update starts on every agent, A to Z.
+function resetAgentFilters() {
+  agentSearch.value = ''
+  chosenPrefix.value = ''
+  chosenCurrency.value = ''
+  sort.value = 'name'
+}
 
 function openNew() {
   // A new entry is in the branch chosen (else the person's own; with one branch the API picks it).
-  agentSearch.value = ''
+  resetAgentFilters()
   form.value = { mode: 'new', week_start: mondayOf(today), entry_id: '', branch_id: rp.effective.value }
   load()
 }
 // Another branch for a new entry has other agents: the sheet is loaded again.
 watch(() => form.value?.branch_id, () => { if (form.value?.mode === 'new' && !form.value.entry_id) load() })
 function openEdit(e: WinLoseEntry) {
-  agentSearch.value = ''
+  resetAgentFilters()
   form.value = { mode: 'edit', week_start: e.week_start, entry_id: e.id, branch_id: e.branch_id }
   load()
 }

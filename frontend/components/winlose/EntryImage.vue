@@ -21,8 +21,11 @@ import { useToast } from '~/composables/useToast'
 /**
  * Takes a picture of an entry's card (the element with the given id) and opens it in a pop-up to
  * download or share to Telegram. Anything inside the card marked `data-capture-skip` (buttons,
- * reactions) is left out, and the group's name is put before the title (in the picture only). Sharing uses the phone's share sheet, where Telegram is one of the
- * choices; where the browser can't share files the image is copied so it can be pasted in Telegram.
+ * reactions) is left out, what is marked `data-capture-show` is shown (the agent column's "AG"),
+ * and the group's name is put before the title (in the picture only). Its agents are in a table per
+ * currency, USD first, as on the page. Sharing uses the phone's share sheet, where Telegram is one
+ * of the choices; where the browser can't share files the image is copied so it can be pasted in
+ * Telegram.
  */
 const props = defineProps<{ targetId: string; title: string; group?: string }>()
 const toast = useToast()
@@ -69,10 +72,14 @@ async function capture() {
     const hidden = Array.from(node.querySelectorAll<HTMLElement>('table [data-capture-skip]'))
     const displays = hidden.map(el => el.style.display)
     hidden.forEach(el => { el.style.display = 'none' })
+    // What only the picture has ("AG" over the agents) is shown while it is taken.
+    const shown = Array.from(node.querySelectorAll<HTMLElement>('[data-capture-show]'))
+    shown.forEach(el => { el.style.display = 'inline' })
     restore = () => {
       label.remove()
       scrollers.forEach((el, i) => { el.style.overflow = overflows[i] ?? '' })
       hidden.forEach((el, i) => { el.style.display = displays[i] ?? '' })
+      shown.forEach(el => { el.style.display = '' })
     }
     const width = node.offsetWidth, height = node.offsetHeight, margin = 16
     // Sharp (2x) unless the picture would be huge (100 agents): phone browsers refuse canvases

@@ -181,6 +181,17 @@ takes it back, the other changes it (`POST /winlose/entries/:id/reactions` with
 with the entry; the audit log has `winlose.entry.react`). (`GET /winlose/reports` with
 `by_entry=true` adds `entries`, each with its own `lines`, totals and reactions; `entry_id` limits
 the report to one entry. The report's `weeks` still has each calendar week's totals.)
+
+The Report and the Group summary list every switched-on group and agent, at 0 when it has no
+results in the dates: the agents Data entry lists (the branch's own and the shared ones, not only
+in switched-off groups), each in its own currency, and the switched-on groups (a group with no
+results in its agents' currencies). A group's detail lists all its agents (each at its rate there),
+an agent's all its groups. The totals stay what was entered. (`GET /winlose/reports` with
+`everyone=true`; not with `partner_id`, `by_week` or `entry_id`.) USD and KHR are never in one
+table: By group, By agent, By week and a group's or an entry's agents are a table per currency, USD
+first, each A to Z (ignoring case; agents in no group last), and By agent and the agents' tables end
+with the currency's Total. Export CSV lists the USD agents, then the KHR ones. On Group summary, the
+**Image** of an entry or a group has the same tables, with the agent column titled **AG**.
 The group form (Assign agents) shows beside each rate what the Total is worked out at (60% → 40%).
 
 ## Permissions
@@ -235,7 +246,15 @@ changed; a week can be finalized from its Sunday; ends and moves can't hide week
   each saved agent with its own ✅ / ❌, as on the form),
   **Update** and **Delete** (with a reason; needs Delete Data Entry), searchable by title and
   filtered by the days they were created (this month at first); **New entry** is a new entry for
-  this week (Monday to Sunday): a title and every agent's W/L and COMM, each agent saved on its own),
+  this week (Monday to Sunday): a title and every agent's W/L and COMM, each agent saved on its own;
+  New entry and Update show the agents like the Report: a **USD** table first, then a **KHR**
+  table, each **A to Z** (at first) or **Z to A** and its No column counting from 1 in that
+  order; they find an agent by search, and show only the agents of one currency
+  (**All**, **USD**, **KHR**) or whose code starts with one of the starts they have (up to the first
+  `_`: **All** at first, then e.g. **12K_**, **SBK_**, **SBU_**), each button with how many; what
+  was typed in the others stays. On a phone, W/L and COMM open the app's own big keypad instead of
+  the phone's keyboard: 1–9, 0, a point (not for KHR), **−** (a loss, and back), delete and
+  **Done**; an amount already in the box is replaced by the first key),
   **Report** (this month at first; by group, then by agent, and the own branch's weekly
   settlement for a whole week),
   **Group Summary** (`/winlose/reports/branch-summary`; this month at first; totals, by group, then by agent),

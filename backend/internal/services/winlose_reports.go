@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/cambodia-finance/income-expense/internal/models"
+	"github.com/cambodia-finance/income-expense/internal/winlose"
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
@@ -34,6 +35,9 @@ type ReportFilter struct {
 	ByEntry bool
 	// EntryID: only one data entry's results.
 	EntryID *uuid.UUID
+	// Everyone: every switched-on group and agent is listed, at 0 when it has no results in the
+	// range (the Report and the Group summary). Not with PartnerID, ByWeek or EntryID.
+	Everyone bool
 }
 
 // Sums are totals in one currency.
@@ -329,8 +333,261 @@ func (s *PlatformService) Report(ctx context.Context, f ReportFilter, scope Bran
 		p.Totals = sortedSums(platSums[id])
 		out.Platforms = append(out.Platforms, *p)
 	}
-	sort.Slice(out.Platforms, func(i, j int) bool { return agentBefore(out.Platforms[i].PlatformCode, out.Platforms[j].PlatformCode) })
+	if f.Everyone && f.PartnerID == nil && !f.ByWeek && f.EntryID == nil {
+		if err := s.addEveryone(ctx, out, f, from, to, branchID, scope); err != nil {
+			return nil, err
+		}
+	}
+	sort.SliceStable(out.Platforms, func(i, j int) bool { return agentBefore(out.Platforms[i].PlatformCode, out.Platforms[j].PlatformCode) })
 	return out, nil
+}
+
+// addEveryone lists the switched-on groups and agents that have no results in the range, at 0 in
+// their currency: the agents Data entry lists for the branches covered (the branch's own and the
+// shared ones, switched on and not only in switched-off groups) and those branches' switched-on
+// groups. For one group, its agents (each at its rate there); for one agent, the groups it is in.
+// The totals stay what was entered.
+func (s *PlatformService) addEveryone(ctx context.Context, out *WinLoseReport, f ReportFilter, from, to time.Time, branchID *uuid.UUID, scope BranchScope) error {
+	db := s.db.WithContext(ctx)
+	inBranches := func(q *gorm.DB) *gorm.DB {
+		if branchID != nil {
+			return q.Where("branch_id = ?", *branchID)
+		}
+		return scope.where(q, "branch_id")
+	}
+	var groups []models.AssignmentGroup
+	if err := inBranches(db.Model(&models.AssignmentGroup{})).Find(&groups).Error; err != nil {
+		return err
+	}
+	groupOf := make(map[uuid.UUID]models.AssignmentGroup, len(groups))
+	for _, g := range groups {
+		groupOf[g.ID] = g
+	}
+	// The agents' places in those groups during the range.
+	var assignments []models.HQPlatformAssignment
+	if err := inBranches(db.Where("group_id IS NOT NULL AND starts_on <= ? AND (ends_on IS NULL OR ends_on >= ?)", dayString(to), dayString(weekStart(from)))).
+		Order("starts_on").Find(&assignments).Error; err != nil {
+		return err
+	}
+	agents := db.Where("is_active = ?", true)
+	switch {
+	case branchID != nil:
+		agents = agents.Where("(branch_id = ? OR branch_id IS NULL)", *branchID)
+	case !scope.All && len(scope.IDs) > 0:
+		agents = agents.Where("(branch_id IN ? OR branch_id IS NULL)", scope.IDs)
+	case !scope.All:
+		agents = agents.Where("branch_id IS NULL")
+	}
+	var list []models.Platform
+	if err := agents.Find(&list).Error; err != nil {
+		return err
+	}
+	platformOf := make(map[uuid.UUID]models.Platform, len(list))
+	for _, p := range list {
+		platformOf[p.ID] = p
+	}
+	// An agent whose groups in the range are all switched off is left out, as in Data entry.
+	on, off := map[uuid.UUID]bool{}, map[uuid.UUID]bool{}
+	inGroup := map[[2]uuid.UUID][]models.HQPlatformAssignment{} // by group and agent, switched-on groups only
+	members := map[uuid.UUID][]uuid.UUID{}                      // a switched-on group's agents
+	for _, a := range assignments {
+		g, ok := groupOf[*a.GroupID]
+		switch {
+		case !ok:
+		case g.IsActive:
+			on[a.PlatformID] = true
+			key := [2]uuid.UUID{g.ID, a.PlatformID}
+			if len(inGroup[key]) == 0 {
+				members[g.ID] = append(members[g.ID], a.PlatformID)
+			}
+			inGroup[key] = append(inGroup[key], a)
+		default:
+			off[a.PlatformID] = true
+		}
+	}
+	shown := func(id uuid.UUID) bool {
+		_, ok := platformOf[id]
+		return ok && (on[id] || !off[id])
+	}
+
+	// An agent's rate in a group (the lowest and highest over the range) and the formula its Total
+	// would be worked out with.
+	var ids []uuid.UUID
+	for _, as := range inGroup {
+		for _, a := range as {
+			ids = append(ids, a.ID)
+		}
+	}
+	links, err := assignmentPartners(db, ids)
+	if err != nil {
+		return err
+	}
+	formula, err := s.Formula(ctx)
+	if err != nil {
+		return err
+	}
+	rateIn := func(groupID, platformID uuid.UUID) (lo, hi decimal.Decimal, kind string) {
+		for i, a := range inGroup[[2]uuid.UUID{groupID, platformID}] {
+			var partners []PartnerShare
+			for _, l := range links[a.ID] {
+				partners = append(partners, PartnerShare{PartnerID: l.PartnerID, CommissionRate: l.CommissionRate})
+			}
+			rate := shareRate(a.CommissionRate, partners)
+			if i == 0 {
+				lo, hi = rate, rate
+			}
+			lo, hi = decimal.Min(lo, rate), decimal.Max(hi, rate)
+			k := formula.Version
+			if winlose.Kind(a.CalcType) == winlose.GI {
+				k = "gi"
+			}
+			if i == 0 {
+				kind = k
+			} else if kind != k {
+				kind = ""
+			}
+		}
+		return lo, hi, kind
+	}
+
+	// Agents: the group's, the one asked for, or every one shown.
+	var wanted []uuid.UUID
+	switch {
+	case f.GroupID != nil:
+		if g, ok := groupOf[*f.GroupID]; ok && g.IsActive {
+			for _, id := range members[g.ID] {
+				if f.PlatformID == nil || id == *f.PlatformID {
+					wanted = append(wanted, id)
+				}
+			}
+		}
+	case f.PlatformID != nil:
+		wanted = []uuid.UUID{*f.PlatformID}
+	default:
+		for _, p := range list {
+			wanted = append(wanted, p.ID)
+		}
+	}
+	listed := map[uuid.UUID]bool{}
+	for _, l := range out.Lines {
+		listed[l.PlatformID] = true
+	}
+	for _, id := range wanted {
+		if listed[id] || !shown(id) {
+			continue
+		}
+		listed[id] = true
+		p := platformOf[id]
+		l := ReportLine{PlatformID: id, PlatformCode: p.Code, PlatformName: p.Name, Partners: []LineShare{}, Sums: Sums{Currency: p.DefaultCurrency}}
+		if f.GroupID != nil {
+			l.RateMin, l.RateMax, l.Formula = rateIn(*f.GroupID, id)
+		}
+		out.Lines = append(out.Lines, l)
+		out.Platforms = append(out.Platforms, PlatformTotals{PlatformID: id, PlatformCode: p.Code, PlatformName: p.Name, Totals: []Sums{{Currency: p.DefaultCurrency}}})
+	}
+	sortLines(out.Lines)
+
+	// Groups (not for one group): the agent's, or every switched-on one.
+	if f.GroupID != nil {
+		return nil
+	}
+	has := map[uuid.UUID]bool{}
+	for _, g := range out.Groups {
+		if g.GroupID != nil {
+			has[*g.GroupID] = true
+		}
+	}
+	for _, g := range groups {
+		if !g.IsActive || has[g.ID] {
+			continue
+		}
+		id := g.ID
+		row := GroupTotalsRow{GroupID: &id, Title: g.Title}
+		if f.PlatformID != nil {
+			if len(inGroup[[2]uuid.UUID{g.ID, *f.PlatformID}]) == 0 || !shown(*f.PlatformID) {
+				continue
+			}
+			row.RateMin, row.RateMax, row.Formula = rateIn(g.ID, *f.PlatformID)
+			row.Totals = []Sums{{Currency: platformOf[*f.PlatformID].DefaultCurrency}}
+		} else {
+			row.Totals = zeroSums(groupCurrencies(g, members[g.ID], platformOf))
+		}
+		out.Groups = append(out.Groups, row)
+	}
+	sortGroups(out.Groups)
+	return nil
+}
+
+// groupCurrencies are the currencies a group's agents report in (USD first); a group with no
+// agents: its own currency, else USD.
+func groupCurrencies(g models.AssignmentGroup, agents []uuid.UUID, platformOf map[uuid.UUID]models.Platform) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, id := range agents {
+		if p, ok := platformOf[id]; ok && !seen[p.DefaultCurrency] {
+			seen[p.DefaultCurrency] = true
+			out = append(out, p.DefaultCurrency)
+		}
+	}
+	if len(out) == 0 {
+		if g.Currency != "" {
+			return []string{g.Currency}
+		}
+		return []string{models.CurrencyUSD}
+	}
+	sort.Slice(out, func(i, j int) bool { return currencyBefore(out[i], out[j]) })
+	return out
+}
+
+func zeroSums(currencies []string) []Sums {
+	out := make([]Sums, len(currencies))
+	for i, c := range currencies {
+		out[i] = Sums{Currency: c}
+	}
+	return out
+}
+
+// currencyBefore puts USD before KHR (any other currency after them, A to Z): the order of every
+// report's currencies.
+func currencyBefore(a, b string) bool {
+	rank := func(c string) int {
+		switch c {
+		case models.CurrencyUSD:
+			return 0
+		case models.CurrencyKHR:
+			return 1
+		}
+		return 2
+	}
+	if x, y := rank(a), rank(b); x != y {
+		return x < y
+	}
+	return a < b
+}
+
+// sortLines orders lines by week, then agent A to Z, then currency (USD first).
+func sortLines(lines []ReportLine) {
+	sort.SliceStable(lines, func(i, j int) bool {
+		a, b := lines[i], lines[j]
+		if a.WeekStart != b.WeekStart {
+			return a.WeekStart < b.WeekStart
+		}
+		if a.PlatformCode != b.PlatformCode {
+			return agentBefore(a.PlatformCode, b.PlatformCode)
+		}
+		return currencyBefore(a.Currency, b.Currency)
+	})
+}
+
+// sortGroups orders groups by title A to Z (ignoring case), weeks of agents in no group last.
+func sortGroups(groups []GroupTotalsRow) {
+	sort.SliceStable(groups, func(i, j int) bool {
+		a, b := groups[i], groups[j]
+		if (a.GroupID == nil) != (b.GroupID == nil) {
+			return b.GroupID == nil
+		}
+		return agentBefore(a.Title, b.Title)
+	})
 }
 
 // Switched off: an agent, and a group with everything in it, are left out of the reports (and
@@ -431,22 +688,13 @@ func (s *PlatformService) reportLines(ctx context.Context, results func() *gorm.
 		}
 		lines[i] = l
 	}
-	sort.Slice(lines, func(i, j int) bool {
-		a, b := lines[i], lines[j]
-		if a.WeekStart != b.WeekStart {
-			return a.WeekStart < b.WeekStart
-		}
-		if a.PlatformCode != b.PlatformCode {
-			return agentBefore(a.PlatformCode, b.PlatformCode)
-		}
-		return a.Currency < b.Currency
-	})
+	sortLines(lines)
 
 	return lines, shareRows, nameOf, nil
 }
 
 // groupTotals adds the results up by titled group, each at its part in the group (an agent in two
-// groups counts in both): by title, weeks of agents in no group last. Switched-off groups are left
+// groups counts in both): by title A to Z, weeks of agents in no group last. Switched-off groups are left
 // out.
 func (s *PlatformService) groupTotals(ctx context.Context, results *gorm.DB) ([]GroupTotalsRow, error) {
 	var rows []struct {
@@ -506,13 +754,7 @@ func (s *PlatformService) groupTotals(ctx context.Context, results *gorm.DB) ([]
 		g.Totals = sortedSums(sums[key])
 		out = append(out, *g)
 	}
-	sort.Slice(out, func(i, j int) bool {
-		a, b := out[i], out[j]
-		if (a.GroupID == nil) != (b.GroupID == nil) {
-			return b.GroupID == nil
-		}
-		return a.Title < b.Title
-	})
+	sortGroups(out)
 	return out, nil
 }
 
@@ -615,6 +857,9 @@ func weekTotals(results *gorm.DB, jame string) ([]WeekTotals, error) {
 		}
 		out[len(out)-1].Totals = append(out[len(out)-1].Totals, r.sums())
 	}
+	for _, w := range out {
+		sort.SliceStable(w.Totals, func(i, j int) bool { return currencyBefore(w.Totals[i].Currency, w.Totals[j].Currency) })
+	}
 	return out, nil
 }
 
@@ -623,6 +868,6 @@ func sortedSums(m map[string]*Sums) []Sums {
 	for _, s := range m {
 		out = append(out, *s)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Currency < out[j].Currency })
+	sort.Slice(out, func(i, j int) bool { return currencyBefore(out[i].Currency, out[j].Currency) })
 	return out
 }

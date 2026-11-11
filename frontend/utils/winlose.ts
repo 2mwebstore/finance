@@ -11,6 +11,35 @@ export function byAgentCode(a: string, b: string) {
   return x < y ? -1 : x > y ? 1 : a < b ? -1 : a > b ? 1 : 0
 }
 
+/** USD before KHR (any other currency after them, A to Z): the order the API gives currencies in. */
+export function byCurrency(a: string, b: string) {
+  const rank = (c: string) => (c === 'USD' ? 0 : c === 'KHR' ? 1 : 2)
+  return rank(a) - rank(b) || (a < b ? -1 : a > b ? 1 : 0)
+}
+
+/**
+ * Rows split into one table per currency, USD first, each keeping the rows' order (A to Z): USD
+ * and KHR are never in one table.
+ */
+export function currencyTables<R>(rows: R[], currencyOf: (row: R) => string) {
+  const tables = new Map<string, R[]>()
+  for (const row of rows) {
+    const currency = currencyOf(row)
+    tables.set(currency, [...(tables.get(currency) || []), row])
+  }
+  return [...tables].sort(([a], [b]) => byCurrency(a, b)).map(([currency, list]) => ({ currency, rows: list }))
+}
+
+/** Each item's totals as rows, one per currency (a group's or an agent's), for currencyTables. */
+export function totalsRows<T extends { totals: { currency: string }[] }>(items: T[]) {
+  return items.flatMap(item => item.totals.map(t => ({ item, t: t as T['totals'][number] })))
+}
+
+/** A currency's totals, or 0 when nothing was entered in it (a table of agents with no results). */
+export function totalsIn<S extends { currency: string; win_lose: string; commission: string; jame_ps: string }>(totals: S[], currency: string): Pick<S, 'currency' | 'win_lose' | 'commission' | 'jame_ps'> {
+  return totals.find(t => t.currency === currency) || { currency, win_lose: '0', commission: '0', jame_ps: '0' }
+}
+
 /** A rate, or the range it moved in: "10%" or "10%–20%". */
 export function rateLabel(min: string, max: string) {
   return Number(min) === Number(max) ? formatRate(min) : `${formatRate(min)}–${formatRate(max)}`

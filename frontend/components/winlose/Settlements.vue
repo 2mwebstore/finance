@@ -17,7 +17,7 @@
         </p>
         <p v-if="settlement?.status === 'finalized'" class="text-[11px] text-muted">
           by {{ settlement.finalized_by }} · {{ formatDocDateTime(settlement.finalized_at) }}
-          <template v-for="t in settlement.totals" :key="t.currency"> · Total {{ formatAmount(t.jame_ps, t.currency) }}</template>
+          <template v-for="t in [...settlement.totals].sort((a, b) => byCurrency(a.currency, b.currency))" :key="t.currency"> · Total {{ formatAmount(t.jame_ps, t.currency) }}</template>
         </p>
         <p v-else-if="settlement?.status === 'reopened'" class="text-[11px] text-amber-700">Reopened by {{ settlement.reopened_by }}: {{ settlement.reopen_reason }}</p>
       </div>
@@ -35,7 +35,7 @@ import { CalendarCheck, Lock, LockOpen } from 'lucide-vue-next'
 import type { WeeklySettlement } from '~/types/api'
 import { useToast } from '~/composables/useToast'
 import { formatDocDate, formatDocDateTime, todayISO } from '~/utils/inventory'
-import { formatAmount, plusDays } from '~/utils/winlose'
+import { byCurrency, formatAmount, plusDays } from '~/utils/winlose'
 
 /** The week's settlement for the person's own group: finalize (keeps its totals, locks its entry) or reopen. */
 /** branchId: the branch whose week it is ('' = the person's own). */

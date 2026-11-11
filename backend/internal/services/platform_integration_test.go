@@ -706,7 +706,7 @@ func TestWinLoseReportsByCurrencyAndWeek(t *testing.T) {
 			t.Errorf("two weeks of HQ1 USD: %d weeks, total %s; want 2 weeks, 455", l.Entries, l.JamePS)
 		}
 	}
-	// Each week's totals, earliest first: 420 USD and -38950 KHR, then 35 USD.
+	// Each week's totals, earliest first (USD before KHR): 420 USD and -38950 KHR, then 35 USD.
 	weeks := []string{}
 	for _, w := range two.Weeks {
 		for _, s := range w.Totals {
@@ -714,8 +714,8 @@ func TestWinLoseReportsByCurrencyAndWeek(t *testing.T) {
 		}
 	}
 	if want := []string{
-		dayString(f.week) + " " + dayString(f.week.AddDate(0, 0, 6))[8:] + " KHR -38950",
 		dayString(f.week) + " " + dayString(f.week.AddDate(0, 0, 6))[8:] + " USD 420",
+		dayString(f.week) + " " + dayString(f.week.AddDate(0, 0, 6))[8:] + " KHR -38950",
 		dayString(f.week.AddDate(0, 0, 7)) + " " + dayString(f.week.AddDate(0, 0, 13))[8:] + " USD 35",
 	}; strings.Join(weeks, ", ") != strings.Join(want, ", ") {
 		t.Errorf("by week: %v, want %v", weeks, want)
@@ -906,7 +906,7 @@ func TestPartners(t *testing.T) {
 	if weeks[dayString(f.week)] != "110" || weeks[dayString(f.week.AddDate(0, 0, 7))] != "125" {
 		t.Errorf("the statement has Chan Lina's share each week, got %v", weeks)
 	}
-	if len(st.Totals) != 2 || st.Totals[1].Currency != "USD" || !st.Totals[1].JamePS.Equal(n(235)) {
+	if len(st.Totals) != 2 || st.Totals[0].Currency != "USD" || !st.Totals[0].JamePS.Equal(n(235)) {
 		t.Errorf("statement totals: %+v", st.Totals)
 	}
 
@@ -1716,4 +1716,160 @@ func TestSwitchedOffAreHidden(t *testing.T) {
 		t.Errorf("the settlement has both agents' currencies: %+v", st.Totals)
 	}
 	_ = a
+}
+
+// The Report and the Group summary (Everyone) list every switched-on group and agent, at 0 when it
+// has no results: not an agent that is off or only in switched-off groups, nor a switched-off
+// group. Groups are A to Z ignoring case; the totals stay what was entered.
+func TestReportListsEveryone(t *testing.T) {
+	f := newWLFixture(t)
+	f.db.Model(&models.User{}).Where("id = ?", f.actor).Update("default_branch_id", f.hq[0].ID)
+	t.Cleanup(func() { f.db.Model(&models.User{}).Where("id = ?", f.actor).Update("default_branch_id", nil) })
+	p3 := f.platform(t, "TWL_GI_ZERO", "25", "KHR")
+	p4 := f.platform(t, "TWL_ONLY_OFF", "10", "USD")
+	p5 := f.platform(t, "TWL_NO_GROUP", "10", "USD")
+	p6 := f.platform(t, "TWL_TURNED_OFF", "10", "USD")
+	f.db.Model(&models.Platform{}).Where("id = ?", p6.ID).Update("is_active", false)
+	n := func(v int64) decimal.Decimal { return decimal.NewFromInt(v) }
+	group := func(title string, agents ...GroupAgentInput) *GroupRow {
+		t.Helper()
+		g, err := f.svc.CreateGroup(f.ctx, GroupInput{Title: title, Agents: agents, StartsOn: dayString(f.week)}, all, f.actor)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return g
+	}
+	// "Beta" has p1 (with a week) and p3 (GI, none); "alpha" only p2 (none); "Off" only p4.
+	beta := group("Beta", GroupAgentInput{PlatformID: f.p1.ID.String(), CommissionRate: "10"}, GroupAgentInput{PlatformID: p3.ID.String(), CommissionRate: "25", CalcType: "GI"})
+	alpha := group("alpha", GroupAgentInput{PlatformID: f.p2.ID.String(), CommissionRate: "30"})
+	off := group("Off", GroupAgentInput{PlatformID: p4.ID.String(), CommissionRate: "10"})
+	if _, err := f.svc.SetGroupActive(f.ctx, off.ID, false, all); err != nil {
+		t.Fatal(err)
+	}
+	sheet, _, err := f.save(f.week, 0, canAll, "", row(f.p1, "1000", "0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	span := ReportFilter{DateFrom: dayString(f.week), DateTo: dayString(f.week.AddDate(0, 0, 6)), Everyone: true}
+	report := func(fl ReportFilter) *WinLoseReport {
+		t.Helper()
+		rep, err := f.svc.Report(f.ctx, fl, all, true, f.actor)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return rep
+	}
+	linesOf := func(rep *WinLoseReport) map[uuid.UUID]ReportLine {
+		out := map[uuid.UUID]ReportLine{}
+		for _, l := range rep.Lines {
+			out[l.PlatformID] = l
+		}
+		return out
+	}
+
+	rep := report(span)
+	lines := linesOf(rep)
+	if l, ok := lines[f.p1.ID]; !ok || !l.WinLose.Equal(n(1000)) || l.Entries != 1 {
+		t.Errorf("p1 has its week: %+v", l)
+	}
+	for _, want := range []struct {
+		p        models.Platform
+		currency string
+	}{{f.p2, "KHR"}, {p3, "KHR"}, {p5, "USD"}} {
+		if l, ok := lines[want.p.ID]; !ok || l.Currency != want.currency || !l.WinLose.IsZero() || !l.JamePS.IsZero() || l.Entries != 0 {
+			t.Errorf("%s is listed at 0 in %s: %+v (listed %v)", want.p.Code, want.currency, l, ok)
+		}
+	}
+	for _, gone := range []models.Platform{p4, p6} {
+		if _, ok := lines[gone.ID]; ok {
+			t.Errorf("%s is left out (only in a switched-off group, or turned off)", gone.Code)
+		}
+	}
+	platforms := map[uuid.UUID]PlatformTotals{}
+	for _, p := range rep.Platforms {
+		platforms[p.PlatformID] = p
+	}
+	if p, ok := platforms[f.p2.ID]; !ok || len(p.Totals) != 1 || p.Totals[0].Currency != "KHR" || !p.Totals[0].JamePS.IsZero() {
+		t.Errorf("Group summary's By agent has p2 at 0: %+v", p)
+	}
+	for i := 1; i < len(rep.Lines); i++ {
+		if a, b := rep.Lines[i-1], rep.Lines[i]; agentBefore(b.PlatformCode, a.PlatformCode) {
+			t.Errorf("lines are A to Z: %s before %s", a.PlatformCode, b.PlatformCode)
+		}
+	}
+	if len(rep.Totals) != 1 || rep.Totals[0].Currency != "USD" || !rep.Totals[0].WinLose.Equal(n(1000)) || rep.Totals[0].Entries != 1 {
+		t.Errorf("the totals are what was entered: %+v", rep.Totals)
+	}
+	if len(rep.Groups) != 2 || rep.Groups[0].Title != "alpha" || rep.Groups[1].Title != "Beta" {
+		t.Fatalf("the switched-on groups, A to Z ignoring case: %+v", rep.Groups)
+	}
+	if g := rep.Groups[0]; len(g.Totals) != 1 || g.Totals[0].Currency != "KHR" || !g.Totals[0].JamePS.IsZero() || g.Totals[0].Entries != 0 {
+		t.Errorf("alpha is at 0 in its agent's currency: %+v", g)
+	}
+	if g := rep.Groups[1]; len(g.Totals) != 1 || g.Totals[0].Currency != "USD" || g.Totals[0].Entries != 1 {
+		t.Errorf("Beta has p1's week: %+v", g)
+	}
+	if plain := report(ReportFilter{DateFrom: span.DateFrom, DateTo: span.DateTo}); len(plain.Lines) != 1 || len(plain.Groups) != 1 {
+		t.Errorf("without everyone only what has results: %+v %+v", plain.Lines, plain.Groups)
+	}
+
+	// One group: all its agents, each at its rate there.
+	inBeta := span
+	inBeta.GroupID = &beta.ID
+	rep = report(inBeta)
+	lines = linesOf(rep)
+	if len(rep.Lines) != 2 || !lines[f.p1.ID].WinLose.Equal(n(1000)) {
+		t.Fatalf("Beta: p1 and p3: %+v", rep.Lines)
+	}
+	if l := lines[p3.ID]; l.Currency != "KHR" || !l.JamePS.IsZero() || !l.RateMin.Equal(n(25)) || !l.RateMax.Equal(n(25)) || l.Formula != "gi" {
+		t.Errorf("p3 in Beta at 0, GI at 25%%: %+v", l)
+	}
+	inOff := span
+	inOff.GroupID = &off.ID
+	if rep := report(inOff); len(rep.Lines) != 0 {
+		t.Errorf("a switched-off group shows nothing: %+v", rep.Lines)
+	}
+
+	// One agent: all its groups, at its rate there.
+	of3 := span
+	of3.PlatformID = &p3.ID
+	rep = report(of3)
+	if len(rep.Lines) != 1 || rep.Lines[0].PlatformCode != p3.Code || len(rep.Groups) != 1 {
+		t.Fatalf("p3: one line at 0 and its group: %+v %+v", rep.Lines, rep.Groups)
+	}
+	if g := rep.Groups[0]; *g.GroupID != beta.ID || !g.RateMin.Equal(n(25)) || g.Formula != "gi" || len(g.Totals) != 1 || g.Totals[0].Currency != "KHR" {
+		t.Errorf("p3 in Beta at 0: %+v", g)
+	}
+	of2 := span
+	of2.PlatformID = &f.p2.ID
+	if rep := report(of2); len(rep.Groups) != 1 || *rep.Groups[0].GroupID != alpha.ID || rep.Groups[0].Formula != "v1" || !rep.Groups[0].RateMin.Equal(n(30)) {
+		t.Errorf("p2 in alpha (PO, v1) at 30%%: %+v", rep.Groups)
+	}
+	of4 := span
+	of4.PlatformID = &p4.ID
+	if rep := report(of4); len(rep.Lines) != 0 || len(rep.Groups) != 0 {
+		t.Errorf("p4 (only in a switched-off group) shows nothing: %+v %+v", rep.Lines, rep.Groups)
+	}
+
+	// One entry: only what it holds.
+	one := span
+	one.EntryID, one.ByEntry = &sheet.Entry.ID, true
+	if rep := report(one); len(rep.Lines) != 1 || len(rep.Entries) != 1 || len(rep.Entries[0].Lines) != 1 {
+		t.Errorf("an entry lists only its results: %+v", rep.Lines)
+	}
+	// Only the branch's own agents and the shared ones.
+	theirs := models.Platform{}
+	other := f.hq[1].ID
+	if err := f.db.Create(&models.Platform{Code: "TWL_OTHER_BRANCH", Name: "x", DefaultRate: n(10), DefaultCurrency: "USD", IsActive: true, BranchID: &other}).Error; err != nil {
+		t.Fatal(err)
+	}
+	f.db.Where("code = ?", "TWL_OTHER_BRANCH").First(&theirs)
+	own := span
+	own.BranchID = &f.hq[0].ID
+	if _, ok := linesOf(report(own))[theirs.ID]; ok {
+		t.Error("another branch's agent is left out of a branch's report")
+	}
+	if _, ok := linesOf(report(span))[theirs.ID]; !ok {
+		t.Error("every branch's agents are in the report of all of them")
+	}
 }

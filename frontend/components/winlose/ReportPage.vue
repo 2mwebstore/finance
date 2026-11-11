@@ -37,7 +37,6 @@
         <div v-if="groupId" class="space-y-1">
           <h2 class="flex items-center gap-2 text-sm font-semibold text-navy"><Network :size="15" /> {{ groupTitle }}</h2>
         </div>
-        <p v-else-if="report.lines.length && !summary" class="text-[11px] text-muted">Tap an agent for its groups</p>
         <!-- One entry (or week) of a group: its agents in each data entry (a title opens the entry);
              on Group summary with ✅ / ❌ and an Image button -->
         <template v-if="weekStart && report.entries?.length">
@@ -70,38 +69,8 @@
           <WinloseReportTable :report="groupCard || report" by-group selectable :reactions="summary" @select="openAgent" />
           <p v-if="summary && (report.entries?.length || 0) > 1 && can('winlose.react')" class="px-1 text-[11px] text-muted">To give an agent ✅ / ❌, open its week in By week.</p>
         </article>
-        <!-- Group summary: each agent's totals in each currency (an agent opens its groups) -->
-        <article v-else-if="summary" class="overflow-x-auto rounded-xl border border-border bg-white">
-          <h2 class="flex items-center gap-2 border-b border-border px-4 py-3 text-sm font-semibold text-navy"><Layers :size="15" /> By agent<span v-if="report.platforms.length" class="ml-auto text-[11px] font-normal text-muted">Tap an agent for its groups</span></h2>
-          <table class="report-table">
-            <thead class="bg-canvas uppercase text-slate-500">
-              <tr>
-                <th class="font-bold">Agent</th>
-                <!-- On phones the currency goes under the agent -->
-                <th class="hidden font-bold sm:table-cell">Currency</th>
-                <th class="amount font-bold">W/L</th>
-                <th class="amount font-bold">COMM</th>
-                <th class="amount font-bold">Total</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-border">
-              <template v-for="p in report.platforms" :key="p.platform_id">
-                <tr v-for="(t, i) in p.totals" :key="t.currency" class="text-navy">
-                  <td class="name">
-                    <button v-if="i === 0" type="button" class="code font-mono font-semibold text-primary hover:underline" @click="openAgent(p.platform_id)">{{ p.platform_code }}</button>
-                    <span class="block text-muted sm:hidden">{{ t.currency }}</span>
-                  </td>
-                  <td class="hidden sm:table-cell">{{ t.currency }}</td>
-                  <td class="amount" :class="tone(t.win_lose)">{{ formatAmount(t.win_lose, t.currency) }}</td>
-                  <td class="amount">{{ formatAmount(t.commission, t.currency) }}</td>
-                  <td class="amount font-bold" :class="tone(t.jame_ps)">{{ formatAmount(t.jame_ps, t.currency) }}</td>
-                </tr>
-              </template>
-              <tr v-if="!report.platforms.length"><td colspan="5" class="empty text-muted">No results entered for these weeks.</td></tr>
-            </tbody>
-          </table>
-        </article>
-        <WinloseReportTable v-else :report="report" selectable @select="openAgent" />
+        <!-- Every agent's totals, a table per currency (an agent opens its groups) -->
+        <WinloseReportTable v-else :report="report" selectable title="By agent" hint="Tap an agent for its groups" @select="openAgent" />
         <!-- By week: the group in each data entry (week-1, week-2, …); one opens its agents in it -->
         <WinloseEntryTotals v-if="groupId && !weekStart" title="By week" :entries="report.entries || []" selectable :reactions="summary" @select="openEntry" />
       </template>
@@ -116,19 +85,20 @@
 </template>
 
 <script setup lang="ts">
-import { ChevronLeft, Download, FileText, Layers, Network } from 'lucide-vue-next'
+import { ChevronLeft, Download, FileText, Network } from 'lucide-vue-next'
 import type { WinLoseReportEntry } from '~/types/api'
 import { useWinLoseReport } from '~/composables/useWinLoseReport'
 import { currentMonthRange } from '~/utils/dateRanges'
 import { formatDocDate } from '~/utils/inventory'
-import { downloadCsv, formatAmount, mondayOf, plusDays, weekLabel } from '~/utils/winlose'
+import { currencyTables, downloadCsv, mondayOf, plusDays, weekLabel } from '~/utils/winlose'
 
 /**
  * The win/lose Report and the Group summary: totals by group and by agent over the dates, where a
  * group opens its agents, an agent its groups and a week of a detail (By week) that week of it.
  * Report (default) has the week's settlement; Group summary (summary) has each entry's ✅ / ❌, each
  * agent's in an entry (its result's, as in Data entry) and the Image button (a picture of an entry
- * or of a group over the dates).
+ * or of a group over the dates). Every switched-on group and agent is listed (0 with no results),
+ * in a table per currency (USD first, then KHR), A to Z in each.
  */
 const props = withDefaults(defineProps<{ summary?: boolean }>(), { summary: false })
 
@@ -215,23 +185,14 @@ const groupCard = computed(() => {
 
 const isWholeWeek = computed(() => !!range.value.from && mondayOf(range.value.from) === range.value.from && plusDays(range.value.from, 6) === range.value.to)
 
-function tone(value: string) {
-  return Number(value) < 0 ? 'text-expense' : ''
-}
-
-// The same columns on both; Group summary is named for it.
+// The same columns on both, in the order shown (USD agents, then KHR); Group summary is named for it.
 function exportCsv() {
   if (!report.value) return
   const r = report.value
-  if (props.summary) {
-    downloadCsv(`winlose-summary-${range.value.from}-to-${range.value.to}.csv`,
-      ['From', 'To', 'Agent', 'Currency', 'W/L', 'COMM', 'Total'],
-      r.platforms.flatMap(p => p.totals.map(t => [r.date_from, range.value.to, p.platform_code, t.currency,
-        Number(t.win_lose), Number(t.commission), Number(t.jame_ps)])))
-    return
-  }
-  downloadCsv(`winlose-weekly-${range.value.from}-to-${range.value.to}.csv`,
+  const name = props.summary ? 'winlose-summary' : 'winlose-weekly'
+  downloadCsv(`${name}-${range.value.from}-to-${range.value.to}.csv`,
     ['From', 'To', 'Agent', 'Currency', 'W/L', 'COMM', 'Total'],
-    r.lines.map(l => [r.date_from, range.value.to, l.platform_code, l.currency, Number(l.win_lose), Number(l.commission), Number(l.jame_ps)]))
+    currencyTables(r.lines, l => l.currency).flatMap(t => t.rows)
+      .map(l => [r.date_from, range.value.to, l.platform_code, l.currency, Number(l.win_lose), Number(l.commission), Number(l.jame_ps)]))
 }
 </script>

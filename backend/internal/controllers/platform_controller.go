@@ -851,7 +851,8 @@ func (pc *PlatformController) Report(c *gin.Context) {
 		return
 	}
 	report, err := pc.svc.Report(c.Request.Context(), services.ReportFilter{DateFrom: c.Query("date_from"), DateTo: c.Query("date_to"), BranchID: branchID,
-		PartnerID: partnerID, GroupID: groupID, PlatformID: platformID, ByWeek: c.Query("by_week") == "true", ByEntry: c.Query("by_entry") == "true", EntryID: entryID},
+		PartnerID: partnerID, GroupID: groupID, PlatformID: platformID, ByWeek: c.Query("by_week") == "true", ByEntry: c.Query("by_entry") == "true", EntryID: entryID,
+		Everyone: c.Query("everyone") == "true"},
 		scope, access.Can(permissions.WinLoseReportsConsolidated), actorOf(c))
 	if err != nil {
 		writePlatformError(c, err)

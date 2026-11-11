@@ -4,8 +4,9 @@ import { useRpBranch } from '~/composables/useRpBranch'
 /**
  * Loads a win/lose report for a date range and, optionally, one titled group (Group Agent
  * Assignments). There's no branch choice: the API covers every branch the user works in for
- * people who may see consolidated totals, else their own. byEntry: the data entries too, each with
- * its lines; entryId: only one entry (both read when loading; the range or detail changes with them).
+ * people who may see consolidated totals, else their own. Every switched-on group and agent is
+ * listed, at 0 when it has no results. byEntry: the data entries too, each with its lines; entryId:
+ * only one entry (both read when loading; the range or detail changes with them).
  */
 export function useWinLoseReport(range: () => { from: string; to: string }, options: { byEntry?: () => boolean; entryId?: () => string } = {}) {
   const { api } = useApi()
@@ -54,7 +55,7 @@ export function useWinLoseReport(range: () => { from: string; to: string }, opti
     loading.value = true
     error.value = ''
     try {
-      const result = await api<WinLoseReport>('/winlose/reports', { query: { date_from: from, date_to: to, branch_id: branch.value || undefined, group_id: groupId.value || undefined, platform_id: agentId.value || undefined, by_entry: options.byEntry?.() ? 'true' : undefined, entry_id: options.entryId?.() || undefined } })
+      const result = await api<WinLoseReport>('/winlose/reports', { query: { date_from: from, date_to: to, branch_id: branch.value || undefined, group_id: groupId.value || undefined, platform_id: agentId.value || undefined, by_entry: options.byEntry?.() ? 'true' : undefined, entry_id: options.entryId?.() || undefined, everyone: 'true' } })
       if (mine === request) report.value = result
     } catch (e: any) {
       if (mine === request) error.value = e?.data?.error || 'Could not load the report.'

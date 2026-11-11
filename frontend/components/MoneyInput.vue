@@ -1,24 +1,37 @@
 <template>
   <input
+    v-bind="$attrs"
     ref="input"
     :value="displayValue"
-    :type="asNumber ? 'number' : 'text'"
-    :inputmode="asNumber ? undefined : 'decimal'"
-    :step="asNumber ? 'any' : undefined"
+    type="text"
+    :inputmode="keypad ? 'none' : 'decimal'"
     autocomplete="off"
     :placeholder="decimalsOf(currency) ? `0.${'0'.repeat(decimalsOf(currency))}` : '0'"
     :aria-label="ariaLabel"
-    @touchstart.passive="onTouchStart"
-    @touchend.passive="backIfNotTyping()"
-    @touchcancel.passive="backIfNotTyping()"
-    @beforeinput="onBeforeInput"
     @focus="onFocus"
     @input="onInput"
     @blur="onBlur"
   />
+  <!-- A phone's keypad for a signed amount: big keys, digits and the signs only -->
+  <Teleport v-if="keypad" to="body">
+    <div v-if="open" ref="pad" class="amount-keypad" role="group" :aria-label="`Keypad${ariaLabel ? ` for ${ariaLabel}` : ''}`" @pointerdown.prevent @mousedown.prevent>
+      <div class="amount-keypad-keys">
+        <button
+          v-for="k in KEYS" :key="k.key" type="button" tabindex="-1" class="amount-key"
+          :class="[k.class, k.key === '-' && typed.startsWith('-') ? 'is-on' : '']"
+          :aria-label="k.label" :aria-pressed="k.key === '-' ? typed.startsWith('-') : undefined"
+          :disabled="k.key === '.' && !decimalsOf(currency)"
+          @pointerdown.prevent="k.key !== 'done' && press(k.key)" @click="(e: MouseEvent) => { if (k.key === 'done' || !e.detail) press(k.key) }"
+        >
+          <Delete v-if="k.key === 'back'" :size="24" aria-hidden="true" /><template v-else>{{ k.text }}</template>
+        </button>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
+import { Delete } from 'lucide-vue-next'
 import { currencyMeta, type SupportedCurrency } from '~/utils/money'
 
 // Decimals come from Manage → Currency (USD 2, KHR 0…). Whole digits stop at 12 for currencies
@@ -29,6 +42,9 @@ function decimalsOf(currency: SupportedCurrency) {
 function wholeLimit(currency: SupportedCurrency) {
   return decimalsOf(currency) ? 9 : 12
 }
+
+// The page's class, disabled and aria-* go on the box (the keypad beside it takes none).
+defineOptions({ inheritAttrs: false })
 
 const props = defineProps<{
   modelValue: string
@@ -42,56 +58,97 @@ const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
 const input = ref<HTMLInputElement | null>(null)
 const focused = ref(false)
 
-// A signed amount on a phone: phones' number pads have no minus (iPhones' none at all), so while
-// one is typed the box is a number box, which opens the keyboard of digits and signs
-// (1 2 3 … - / : ; ( ) $ & @ "). It is plain digits while typed (-12000) and goes back to
-// text with separators (-12,000) when left. Computers keep the text box.
-const touch = import.meta.client && !!window.matchMedia?.('(pointer: coarse)').matches
-const asNumber = ref(false)
-function toNumber() {
+// A signed amount on a phone: phones' big number pads have no minus (an iPhone's has only digits
+// and a point), and their other keyboards have letters. So the phone's keyboard stays closed
+// (inputmode none) and the box opens the app's own keypad: 1–9, 0, a point (not for KHR), a minus
+// that makes the amount a loss and back, delete and Done. An amount already in the box is chosen
+// whole, so the first key starts it again (delete clears it). Computers keep the text box.
+const keypad = props.signed && import.meta.client && !!window.matchMedia?.('(pointer: coarse)').matches
+const KEYS = [
+  ...['1', '2', '3', '4', '5', '6', '7', '8', '9'].map(d => ({ key: d, text: d, label: d, class: '' })),
+  { key: '-', text: '−', label: 'Minus (a loss)', class: 'is-sign' },
+  { key: '0', text: '0', label: '0', class: '' },
+  { key: '.', text: '.', label: 'Point', class: 'is-sign' },
+  { key: 'done', text: 'Done', label: 'Done', class: 'is-done' },
+  { key: 'back', text: '', label: 'Delete', class: 'is-sign' },
+]
+const open = ref(false)
+const pad = ref<HTMLElement | null>(null)
+// What is typed with the keypad (a lone minus too), and whether the box's amount is still chosen whole.
+const typed = ref('')
+let whole = false
+function openKeypad() {
   const el = input.value
-  if (!props.signed || !touch || asNumber.value || !el || el.disabled || el.readOnly) return
-  const raw = normalize(props.modelValue, props.currency)
-  asNumber.value = true
-  displayValue.value = raw === '-' ? '' : raw
-  // Now, before the keyboard opens (the page updates a moment later).
-  el.type = 'number'
-  el.removeAttribute('inputmode')
-  el.value = displayValue.value
+  if (!keypad || !el || el.disabled || el.readOnly) return
+  typed.value = normalize(props.modelValue, props.currency)
+  whole = !!typed.value
+  open.value = true
+  document.addEventListener('click', tapOutside, true)
+  nextTick(() => {
+    if (whole) el.setSelectionRange(0, el.value.length)
+    // The keypad's height is kept free under the page, so the last agents can scroll above it, and
+    // the box stays in sight.
+    const space = pad.value?.offsetHeight || 330
+    document.body.style.paddingBottom = `${space}px`
+    const box = el.getBoundingClientRect()
+    const free = window.innerHeight - space - 12
+    if (box.bottom > free) window.scrollBy({ top: box.bottom - free, behavior: 'smooth' })
+    else if (box.top < 72) window.scrollBy({ top: box.top - 72, behavior: 'smooth' })
+  })
 }
-function toText() {
-  asNumber.value = false
-  const formatted = formatEntry(props.modelValue, props.currency, true)
-  displayValue.value = formatted
+function closeKeypad() {
+  if (!open.value) return
+  open.value = false
+  document.removeEventListener('click', tapOutside, true)
+  document.body.style.paddingBottom = ''
+}
+// A tap anywhere else (a Save button, the page) leaves the box and closes the keypad; scrolling
+// the page doesn't.
+function tapOutside(event: MouseEvent) {
+  const target = event.target as Node | null
+  if (target && (input.value?.contains(target) || pad.value?.contains(target))) return
+  input.value?.blur()
+}
+// Keys act as soon as they are touched (and from a keyboard's Enter). Done waits for the tap to end:
+// the keypad closing under the finger would pass the tap on to what is beneath (the bottom bar).
+function press(key: string) {
   const el = input.value
   if (!el) return
-  el.type = 'text'
-  el.setAttribute('inputmode', 'decimal')
-  if (el.value !== formatted) el.value = formatted
+  if (key === 'done') {
+    el.blur()
+    return
+  }
+  let negative = typed.value.startsWith('-')
+  let amount = typed.value.replace(/^-/, '')
+  // The first key replaces an amount chosen whole.
+  if (whole) {
+    negative = false
+    amount = ''
+    whole = false
+  }
+  if (key === 'back') {
+    if (amount) amount = amount.slice(0, -1)
+    else negative = false
+  } else if (key === '-') {
+    negative = !negative
+  } else if (key === '.') {
+    if (decimalsOf(props.currency) && !amount.includes('.')) amount = `${amount || '0'}.`
+  } else {
+    const next = amount === '0' ? key : amount + key
+    if (!overLimit(next, props.currency)) amount = next
+  }
+  typed.value = `${negative ? '-' : ''}${amount}`
+  const shown = formatEntry(typed.value, props.currency)
+  displayValue.value = shown
+  el.value = shown
+  el.setSelectionRange(shown.length, shown.length)
+  emit('update:modelValue', amount ? normalize(typed.value, props.currency) : '')
 }
-// A touch that scrolled the page instead of opening the box puts it back. Browsers that take
-// over a scroll may not send its end, so a touch is also checked a moment after it starts (a tap
-// has opened the box by then; a slow one switches again when it does).
-function backIfNotTyping(after = 400) {
-  setTimeout(() => { if (asNumber.value && document.activeElement !== input.value) toText() }, after)
-}
-function onTouchStart() {
-  toNumber()
-  backIfNotTyping(700)
-}
-function onFocus() {
-  focused.value = true
-  toNumber() // also when reached with the keyboard's arrows
-}
-// A number box takes digits, one minus and one point; other keys (a 1,000 comma, + * …) do nothing.
-function onBeforeInput(event: Event) {
-  const data = (event as InputEvent).data
-  if (asNumber.value && data && /[^\d.-]/.test(data)) event.preventDefault()
-}
-// Digits past the currency's limits (whole digits, decimals) in a number box.
-function overLimit(typed: string, currency: SupportedCurrency) {
-  const [whole = '', fraction] = typed.replace(/^-/, '').split('.')
-  return whole.replace(/^0+(?=\d)/, '').length > wholeLimit(currency) || (fraction !== undefined && fraction.length > decimalsOf(currency))
+onBeforeUnmount(closeKeypad)
+// Digits past the currency's limits (whole digits, decimals).
+function overLimit(value: string, currency: SupportedCurrency) {
+  const [digits = '', fraction] = value.replace(/^-/, '').split('.')
+  return digits.replace(/^0+(?=\d)/, '').length > wholeLimit(currency) || (fraction !== undefined && fraction.length > decimalsOf(currency))
 }
 // Shown finished (e.g. 1,500.00), as when the value changes while the input isn't focused.
 const displayValue = ref(formatEntry(props.modelValue, props.currency, true))
@@ -154,21 +211,15 @@ function caretForRawLength(value: string, target: number) {
   return value.length
 }
 
+function onFocus() {
+  focused.value = true
+  openKeypad()
+}
+
 function onInput(event: Event) {
   const element = event.target as HTMLInputElement
-  if (asNumber.value) {
-    // Not a number yet (a lone minus): nothing until the digits come.
-    if (element.validity.badInput) {
-      displayValue.value = ''
-      emit('update:modelValue', '')
-      return
-    }
-    const raw = normalize(element.value, props.currency)
-    if (overLimit(element.value, props.currency)) element.value = raw
-    displayValue.value = element.value
-    emit('update:modelValue', raw === '-' ? '' : raw)
-    return
-  }
+  // A key typed some other way (a phone's own or a plugged-in keyboard) while the keypad is open.
+  whole = false
   const rawCaret = rawCaretLength(element.value.slice(0, element.selectionStart ?? element.value.length))
   const raw = normalize(element.value, props.currency)
   const formatted = formatEntry(raw, props.currency)
@@ -176,6 +227,7 @@ function onInput(event: Event) {
   // A refused character leaves the value as it was, so put the box back by hand.
   if (element.value !== formatted) element.value = formatted
   emit('update:modelValue', raw === '-' ? '' : raw)
+  typed.value = raw
   nextTick(() => {
     const caret = caretForRawLength(formatted, rawCaret)
     element.setSelectionRange(caret, caret)
@@ -184,7 +236,7 @@ function onInput(event: Event) {
 
 function onBlur() {
   focused.value = false
-  if (asNumber.value) toText()
+  closeKeypad()
   const formatted = formatEntry(props.modelValue, props.currency, true)
   displayValue.value = formatted
   if (input.value && input.value.value !== formatted) input.value.value = formatted
@@ -192,7 +244,7 @@ function onBlur() {
 }
 
 watch(() => [props.modelValue, props.currency], ([value, currency]) => {
-  if (!focused.value && !asNumber.value) displayValue.value = formatEntry(String(value), currency as SupportedCurrency, true)
+  if (!focused.value) displayValue.value = formatEntry(String(value), currency as SupportedCurrency, true)
 })
 
 watch(() => props.currency, (currency, previousCurrency) => {
@@ -203,3 +255,16 @@ watch(() => props.currency, (currency, previousCurrency) => {
   }
 })
 </script>
+
+<style scoped>
+/* Like a phone's number pad: big keys on grey, above the app's bottom bar, under pop-ups. */
+.amount-keypad { position: fixed; right: 0; bottom: 0; left: 0; z-index: 70; padding: 6px 6px calc(6px + env(safe-area-inset-bottom)); background: #d1d5db; box-shadow: 0 -4px 16px rgb(15 23 42 / 12%); touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+.amount-keypad-keys { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; max-width: 520px; margin: 0 auto; }
+.amount-key { display: flex; align-items: center; justify-content: center; height: 52px; border-radius: 8px; background: #fff; color: #0f172a; font-size: 26px; font-weight: 500; box-shadow: 0 1px 0 rgb(15 23 42 / 25%); -webkit-tap-highlight-color: transparent; }
+.amount-key:active { background: #e2e8f0; }
+.amount-key:disabled { opacity: .35; }
+.amount-key.is-sign { background: #e5e7eb; }
+.amount-key.is-on { background: #e2445c; color: #fff; }
+.amount-key.is-done { grid-column: span 2; background: #2563eb; color: #fff; font-size: 18px; font-weight: 700; }
+.amount-key.is-done:active { background: #1d4ed8; }
+</style>
