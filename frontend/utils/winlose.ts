@@ -18,8 +18,8 @@ export function byCurrency(a: string, b: string) {
 }
 
 /**
- * Rows split into one table per currency, USD first, each keeping the rows' order (A to Z): on the
- * Report USD and KHR are never in one table (Group summary puts them back in one: mergedTables).
+ * Rows split into one table per currency, USD first, each keeping the rows' order (A to Z): USD
+ * and KHR are never in one table.
  */
 export function currencyTables<R>(rows: R[], currencyOf: (row: R) => string) {
   const tables = new Map<string, R[]>()
@@ -28,16 +28,6 @@ export function currencyTables<R>(rows: R[], currencyOf: (row: R) => string) {
     tables.set(currency, [...(tables.get(currency) || []), row])
   }
   return [...tables].sort(([a], [b]) => byCurrency(a, b)).map(([currency, list]) => ({ currency, rows: list }))
-}
-
-/**
- * Group summary (merged): the currency tables as one, USD rows first, then KHR (currency '' when it
- * has several; `currencies` are the ones in each table, for its Total rows).
- */
-export function mergedTables<R>(tables: { currency: string; rows: R[] }[], merged: boolean) {
-  const parts = tables.map(t => ({ ...t, currencies: [t.currency] }))
-  if (!merged || parts.length < 2) return parts
-  return [{ currency: '', currencies: tables.map(t => t.currency), rows: tables.flatMap(t => t.rows) }]
 }
 
 /** Each item's totals as rows, one per currency (a group's or an agent's), for currencyTables. */

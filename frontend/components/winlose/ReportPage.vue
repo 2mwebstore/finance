@@ -27,8 +27,8 @@
       <template v-if="agentId">
         <WinloseGroupTotals :groups="report.groups" detail />
         <!-- By week: the agent in each data entry (week-1, week-2, …); one opens its groups in it -->
-        <WinloseEntryTotals v-if="!weekStart" title="By week" :entries="report.entries || []" selectable :reactions="summary" :merged="summary" @select="openEntry" />
-        <WinloseEntryTotals v-else :entries="report.entries || []" :reactions="summary" :merged="summary" />
+        <WinloseEntryTotals v-if="!weekStart" title="By week" :entries="report.entries || []" selectable :reactions="summary" @select="openEntry" />
+        <WinloseEntryTotals v-else :entries="report.entries || []" :reactions="summary" />
         <p v-if="!report.groups.length" class="rounded-xl border border-border bg-white px-4 py-8 text-center text-sm text-muted">No results entered for these weeks.</p>
       </template>
       <template v-else>
@@ -56,7 +56,7 @@
                 </template>
               </div>
             </div>
-            <WinloseReportTable :report="{ lines: e.lines || [], totals: e.totals }" by-group selectable :reactions="summary" :merged="summary" @select="openAgent" />
+            <WinloseReportTable :report="{ lines: e.lines || [], totals: e.totals }" by-group selectable :reactions="summary" @select="openAgent" />
           </article>
         </template>
         <!-- One group over the dates: every agent in one card (on Group summary with an Image button:
@@ -66,13 +66,13 @@
             <h3 class="text-sm font-semibold text-navy">{{ formatDocDate(range.from) }} – {{ formatDocDate(range.to) }}</h3>
             <WinloseEntryImage v-if="summary" target-id="group-card" :title="`${groupTitle} ${range.from} to ${range.to}`" :group="groupTitle" />
           </div>
-          <WinloseReportTable :report="groupCard || report" by-group selectable :reactions="summary" :merged="summary" @select="openAgent" />
+          <WinloseReportTable :report="groupCard || report" by-group selectable :reactions="summary" @select="openAgent" />
           <p v-if="summary && (report.entries?.length || 0) > 1 && can('winlose.react')" class="px-1 text-[11px] text-muted">To give an agent ✅ / ❌, open its week in By week.</p>
         </article>
-        <!-- Every agent's totals, a table per currency (Group summary: one table; an agent opens its groups) -->
-        <WinloseReportTable v-else :report="report" selectable title="By agent" hint="Tap an agent for its groups" :merged="summary" @select="openAgent" />
+        <!-- Every agent's totals, a table per currency (an agent opens its groups) -->
+        <WinloseReportTable v-else :report="report" selectable title="By agent" hint="Tap an agent for its groups" @select="openAgent" />
         <!-- By week: the group in each data entry (week-1, week-2, …); one opens its agents in it -->
-        <WinloseEntryTotals v-if="groupId && !weekStart" title="By week" :entries="report.entries || []" selectable :reactions="summary" :merged="summary" @select="openEntry" />
+        <WinloseEntryTotals v-if="groupId && !weekStart" title="By week" :entries="report.entries || []" selectable :reactions="summary" @select="openEntry" />
       </template>
     </template>
 
@@ -98,10 +98,8 @@ import { currencyTables, downloadCsv, mondayOf, plusDays, weekLabel } from '~/ut
  * Report (default) has the week's settlement; Group summary (summary) has each entry's ✅ / ❌, each
  * agent's in an entry (its result's, as in Data entry) and the Image button (a picture of an entry
  * or of a group over the dates). Every switched-on group and agent is listed (0 with no results),
- * A to Z. By group is one table on both: a row per group with its USD and KHR amounts in it
- * ("$1,000.00 / -៛500,000"). The rest: on the Report a table per currency (USD first, then KHR); on
- * Group summary one table (the USD rows first, then the KHR ones; the agents end with a Total for
- * each).
+ * A to Z: By group in one table, a row per group with its USD and KHR amounts in it
+ * ("$1,000.00 / -៛500,000"); the rest in a table per currency (USD first, then KHR).
  */
 const props = withDefaults(defineProps<{ summary?: boolean }>(), { summary: false })
 
