@@ -491,14 +491,22 @@ func (s *PlatformService) addEveryone(ctx context.Context, out *WinLoseReport, f
 	if f.GroupID != nil {
 		return nil
 	}
-	has := map[uuid.UUID]bool{}
-	for _, g := range out.Groups {
+	has := map[uuid.UUID]int{}
+	for i, g := range out.Groups {
 		if g.GroupID != nil {
-			has[*g.GroupID] = true
+			has[*g.GroupID] = i
 		}
 	}
 	for _, g := range groups {
-		if !g.IsActive || has[g.ID] {
+		if !g.IsActive {
+			continue
+		}
+		if i, ok := has[g.ID]; ok {
+			// A group with results in one currency is at 0 in its other agents' currencies too
+			// (results in KHR and USD agents with none: it is in the USD table as well).
+			if f.PlatformID == nil {
+				out.Groups[i].Totals = withZeroSums(out.Groups[i].Totals, agentCurrencies(members[g.ID], platformOf))
+			}
 			continue
 		}
 		id := g.ID
@@ -521,6 +529,17 @@ func (s *PlatformService) addEveryone(ctx context.Context, out *WinLoseReport, f
 // groupCurrencies are the currencies a group's agents report in (USD first); a group with no
 // agents: its own currency, else USD.
 func groupCurrencies(g models.AssignmentGroup, agents []uuid.UUID, platformOf map[uuid.UUID]models.Platform) []string {
+	if out := agentCurrencies(agents, platformOf); len(out) > 0 {
+		return out
+	}
+	if g.Currency != "" {
+		return []string{g.Currency}
+	}
+	return []string{models.CurrencyUSD}
+}
+
+// agentCurrencies are the currencies the agents report in (USD first); none for no agents.
+func agentCurrencies(agents []uuid.UUID, platformOf map[uuid.UUID]models.Platform) []string {
 	seen := map[string]bool{}
 	var out []string
 	for _, id := range agents {
@@ -528,12 +547,6 @@ func groupCurrencies(g models.AssignmentGroup, agents []uuid.UUID, platformOf ma
 			seen[p.DefaultCurrency] = true
 			out = append(out, p.DefaultCurrency)
 		}
-	}
-	if len(out) == 0 {
-		if g.Currency != "" {
-			return []string{g.Currency}
-		}
-		return []string{models.CurrencyUSD}
 	}
 	sort.Slice(out, func(i, j int) bool { return currencyBefore(out[i], out[j]) })
 	return out
@@ -545,6 +558,22 @@ func zeroSums(currencies []string) []Sums {
 		out[i] = Sums{Currency: c}
 	}
 	return out
+}
+
+// withZeroSums adds a 0 for each currency the sums don't have yet (USD first).
+func withZeroSums(sums []Sums, currencies []string) []Sums {
+	have := map[string]bool{}
+	for _, s := range sums {
+		have[s.Currency] = true
+	}
+	for _, c := range currencies {
+		if !have[c] {
+			have[c] = true
+			sums = append(sums, Sums{Currency: c})
+		}
+	}
+	sort.SliceStable(sums, func(i, j int) bool { return currencyBefore(sums[i].Currency, sums[j].Currency) })
+	return sums
 }
 
 // currencyBefore puts USD before KHR (any other currency after them, A to Z): the order of every

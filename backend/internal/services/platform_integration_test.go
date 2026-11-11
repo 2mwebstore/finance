@@ -1831,8 +1831,10 @@ func TestReportListsEveryone(t *testing.T) {
 	if g := rep.Groups[0]; len(g.Totals) != 1 || g.Totals[0].Currency != "KHR" || !g.Totals[0].JamePS.IsZero() || g.Totals[0].Entries != 0 {
 		t.Errorf("alpha is at 0 in its agent's currency: %+v", g)
 	}
-	if g := rep.Groups[1]; len(g.Totals) != 1 || g.Totals[0].Currency != "USD" || g.Totals[0].Entries != 1 {
-		t.Errorf("Beta has p1's week: %+v", g)
+	// Beta has p1's week (USD) and is at 0 in KHR too (p3 has none): it is in both currencies' tables.
+	if g := rep.Groups[1]; len(g.Totals) != 2 || g.Totals[0].Currency != "USD" || g.Totals[0].Entries != 1 || !g.Totals[0].WinLose.Equal(n(1000)) ||
+		g.Totals[1].Currency != "KHR" || !g.Totals[1].JamePS.IsZero() || g.Totals[1].Entries != 0 {
+		t.Errorf("Beta has p1's week in USD and is at 0 in KHR: %+v", g)
 	}
 	if plain := report(ReportFilter{DateFrom: span.DateFrom, DateTo: span.DateTo}); len(plain.Lines) != 1 || len(plain.Groups) != 1 {
 		t.Errorf("without everyone only what has results: %+v %+v", plain.Lines, plain.Groups)
