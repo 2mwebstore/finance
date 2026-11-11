@@ -13,7 +13,7 @@
             <th class="font-bold"><span data-capture-skip>Agent</span><span class="hidden" data-capture-show>AG</span></th>
             <th class="amount font-bold">W/L</th>
             <th class="amount font-bold">COMM</th>
-            <!-- One group: the rate each agent's Total is at (on phones it is in the line under the agent) -->
+            <!-- One group: the rate each agent's Total is at (on phones it is next to the agent) -->
             <th v-if="showRates" class="amount hidden font-bold sm:table-cell">Rate</th>
             <th class="amount font-bold">Total</th>
           </tr>
@@ -21,9 +21,12 @@
         <tbody class="divide-y divide-border">
           <tr v-for="line in part.rows" :key="`${line.platform_id}-${line.currency}`" class="text-navy">
             <td class="name">
-              <button v-if="selectable" type="button" class="code font-mono font-semibold text-primary hover:underline" @click="emit('select', line.platform_id)">{{ line.platform_code }}</button>
-              <span v-else class="code font-mono font-semibold">{{ line.platform_code }}</span>
-              <span v-if="showRates" class="block text-muted sm:hidden">{{ usedRate(line.rate_min, line.rate_max, line.formula) }}</span>
+              <!-- On phones the rate is next to the agent, on the same line -->
+              <span class="whitespace-nowrap">
+                <button v-if="selectable" type="button" class="code font-mono font-semibold text-primary hover:underline" @click="emit('select', line.platform_id)">{{ line.platform_code }}</button>
+                <span v-else class="code font-mono font-semibold">{{ line.platform_code }}</span>
+                <span v-if="showRates" class="ml-1 text-muted sm:hidden">{{ usedRate(line.rate_min, line.rate_max, line.formula) }}</span>
+              </span>
               <!-- The agent's result in an entry: its ✅ / ❌ (left out of the picture) -->
               <div v-if="reactions && line.result_id" class="mt-1" data-capture-skip><WinloseEntryReactions :url="`/winlose/results/${line.result_id}/reactions`" :reactions="line.reactions || []" /></div>
             </td>

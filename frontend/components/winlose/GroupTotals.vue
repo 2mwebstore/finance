@@ -9,7 +9,7 @@
             <th class="font-bold">Group</th>
             <th class="amount font-bold">W/L</th>
             <th class="amount font-bold">COMM</th>
-            <!-- One agent: the rate its Total is at in each group (on phones in the line under the group) -->
+            <!-- One agent: the rate its Total is at in each group (on phones next to the group) -->
             <th v-if="showRates" class="amount hidden font-bold sm:table-cell">Rate</th>
             <th class="amount font-bold">Total</th>
           </tr>
@@ -19,7 +19,7 @@
             <td class="name font-semibold" :class="g.group_id ? '' : 'font-normal italic text-muted'">
               <button v-if="selectable && g.group_id" type="button" class="text-left font-semibold text-primary hover:underline" @click="emit('select', g.group_id)">{{ g.title }}</button>
               <template v-else>{{ g.title || 'No group' }}</template>
-              <span v-if="showRates && g.group_id" class="block font-normal not-italic text-muted sm:hidden">{{ usedRate(g.rate_min, g.rate_max, g.formula) }}</span>
+              <span v-if="showRates && g.group_id" class="ml-1 whitespace-nowrap font-normal not-italic text-muted sm:hidden">{{ usedRate(g.rate_min, g.rate_max, g.formula) }}</span>
             </td>
             <td class="amount" :class="tone(t.win_lose)">{{ formatAmount(t.win_lose, t.currency) }}</td>
             <td class="amount">{{ formatAmount(t.commission, t.currency) }}</td>
