@@ -408,11 +408,11 @@ func (s *ReportService) ExportCSV(ctx context.Context, actorID uuid.UUID, period
 
 	var b strings.Builder
 	w := csv.NewWriter(&b)
-	_ = w.Write([]string{"transaction_number", "type", "status", "date", "branch_code", "category", "payment_method", "currency", "amount", "description", "counterparty"})
+	_ = w.Write([]string{"transaction_number", "type", "status", "date", "branch", "category", "payment_method", "currency", "amount", "description", "counterparty"})
 	for _, t := range items {
-		branchCode, catName, pmName := "", "", ""
+		branchName, catName, pmName := "", "", ""
 		if t.Branch != nil {
-			branchCode = t.Branch.Code
+			branchName = t.Branch.Name
 		}
 		if t.Category != nil {
 			catName = t.Category.Name
@@ -423,7 +423,7 @@ func (s *ReportService) ExportCSV(ctx context.Context, actorID uuid.UUID, period
 		_ = w.Write([]string{
 			t.TransactionNumber, t.Type, t.Status,
 			t.TransactionDate.In(accounting.LoadLocation(s.timezone)).Format("2006-01-02"),
-			csvText(branchCode), csvText(catName), csvText(pmName), t.Currency,
+			csvText(branchName), csvText(catName), csvText(pmName), t.Currency,
 			t.Amount.StringFixed(4),
 			csvText(richtext.ToText(t.Description)), csvText(t.Counterparty),
 		})

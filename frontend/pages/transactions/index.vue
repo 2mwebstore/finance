@@ -74,7 +74,7 @@
           <div class="transaction-meta">
             <span class="meta-number">{{ transaction.transaction_number }}</span>
             <span v-if="transaction.type === 'expense'">{{ transaction.category?.name || 'Uncategorized' }}</span>
-            <span>{{ transaction.branch?.name || transaction.branch?.code || 'No branch' }}</span>
+            <span>{{ transaction.branch?.name || 'No branch' }}</span>
             <span class="meta-date">{{ formatDate(transaction.transaction_date) }}</span>
           </div>
           <p v-if="transaction.status === 'pending'" class="pending-hint" :class="{ 'is-yours': isMyDecision(transaction) }">

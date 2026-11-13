@@ -62,12 +62,18 @@ func main() {
 		}
 	}
 
-	// Saved win/lose weeks that aren't finalized follow the current formula. A failure is logged and
-	// the server still starts (the weeks keep what they were worked out with).
-	if n, err := services.NewPlatformService(db, cfg.Timezone).RecalculateOpenWeeks(context.Background()); err != nil {
+	// Saved win/lose weeks follow the current formula and the agents' current rates. A failure is
+	// logged and the server still starts (the weeks keep what they were worked out with).
+	wl := services.NewPlatformService(db, cfg.Timezone)
+	if n, err := wl.RecalculateWeeks(context.Background()); err != nil {
 		log.Printf("win/lose: could not work saved weeks out with the current formula: %v", err)
 	} else if n > 0 {
 		log.Printf("win/lose: %d saved results worked out again with the current formula", n)
+	}
+	if n, err := wl.ApplyCurrentRates(context.Background()); err != nil {
+		log.Printf("win/lose: could not work saved weeks out at the current rates: %v", err)
+	} else if n > 0 {
+		log.Printf("win/lose: %d saved results worked out again at the agents' current rates", n)
 	}
 
 	if cfg.AppEnv == "production" {

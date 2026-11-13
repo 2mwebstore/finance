@@ -67,11 +67,10 @@ Server-side authorization is enforced on every protected API. The UI uses the sa
 | `winlose.create` | Add Data Entry | Win/Lose | Make new entries and enter agents' W/L and COMM for your groups |
 | `winlose.edit` | Update Data Entry | Win/Lose | Change an entry's title and amounts already saved, with a reason (kept in the audit log) |
 | `winlose.delete` | Delete Data Entry | Win/Lose | Delete an entry and its amounts, with a reason (kept in the audit log) |
-| `winlose.react` | React to Data Entry | Win/Lose | Give an entry, or an agent in it, ✅ or ❌, on Data entry and the Report |
+| `winlose.react` | React to Data Entry | Win/Lose | Give an entry, or a group or agent in it (at 0 too), ✅ or ❌, on Data entry, the Report and Group summary |
 | `winlose-reports.view` | View Report | Win/Lose Reports | The Report and the group summary for your groups, one group at a time |
 | `winlose-reports.consolidated` | View Consolidated Win/Lose | Win/Lose Reports | Combined totals across all your groups |
 | `winlose-reports.rates` | View Rates in Reports | Win/Lose Reports | Show each agent's rate on the Report and the Group Summary; without it the rates are hidden |
-| `winlose-settlements.finalize` | Finalize Weekly Settlements | Win/Lose Reports | Finalize or reopen a group's week; a finalized week can't be changed |
 
 ## By module
 
@@ -118,6 +117,19 @@ Server-side authorization is enforced on every protected API. The UI uses the sa
 | `branches.edit` | Edit branch details |
 | `branches.manage` | Full branch management including assignments |
 
+**An inactive branch** (Delete on Branches makes it inactive; nothing is removed) keeps its data,
+and its data stays in the reports: it is still in the branch pickers, after the active ones and
+marked **(inactive)**, for everyone who could see it before. Someone whose every branch is inactive
+can't sign in (403 "your branch is inactive, so you can't sign in") and is signed out when the last
+one goes inactive; someone who also works in an active branch signs in as before. The owner and
+admins are never blocked. **Restore** on Branches makes it active again, and its people can sign in again.
+
+**A branch picked in the top bar** (people with several branches) limits every page to that branch's
+own data: lists and reports carry it as `branch_id`. Things that belong to no branch are left out
+too: Branches lists only that branch, Roles only its own roles (no built-in roles: `GET /roles?branch_id=`
+returns the branch's roles only), and Categories only its own categories (the shared ones still
+appear in its forms). **All branches** shows everything again.
+
 ### Users
 | Code | Description |
 |------|-------------|
@@ -126,6 +138,22 @@ Server-side authorization is enforced on every protected API. The UI uses the sa
 | `users.edit` | Edit user profiles |
 | `users.manage` | Manage user roles, passwords, and account activation |
 
+**The user form** (Add user / Edit) has **Name**, **Branch**, **Username** and **Info** (optional,
+anything about the person). The username is filled in from the Name and the branch, each in small
+letters without spaces: Name `Dara` in Phnom Penh is `dara@phnompenh`, and that is what they sign
+in with. No email is asked: the API stores the username as the email (`email` is optional in
+`POST /users`; signing in takes the username or the email). On Edit the username follows the Name
+and the branch once either is changed (someone in several branches goes by their default branch,
+else the first), and the person then signs in with the new one; an email that was the old username
+moves with it. A username can't be anyone else's username or email. People made before keep their
+username until their Name or branch is changed. The top bar shows a person in one branch by name
+with their username under it (others: their role).
+
+The **Role** list in the user form shows the roles of the person's branches only; the built-in
+system roles (owner, admin, manager, accountant, cashier, viewer) are not offered there, and
+**Super Admin** is offered only to the Super Admin. Someone who already holds a system role keeps it
+on Edit. To give a branch a role like a system one, the Super Admin clones it (below).
+
 ### Roles
 | Code | Description |
 |------|-------------|
@@ -133,6 +161,22 @@ Server-side authorization is enforced on every protected API. The UI uses the sa
 | `roles.manage` | Create, edit, and delete non-system roles |
 | `permissions.manage` | Assign permissions to roles |
 | `permissions.view` | Show the Permission Codes page (menu item and page); without it the page is hidden |
+
+**The Roles page** never lists the Super Admin role (`GET /roles` leaves it out; the user form asks
+for it with `include_super_admin=true`, which only the Super Admin gets). The Super Admin sees the
+built-in roles there, and a branch's own roles by choosing it in **Roles for** (or in the top bar).
+Others see every role they may, or one branch's.
+
+**Clone** (Roles & permissions, the Super Admin only): copies any role, system or a branch's, to the
+branches picked. Each branch gets its own role with the same name, description and permissions
+(code `<role>-<branch>`, e.g. `cashier-phnompenh`; `-2`, `-3`… if that is taken), which can then be
+given to its people and changed on its own. A branch that already has a role of that name is
+skipped. The Super Admin role itself can't be cloned.
+
+**Delete** (a role nobody has) removes it from the database for good, with its permissions; it can't
+be brought back, and its code can be used again. A role someone still has can't be deleted (take it
+off them first), nor can a built-in role. API: `POST /api/v1/roles/:id/clone`
+`{"branch_ids": [...]}` → `201 {"created": [roles], "skipped": [{id, name}]}`.
 
 ### Settings & Audit
 | Code | Description |
@@ -183,13 +227,12 @@ In the RP menu (once called PLATFORMS) a platform is called an **agent** and a b
 | `winlose.create` | Make new entries and enter agents' W/L and COMM for your groups |
 | `winlose.edit` | Change an entry's title and amounts already saved, with a reason (kept in the audit log) |
 | `winlose.delete` | Delete an entry and its amounts, with a reason (kept in the audit log) |
-| `winlose.react` | Give an entry, or an agent in it, ✅ or ❌, on Data entry and the Report |
+| `winlose.react` | Give an entry, or a group or agent in it (at 0 too), ✅ or ❌, on Data entry, the Report and Group summary |
 | `winlose-reports.view` | The Report and the group summary for your groups, one group at a time |
 | `winlose-reports.consolidated` | Combined totals across all your groups |
 | `winlose-reports.rates` | Show each agent's rate on the Report and the Group Summary (hidden without it) |
-| `winlose-settlements.finalize` | Finalize or reopen a group's week; a finalized week can't be changed |
 
-Win/lose is entered once a week (Monday to Sunday) per branch and platform. A saved week keeps the partners, partner %, currency and formula version it was worked out with; changing it needs `winlose.edit` and a reason (audit log). A finalized week can't be changed until someone with `winlose-settlements.finalize` reopens it. Reports without one branch chosen (all your branches together) need `winlose-reports.consolidated`. Owner/admin (Manage Branches) get these permissions automatically when they first ship.
+Win/lose is entered once a week (Monday to Sunday) per branch and platform. A saved week keeps the partners, partner % and currency it was worked out with and follows the current formula and its agents' current rates; changing it needs `winlose.edit` and a reason (audit log). There is no finalizing: every week can be changed. Finalize Weekly Settlements (`winlose-settlements.finalize`) is gone: the API takes it off every role when it starts. Reports without one branch chosen (all your branches together) need `winlose-reports.consolidated`. Owner/admin (Manage Branches) get these permissions automatically when they first ship.
 
 Each RP page has its own **view, add, update and delete** (Data entry also **react**). They took
 over from Manage Agents (`platforms.manage`) and Manage Group Agent Assignments

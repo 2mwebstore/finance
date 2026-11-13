@@ -12,11 +12,11 @@
       <!-- Only with several branches: a new group picks its branch (its agents change with it); a saved one keeps its own -->
       <div v-if="rp.show.value" class="space-y-1 text-xs font-medium text-muted">Branch
         <SearchSelect v-if="isNew" v-model="branchId" :options="rp.optionsFor(false)" :searchable="false" aria-label="Group branch" />
-        <p v-else class="h-10 rounded-lg border border-border bg-canvas px-3 py-2.5 text-sm font-normal text-muted">{{ group?.branch_code }}</p>
+        <p v-else class="h-10 rounded-lg border border-border bg-canvas px-3 py-2.5 text-sm font-normal text-muted">{{ group?.branch_name || group?.branch_code }}</p>
       </div>
 
       <label class="block space-y-1 text-xs font-medium text-muted">Title <span class="text-expense">*</span>
-        <input v-model="title" maxlength="128" :aria-invalid="tried && !title.trim() ? 'true' : undefined" class="h-10 w-full rounded-lg border border-border px-3 text-sm text-navy" placeholder="e.g. V-series Phnom Penh" />
+        <input v-model="title" maxlength="128" :aria-invalid="tried && !title.trim() ? 'true' : undefined" class="h-10 w-full rounded-lg border border-border px-3 text-sm text-navy" placeholder="e.g. Group" />
       </label>
 
       <div class="space-y-1 text-xs font-medium text-muted">Agents <span class="text-expense">*</span>
@@ -99,9 +99,9 @@
         <div class="space-y-1 text-xs font-medium text-muted">From<DatePicker v-model="startsOn" aria-label="First day" /></div>
       </div>
 
-      <p v-if="!isNew" class="text-[11px] text-muted">An agent taken out is ended if weeks were entered for it (they stay), else removed. An agent put in starts today; its weeks already saved for this week count in the group too.</p>
+      <p v-if="!isNew" class="text-[11px] text-muted">An agent taken out is ended if weeks were entered for it (they stay), else removed. An agent put in starts today; its weeks already saved for this week count in the group too. Saved weeks are worked out again at the rates and types here.</p>
       <AppAlert v-if="group?.partners.length" type="warning" title="This group still has partners" :message="`${group.partners.map(p => `${p.partner_name} ${formatRate(p.commission_rate)}`).join(', ')}. Saving takes them off: from then on each agent’s rate above is used. Weeks already saved keep their partner shares.`" />
-      <p v-else-if="isNew" class="text-[11px] text-muted">An agent can be in more than one group, at its own rate in each. Results are entered once a week; the first day can be in the past to enter earlier weeks. Weeks already saved from the first day on count in the group too (finalized weeks stay as they are).</p>
+      <p v-else-if="isNew" class="text-[11px] text-muted">An agent can be in more than one group, at its own rate in each. Results are entered once a week; the first day can be in the past to enter earlier weeks. Weeks already saved from the first day on count in the group too.</p>
 
       <AppAlert v-if="formError" title="Couldn’t save the group" :message="formError" dismissible @dismiss="formError = ''" />
       <div class="flex flex-wrap items-center justify-end gap-2 border-t border-border pt-4">
@@ -254,7 +254,8 @@ async function save() {
       : await api<AssignmentGroup>(`/platform-groups/${route.params.id}`, { method: 'PATCH', body })
     saved.value = true
     const counted = g.counted_weeks ? ` ${g.counted_weeks} ${g.counted_weeks === 1 ? 'week' : 'weeks'} saved before now count in it.` : ''
-    toast.success(`${g.agents.length} ${g.agents.length === 1 ? 'agent' : 'agents'}; new weeks use these types and rates.${counted}`, { title: `“${g.title}” ${isNew.value ? 'made' : 'updated'}` })
+    const reworked = g.reworked_weeks ? ` ${g.reworked_weeks} saved ${g.reworked_weeks === 1 ? 'week was' : 'weeks were'} worked out again at the new rates.` : ''
+    toast.success(`${g.agents.length} ${g.agents.length === 1 ? 'agent' : 'agents'}; new weeks use these types and rates.${counted}${reworked}`, { title: `“${g.title}” ${isNew.value ? 'made' : 'updated'}` })
     await navigateTo('/admin/platform-assignments')
   } catch (e: any) {
     formError.value = e?.data?.error || 'Could not save the group.'

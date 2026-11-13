@@ -57,8 +57,7 @@
     { "code": "winlose.create", "name": "Enter Win/Lose", "module": "Win/Lose", "description": "Enter a week's win/lose and commission for your groups (once a week)" },
     { "code": "winlose.edit", "name": "Correct Win/Lose", "module": "Win/Lose", "description": "Change a week already saved, with a reason (kept in the audit log)" },
     { "code": "winlose-reports.view", "name": "View Win/Lose Reports", "module": "Win/Lose Reports", "description": "The weekly report and the group summary for your groups, one group at a time" },
-    { "code": "winlose-reports.consolidated", "name": "View Consolidated Win/Lose", "module": "Win/Lose Reports", "description": "Combined totals across all your groups" },
-    { "code": "winlose-settlements.finalize", "name": "Finalize Weekly Settlements", "module": "Win/Lose Reports", "description": "Finalize or reopen a group's week; a finalized week can't be changed" }
+    { "code": "winlose-reports.consolidated", "name": "View Consolidated Win/Lose", "module": "Win/Lose Reports", "description": "Combined totals across all your groups" }
   ],
-  "count": 57
+  "count": 56
 }

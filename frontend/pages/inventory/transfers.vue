@@ -84,7 +84,7 @@ import { ArrowLeftRight, Plus } from 'lucide-vue-next'
 import type { DocLineForm, Paged, Product, StockTransfer } from '~/types/api'
 import { useToast } from '~/composables/useToast'
 import { useFormErrors } from '~/composables/useFormErrors'
-import { useBranchOptions } from '~/composables/useBranchOptions'
+import { branchLabel, useBranchOptions } from '~/composables/useBranchOptions'
 import { rule } from '~/utils/validation'
 import { sanitizeRichText } from '~/utils/richText'
 import { formatDocDate, formatDocDateTime, linesCheck, todayISO } from '~/utils/inventory'
@@ -96,7 +96,7 @@ const canTransfer = computed(() => can('inventory.transfer'))
 const { everyBranch, options: branchOptions, showFilter: showBranchFilter } = useBranchOptions('All branches')
 const { activeBranchId } = useActiveBranch()
 // A transfer goes to another branch, so the form offers every branch even when the top bar shows one.
-const branchChoices = computed(() => everyBranch.value.map(b => ({ value: b.id, label: `${b.code} — ${b.name}` })))
+const branchChoices = computed(() => everyBranch.value.map(b => ({ value: b.id, label: branchLabel(b) })))
 const toChoices = computed(() => branchChoices.value.filter(b => b.value !== form.from_branch_id))
 const statusOptions = [{ value: '', label: 'All statuses' }, { value: 'completed', label: 'Done' }, { value: 'voided', label: 'Voided' }]
 

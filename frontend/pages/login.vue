@@ -2,7 +2,8 @@
   <div>
     <form class="bg-white rounded-2xl shadow-xl p-6 space-y-4" novalidate @submit.prevent="onSubmit">
       <div>
-        <label class="block text-sm font-medium text-navy mb-1">Username or email</label>
+        <!-- name@branch for people added on Users (an email still works for those who have one) -->
+        <label class="block text-sm font-medium text-navy mb-1">Username</label>
         <input
           v-model="identifier"
           type="text"
@@ -10,7 +11,7 @@
           required
           :aria-invalid="loginCheck.invalid('identifier')"
           class="w-full rounded-lg border border-border px-3 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-primary"
-          placeholder="Username or email"
+          placeholder="e.g. dara@phnompenh"
         />
       </div>
       <div>
@@ -73,7 +74,7 @@ const showPassword = ref(false)
 // Same required fields as the API (loginRequest).
 const loginCheck = reactive(useFormErrors(
   () => ({ identifier: identifier.value, password: password.value }),
-  () => ({ identifier: [rule.required('username or email')], password: [rule.required('password')] }),
+  () => ({ identifier: [rule.required('username')], password: [rule.required('password')] }),
 ))
 
 onMounted(() => {

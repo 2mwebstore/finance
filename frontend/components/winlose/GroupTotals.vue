@@ -17,9 +17,16 @@
       <tbody class="divide-y divide-border">
         <tr v-for="g in groups" :key="g.group_id || 'none'" class="text-navy">
           <td class="name font-semibold" :class="g.group_id ? '' : 'font-normal italic text-muted'">
-            <button v-if="selectable && g.group_id" type="button" class="text-left font-semibold text-primary hover:underline" @click="emit('select', g.group_id)">{{ g.title }}</button>
-            <template v-else>{{ g.title || 'No group' }}</template>
-            <span v-if="showRates && g.group_id" class="ml-1 whitespace-nowrap font-normal not-italic text-muted sm:hidden">{{ usedRate(g.rate_min, g.rate_max, g.formula) }}</span>
+            <!-- On the same line: the group, on phones its rate, and in one entry (Group summary) its
+                 ✅ / ❌ there -->
+            <span class="inline-flex items-center gap-2 whitespace-nowrap">
+              <span>
+                <button v-if="selectable && g.group_id" type="button" class="text-left font-semibold text-primary hover:underline" @click="emit('select', g.group_id)">{{ g.title }}</button>
+                <template v-else>{{ g.title || 'No group' }}</template>
+                <span v-if="showRates && g.group_id" class="ml-1 font-normal not-italic text-muted sm:hidden">{{ usedRate(g.rate_min, g.rate_max, g.formula) }}</span>
+              </span>
+              <WinloseEntryReactions v-if="entryId && g.group_id" class="font-normal" data-capture-skip :url="`/winlose/entries/${entryId}/groups/${g.group_id}/reactions`" :reactions="g.reactions || []" />
+            </span>
           </td>
           <td class="amount">
             <template v-for="(t, i) in totalsOf(g)" :key="t.currency"><span v-if="i" class="hidden text-muted sm:inline"> / </span><span class="block sm:inline" :class="tone(t.win_lose)">{{ formatAmount(t.win_lose, t.currency) }}</span></template>
@@ -46,8 +53,9 @@ import { byCurrency, formatAmount, usedRate } from '~/utils/winlose'
  * with its amounts in each of its agents' currencies, USD first ("$1,000.00 / -៛500,000"; USD and
  * KHR are never added together). Selectable: a group's title opens its agents (`select` with its
  * id). Detail (one agent's report): the rate its Total is at in each group (an agent at 60%: 40%).
+ * entryId (Group summary, one data entry): each group's ✅ / ❌ in that entry.
  * No total row: an agent in two groups counts in both (the Totals above are the report's). */
-const props = withDefaults(defineProps<{ groups: WinLoseReport['groups']; selectable?: boolean; detail?: boolean }>(), { selectable: false, detail: false })
+const props = withDefaults(defineProps<{ groups: WinLoseReport['groups']; selectable?: boolean; detail?: boolean; entryId?: string }>(), { selectable: false, detail: false, entryId: '' })
 // Rates need View Rates in Reports (the API leaves them out without it).
 const { can } = usePermissions()
 const showRates = computed(() => props.detail && can('winlose-reports.rates'))

@@ -4,11 +4,12 @@ import { useRpBranch } from '~/composables/useRpBranch'
 /**
  * Loads a win/lose report for a date range and, optionally, one titled group (Group Agent
  * Assignments). There's no branch choice: the API covers every branch the user works in for
- * people who may see consolidated totals, else their own. Every switched-on group and agent is
- * listed, at 0 when it has no results. byEntry: the data entries too, each with its lines; entryId:
- * only one entry (both read when loading; the range or detail changes with them).
+ * people who may see consolidated totals, else their own. Only the groups and agents with results
+ * in the dates are listed, or with everyone every switched-on one, at 0 when it has no results.
+ * byEntry: the data entries too, each with its lines; entryId: only one entry (all read when
+ * loading; the range or detail changes with them). enabled: false loads nothing (no report).
  */
-export function useWinLoseReport(range: () => { from: string; to: string }, options: { byEntry?: () => boolean; entryId?: () => string } = {}) {
+export function useWinLoseReport(range: () => { from: string; to: string }, options: { byEntry?: () => boolean; entryId?: () => string; everyone?: () => boolean; enabled?: () => boolean } = {}) {
   const { api } = useApi()
   const { can } = usePermissions()
   const route = useRoute()
@@ -50,12 +51,19 @@ export function useWinLoseReport(range: () => { from: string; to: string }, opti
   let request = 0
   async function load() {
     const { from, to } = range()
+    if (options.enabled && !options.enabled()) {
+      ++request
+      report.value = null
+      loading.value = false
+      error.value = ''
+      return
+    }
     if (!from || !to) return
     const mine = ++request
     loading.value = true
     error.value = ''
     try {
-      const result = await api<WinLoseReport>('/winlose/reports', { query: { date_from: from, date_to: to, branch_id: branch.value || undefined, group_id: groupId.value || undefined, platform_id: agentId.value || undefined, by_entry: options.byEntry?.() ? 'true' : undefined, entry_id: options.entryId?.() || undefined, everyone: 'true' } })
+      const result = await api<WinLoseReport>('/winlose/reports', { query: { date_from: from, date_to: to, branch_id: branch.value || undefined, group_id: groupId.value || undefined, platform_id: agentId.value || undefined, by_entry: options.byEntry?.() ? 'true' : undefined, entry_id: options.entryId?.() || undefined, everyone: options.everyone?.() ? 'true' : undefined } })
       if (mine === request) report.value = result
     } catch (e: any) {
       if (mine === request) error.value = e?.data?.error || 'Could not load the report.'

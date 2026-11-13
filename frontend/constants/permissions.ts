@@ -72,7 +72,6 @@ export const PERMISSION_CODES = [
   'winlose-reports.view',
   'winlose-reports.consolidated',
   'winlose-reports.rates',
-  'winlose-settlements.finalize',
 ] as const
 
 export type PermissionCodeLiteral = (typeof PERMISSION_CODES)[number]

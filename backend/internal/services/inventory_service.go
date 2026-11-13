@@ -644,6 +644,7 @@ type MovementFilter struct {
 type MovementRow struct {
 	models.StockMovement
 	BranchCode string `json:"branch_code"`
+	BranchName string `json:"branch_name"`
 	SKU        string `json:"sku"`
 	Name       string `json:"name"`
 	Unit       string `json:"unit"`
@@ -678,7 +679,7 @@ func (s *InventoryService) ListMovements(ctx context.Context, f MovementFilter, 
 	}
 	page, size := pageArgs(f.Page, f.PageSize)
 	var rows []MovementRow
-	err := q.Select(`stock_movements.*, branches.code AS branch_code, products.sku, products.name, products.unit,
+	err := q.Select(`stock_movements.*, branches.code AS branch_code, branches.name AS branch_name, products.sku, products.name, products.unit,
 		products.currency, COALESCE(NULLIF(users.full_name, ''), users.username, '') AS created_by`).
 		Order("stock_movements.created_at DESC").Limit(size).Offset((page - 1) * size).Scan(&rows).Error
 	return rows, total, err
@@ -885,7 +886,7 @@ func (s *InventoryService) actorHas(ctx context.Context, actorID uuid.UUID, code
 	return false
 }
 
-// names looks up display names: users (full name or username), branches (code — name) and
+// names looks up display names: users (name or username), branches and
 // products, for the ids given.
 type nameBook struct {
 	users    map[uuid.UUID]string

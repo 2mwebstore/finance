@@ -128,6 +128,7 @@ func userJSON(u *models.User) gin.H {
 		"username":          u.Username,
 		"email":             u.Email,
 		"full_name":         u.FullName,
+		"info":              u.Info,
 		"is_active":         u.IsActive,
 		"is_super_admin":    u.IsSuperAdmin,
 		"default_branch_id": u.DefaultBranchID,

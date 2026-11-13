@@ -1,8 +1,13 @@
 export interface User {
   id: string
+  /** What they sign in with: name@branch for people added on Users. */
   username: string
+  /** The username too when none was given (signing in takes either). */
   email: string
+  /** The person's Name. */
   full_name: string
+  /** Anything about the person (optional). */
+  info?: string
   is_active: boolean
   is_super_admin: boolean
   roles: string[]
@@ -11,8 +16,9 @@ export interface User {
   branches: { id: string; code: string; name: string }[]
   /** Owner/admin access (Manage Branches): every branch; otherwise only scope_branches (their own). */
   all_branches?: boolean
-  /** Active branches whose data the user may see and work in (use these for branch pickers). */
-  scope_branches?: { id: string; code: string; name: string }[]
+  /** Branches whose data the user may see (use these for branch pickers), active ones first; an
+   *  inactive one (is_active false) stays so its data can be looked at in the reports. */
+  scope_branches?: { id: string; code: string; name: string; is_active?: boolean }[]
   last_login_at?: string
 }
 
@@ -212,7 +218,9 @@ export interface AdminUser {
   id: string
   username: string
   email: string
+  /** The Name on Users. */
   full_name: string
+  info?: string
   is_active: boolean
   is_super_admin: boolean
   default_branch_id?: string | null
@@ -307,6 +315,7 @@ export interface StockMovement {
   id: string
   branch_id: string
   branch_code: string
+  branch_name: string
   product_id: string
   sku: string
   name: string
@@ -530,6 +539,7 @@ export interface Platform {
   /** The branch the agent belongs to; empty: a shared agent every branch sees. */
   branch_id: string | null
   branch_code: string
+  branch_name: string
   /** How many HQs have it now. */
   active_hqs: number
 }
@@ -586,6 +596,7 @@ export interface AssignmentGroup {
   /** The branch the group is in. */
   branch_id: string
   branch_code: string
+  branch_name: string
   /** Empty: each agent's own default. */
   currency: string
   starts_on: string
@@ -600,6 +611,8 @@ export interface AssignmentGroup {
   weeks: number
   /** On a save only: weeks saved before an agent was put in the group that count in it now. */
   counted_weeks?: number
+  /** On a save only: saved weeks worked out again at the agents' new rates and types. */
+  reworked_weeks?: number
 }
 
 export interface WinLoseFormula {
@@ -658,10 +671,9 @@ export interface WinLoseEntry {
   week_end: string
   branch_id: string
   branch_code: string
+  branch_name: string
   created_at: string
   created_by: string
-  /** The week is finalized. */
-  locked: boolean
   /** People's ✅ (yes) and ❌ (no) on the entry, one each. */
   reactions: EntryReaction[]
 }
@@ -683,9 +695,6 @@ export interface WeekSheet {
   /** Null for a new entry until its first save. */
   entry: { id: string; title: string; created_at: string; created_by: string } | null
   formula: WinLoseFormula
-  settlement: { id: string; status: 'finalized' | 'reopened'; week_start: string; week_end: string } | null
-  /** The week is finalized: nothing can change. */
-  locked: boolean
   rows: WeekSheetRow[]
 }
 
@@ -723,7 +732,7 @@ export interface WinLoseReportLine extends WinLoseSums {
   formula: string
   /** Who shared the Total, by name (partner_id null: weeks with no partner); empty when no week had partners. */
   partners: { partner_id: string | null; partner_name: string; rate_min: string; rate_max: string; jame_ps: string; entries: number }[]
-  /** An entry's line (by_entry): the agent's one result in it, with people's ✅ / ❌ on it (the same as on its row in Data entry). Not on lines that add results up. */
+  /** An entry's line (by_entry): the agent's one result in it (none for a line at 0: everyone). Reactions: people's ✅ / ❌ on the agent in the entry (the same as on its row in Data entry). Not on lines that add results up. */
   result_id?: string
   reactions?: EntryReaction[]
 }
@@ -738,7 +747,11 @@ export interface WinLoseReport {
   platforms: { platform_id: string; platform_code: string; platform_name: string; totals: WinLoseSums[] }[]
   /** Per titled group (group_id null: agents in no group), by title. For one agent (platform_id): its
    * rate in the group (rate_min = rate_max unless it changed) and the formula ('' when it differs). */
-  groups: { group_id: string | null; title: string; rate_min: string; rate_max: string; formula: string; totals: WinLoseSums[] }[]
+  groups: {
+    group_id: string | null; title: string; rate_min: string; rate_max: string; formula: string; totals: WinLoseSums[]
+    /** People's ✅ / ❌ on the group in the report's one entry (entry_id; Group summary). */
+    reactions?: EntryReaction[]
+  }[]
   /** Each week in the range that has results (Monday to Sunday), earliest first. */
   weeks: { week_start: string; week_end: string; totals: WinLoseSums[] }[]
   /** Only with by_entry: the data entries in the range (id null: results saved before entries), by week and then as created. */
@@ -762,24 +775,8 @@ export interface WinLoseReportEntry {
 }
 
 export interface EntryReaction {
-  reaction: 'yes' | 'no'
+  reaction: 'yes' | 'no' | 'sent'
   user_id: string
   user_name: string
   at: string
-}
-
-export interface WeeklySettlement {
-  id: string
-  branch_id: string
-  branch_code: string
-  branch_name: string
-  week_start: string
-  week_end: string
-  status: 'finalized' | 'reopened'
-  finalized_by: string
-  finalized_at: string
-  reopened_by: string
-  reopened_at: string | null
-  reopen_reason: string
-  totals: WinLoseSums[]
 }

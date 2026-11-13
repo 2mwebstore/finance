@@ -63,6 +63,8 @@ func (ac *AuthController) Login(c *gin.Context) {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
 		case auth.ErrAccountInactive:
 			c.JSON(http.StatusForbidden, gin.H{"error": "account is inactive"})
+		case auth.ErrBranchInactive:
+			c.JSON(http.StatusForbidden, gin.H{"error": auth.ErrBranchInactive.Error()})
 		case auth.ErrAccountLocked:
 			c.JSON(http.StatusForbidden, gin.H{"error": "account is temporarily locked"})
 		default:
@@ -196,11 +198,12 @@ func (ac *AuthController) Me(c *gin.Context) {
 	}
 
 	// Data scope: every branch, or the branches the user's roles let them see (the app's branch
-	// pickers offer exactly these; "branches" stays the ones the user is assigned to).
+	// pickers offer exactly these, inactive ones marked; "branches" stays the ones the user is
+	// assigned to).
 	scopeBranches := []gin.H{}
 	inScope, allBranches := ac.svc.ScopeBranches(c.Request.Context(), user)
 	for _, b := range inScope {
-		scopeBranches = append(scopeBranches, gin.H{"id": b.ID, "code": b.Code, "name": b.Name})
+		scopeBranches = append(scopeBranches, gin.H{"id": b.ID, "code": b.Code, "name": b.Name, "is_active": b.IsActive})
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -208,6 +211,7 @@ func (ac *AuthController) Me(c *gin.Context) {
 		"username":       user.Username,
 		"email":          user.Email,
 		"full_name":      user.FullName,
+		"info":           user.Info,
 		"is_active":      user.IsActive,
 		"is_super_admin": user.IsSuperAdmin,
 		"roles":          roleCodes(user),

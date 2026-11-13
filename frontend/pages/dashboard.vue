@@ -115,7 +115,7 @@
                     <td class="date-cell">{{ formatTransactionDate(transaction.transaction_date) }}</td>
                     <td class="type-cell"><span class="type-pill" :class="transaction.type === 'income' ? 'type-income' : 'type-expense'">{{ transaction.type }}</span></td>
                     <td class="description-cell">{{ richTextToPlain(transaction.description) || (transaction.type === 'expense' ? transaction.category?.name : '') || transaction.transaction_number }}</td>
-                    <td class="branch-cell">{{ transaction.branch?.name || transaction.branch?.code || '—' }}</td>
+                    <td class="branch-cell">{{ transaction.branch?.name || '—' }}</td>
                     <td class="amount-cell">{{ formatMoney(transaction.amount, transaction.currency) }}</td>
                     <td class="status-cell"><span class="status-pill"><Check :size="11" /> {{ formatStatus(transaction.status) }}</span></td>
                   </tr>
@@ -138,7 +138,7 @@
                 <thead><tr><th>Branch</th><th class="amount-cell">Income</th><th class="amount-cell">Expense</th><th class="amount-cell">Net</th></tr></thead>
                 <tbody>
                   <tr v-for="branch in data.by_branch" :key="branch.branch_id">
-                    <td><span class="branch-name">{{ branch.branch_name }}</span><small>{{ branch.branch_code }}</small></td>
+                    <td><span class="branch-name">{{ branch.branch_name }}</span></td>
                     <td class="amount-cell" data-label="Income">{{ formatBranchAmount(branch, 'income') }}</td>
                     <td class="amount-cell" data-label="Expense">{{ formatBranchAmount(branch, 'expense') }}</td>
                     <td class="amount-cell net-cell" data-label="Net" :class="branchNet(branch) < 0 ? 'negative-net' : ''">{{ formatBranchAmount(branch, 'net') }}</td>
@@ -202,6 +202,7 @@
 </template>
 
 <script setup lang="ts">
+import { branchLabel as pickerLabel } from '~/composables/useBranchOptions'
 import {
   ArrowUpRight,
   Building2,
@@ -253,7 +254,7 @@ const isMobile = useMediaQuery('(max-width: 760px)')
 const chartWidth = computed(() => isMobile.value ? 360 : 720)
 const branchOptions = computed(() => [
   { value: '', label: 'All accessible branches' },
-  ...branches.value.map(branch => ({ value: branch.id, label: `${branch.code} — ${branch.name}` })),
+  ...branches.value.map(branch => ({ value: branch.id, label: pickerLabel(branch) })),
 ])
 const loading = ref(true)
 const err = ref('')
@@ -270,7 +271,7 @@ const periodLabel = computed(() => ({ today: 'Today', this_week: 'This week', th
 const currencyMark = computed(() => currencyMeta(currency.value).symbol.trim())
 const branchLabel = computed(() => {
   const selected = branches.value.find(branch => branch.id === (activeBranchId.value || branchId.value))
-  return selected ? selected.code : 'All branches'
+  return selected ? pickerLabel(selected) : 'All branches'
 })
 const selectedIncomeDisplay = computed(() => formatMoney(amountOf(data.value, 'income'), currency.value))
 const selectedExpenseDisplay = computed(() => formatMoney(amountOf(data.value, 'expense'), currency.value))

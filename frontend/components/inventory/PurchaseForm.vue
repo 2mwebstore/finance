@@ -55,7 +55,7 @@ import { ArrowLeft, Truck } from 'lucide-vue-next'
 import type { Currency, DiscountMode, DocLineForm, Paged, Product, Purchase } from '~/types/api'
 import { useToast } from '~/composables/useToast'
 import { useFormErrors } from '~/composables/useFormErrors'
-import { useBranchOptions } from '~/composables/useBranchOptions'
+import { branchLabel, useBranchOptions } from '~/composables/useBranchOptions'
 import { usePaymentMethods } from '~/composables/usePaymentMethods'
 import { useCurrency } from '~/composables/useCurrency'
 import { rule } from '~/utils/validation'
@@ -70,7 +70,7 @@ const route = useRoute()
 const toast = useToast()
 const canApprove = computed(() => can('purchases.approve'))
 const { branches } = useBranchOptions('All branches')
-const branchChoices = computed(() => branches.value.map(b => ({ value: b.id, label: `${b.code} — ${b.name}` })))
+const branchChoices = computed(() => branches.value.map(b => ({ value: b.id, label: branchLabel(b) })))
 const { options: paymentOptions, defaultId: defaultPayment, load: loadPayments } = usePaymentMethods()
 const { currencyOptions, rateLabel, defaultCurrency, load: loadCurrency, convert } = useCurrency()
 

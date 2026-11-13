@@ -26,6 +26,9 @@ var (
 	ErrSetupTokenInvalid  = errors.New("invalid setup token")
 )
 
+// ErrBranchInactive: every branch the user works in is inactive (see access.BranchesInactive).
+var ErrBranchInactive = errors.New("your branch is inactive, so you can't sign in")
+
 type Service struct {
 	db    *gorm.DB
 	cfg   *config.Config
@@ -51,7 +54,7 @@ type LoginResult struct {
 func (s *Service) Login(ctx context.Context, identifier, password, userAgent, ip string) (*LoginResult, error) {
 	var user models.User
 	err := s.db.WithContext(ctx).
-		Preload("Roles").
+		Preload("Roles.Permissions").Preload("Branches").
 		Where("username = ? OR email = ?", identifier, identifier).
 		First(&user).Error
 	if err != nil {
@@ -68,6 +71,10 @@ func (s *Service) Login(ctx context.Context, identifier, password, userAgent, ip
 	// Only someone who knows the PIN learns that the account is switched off.
 	if !user.IsActive {
 		return nil, ErrAccountInactive
+	}
+	// Nor can someone whose every branch is inactive (the owner and admins always can).
+	if access.BranchesInactive(&user) {
+		return nil, ErrBranchInactive
 	}
 	s.db.WithContext(ctx).Model(&user).Update("last_login_at", time.Now())
 
@@ -205,11 +212,14 @@ func (s *Service) Refresh(ctx context.Context, refreshPlain, userAgent, ip strin
 	}
 
 	var user models.User
-	if err := s.db.WithContext(ctx).Preload("Roles").First(&user, "id = ?", session.UserID).Error; err != nil {
+	if err := s.db.WithContext(ctx).Preload("Roles.Permissions").Preload("Branches").First(&user, "id = ?", session.UserID).Error; err != nil {
 		return nil, err
 	}
 	if !user.IsActive {
 		return nil, ErrAccountInactive
+	}
+	if access.BranchesInactive(&user) {
+		return nil, ErrBranchInactive
 	}
 
 	newPlain := ""
@@ -380,11 +390,12 @@ func (s *Service) GetUserByID(ctx context.Context, id uuid.UUID) (*models.User, 
 	return &user, nil
 }
 
-// ScopeBranches returns the active branches in the user's data scope (every active branch when
-// all is true). The user needs Roles.Permissions and Branches loaded.
+// ScopeBranches returns the branches in the user's data scope for the branch pickers (every branch
+// when all is true), inactive ones too, after the active ones (is_active false: their data stays
+// in the reports). The user needs Roles.Permissions and Branches loaded.
 func (s *Service) ScopeBranches(ctx context.Context, user *models.User) (branches []models.Branch, all bool) {
 	ids, all := access.BranchScope(user)
-	q := s.db.WithContext(ctx).Where("is_active = ?", true).Order("code ASC")
+	q := s.db.WithContext(ctx).Order("is_active DESC, code ASC")
 	if !all {
 		if len(ids) == 0 {
 			return []models.Branch{}, false

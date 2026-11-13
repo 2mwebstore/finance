@@ -27,7 +27,7 @@
             <h2 class="text-sm font-semibold text-navy">{{ row.name }}</h2>
             <span v-if="row.low" class="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold uppercase text-amber-700">Low stock</span>
           </div>
-          <p class="mt-0.5 text-xs text-muted"><span class="font-mono">{{ row.sku }}</span> · {{ row.branch_code }} — {{ row.branch_name }}<template v-if="row.category_name"> · {{ row.category_name }}</template></p>
+          <p class="mt-0.5 text-xs text-muted"><span class="font-mono">{{ row.sku }}</span> · {{ row.branch_name }}<template v-if="row.category_name"> · {{ row.category_name }}</template></p>
         </div>
         <div class="flex flex-wrap items-center justify-between gap-4 sm:justify-end">
           <div class="text-left sm:text-right">
@@ -69,7 +69,7 @@
       </template>
     </AppModal>
 
-    <AppModal v-model="historyOpen" :title="historyRow ? `${historyRow.name} · ${historyRow.branch_code}` : 'History'" eyebrow="STOCK HISTORY" subtitle="Every change to this stock, newest first." width="640px">
+    <AppModal v-model="historyOpen" :title="historyRow ? `${historyRow.name} · ${historyRow.branch_name}` : 'History'" eyebrow="STOCK HISTORY" subtitle="Every change to this stock, newest first." width="640px">
       <template #icon><History :size="20" /></template>
       <div v-if="historyLoading" class="py-6 text-center text-sm text-muted">Loading…</div>
       <AppAlert v-else-if="historyError" compact :message="historyError" />
@@ -97,7 +97,7 @@ import { History, SlidersHorizontal } from 'lucide-vue-next'
 import type { Paged, Product, ProductCategory, StockMovement, StockRow } from '~/types/api'
 import { useToast } from '~/composables/useToast'
 import { useFormErrors } from '~/composables/useFormErrors'
-import { useBranchOptions } from '~/composables/useBranchOptions'
+import { branchLabel, useBranchOptions } from '~/composables/useBranchOptions'
 import { rule } from '~/utils/validation'
 import { formatMoney } from '~/utils/money'
 import { MOVEMENT_LABELS, formatDocDateTime, formatQty } from '~/utils/inventory'
@@ -107,7 +107,7 @@ const { can } = usePermissions()
 const toast = useToast()
 const canAdjust = computed(() => can('inventory.adjust'))
 const { branches, options: branchOptions, showFilter: showBranchFilter } = useBranchOptions('All branches')
-const branchChoices = computed(() => branches.value.map(b => ({ value: b.id, label: `${b.code} — ${b.name}` })))
+const branchChoices = computed(() => branches.value.map(b => ({ value: b.id, label: branchLabel(b) })))
 
 const items = ref<StockRow[]>([])
 const total = ref(0)

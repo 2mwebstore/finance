@@ -16,8 +16,8 @@ import (
 	"gorm.io/gorm"
 )
 
-// PlatformController: platforms, HQ-platform assignments, weekly win/lose entry, weekly
-// settlements and the win/lose reports. An HQ is a branch: everything is limited to the actor's
+// PlatformController: platforms, HQ-platform assignments, weekly win/lose entry and the win/lose
+// reports. An HQ is a branch: everything is limited to the actor's
 // own branches (owner/admin see every branch).
 type PlatformController struct {
 	svc   *services.PlatformService
@@ -60,7 +60,7 @@ func (pc *PlatformController) ownGroupUnless(c *gin.Context, scope services.Bran
 
 func writePlatformError(c *gin.Context, err error) {
 	switch {
-	case errors.Is(err, services.ErrPlatformNotFound), errors.Is(err, services.ErrPartnerNotFound), errors.Is(err, services.ErrAssignmentNotFound), errors.Is(err, services.ErrSettlementNotFound),
+	case errors.Is(err, services.ErrPlatformNotFound), errors.Is(err, services.ErrPartnerNotFound), errors.Is(err, services.ErrAssignmentNotFound),
 		errors.Is(err, services.ErrGroupNotFound), errors.Is(err, services.ErrEntryNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 	case errors.Is(err, services.ErrBranchAccessDenied):
@@ -219,11 +219,13 @@ func (pc *PlatformController) SavePlatform(c *gin.Context) {
 	if id == nil {
 		status = http.StatusCreated
 	}
-	// counted_weeks: weeks saved before it was put in a group that count in it now.
+	// counted_weeks: weeks saved before it was put in a group that count in it now; reworked_weeks:
+	// saved weeks worked out again at its new rates.
 	c.JSON(status, struct {
 		*models.Platform
-		CountedWeeks int `json:"counted_weeks,omitempty"`
-	}{p, groups.Weeks})
+		CountedWeeks  int `json:"counted_weeks,omitempty"`
+		ReworkedWeeks int `json:"reworked_weeks,omitempty"`
+	}{p, groups.Weeks, groups.Reworked})
 }
 
 // DeletePlatform removes an agent that was never used (a used one can only be turned off).
@@ -441,9 +443,13 @@ func groupDetails(g *services.GroupRow) map[string]interface{} {
 		partners[i] = p.PartnerID.String() + ": " + p.CommissionRate.String()
 	}
 	details := map[string]interface{}{"title": g.Title, "agents": agents, "partners": partners, "currency": g.Currency, "is_active": g.IsActive}
-	// Weeks saved before an agent was put in the group that count in it now.
+	// Weeks saved before an agent was put in the group that count in it now; saved weeks worked out
+	// again at the new rates.
 	if g.CountedWeeks > 0 {
 		details["counted_weeks"] = g.CountedWeeks
+	}
+	if g.ReworkedWeeks > 0 {
+		details["reworked_weeks"] = g.ReworkedWeeks
 	}
 	return details
 }
@@ -680,7 +686,8 @@ type entryReactionInput struct {
 	Reaction string `json:"reaction" binding:"required,max=8"`
 }
 
-// ReactToEntry sets the person's ✅ (yes) or ❌ (no) on an entry; the same again takes it back.
+// ReactToEntry sets the person's ✅ (yes) or ❌ (no), or 📤 (sent) beside it, on an entry; the same
+// again takes it back. The audit log has what was tapped and the person's reaction of that kind now.
 func (pc *PlatformController) ReactToEntry(c *gin.Context) {
 	_, scope, ok := pc.scope(c)
 	if !ok {
@@ -700,13 +707,75 @@ func (pc *PlatformController) ReactToEntry(c *gin.Context) {
 		return
 	}
 	pc.record(c, actorOf(c), "winlose.entry.react", "weekly_entry", id.String(), &entry.BranchID, map[string]interface{}{
-		"title": entry.Title, "week_start": entry.WeekStart.Format("2006-01-02"), "reaction": now,
+		"title": entry.Title, "week_start": entry.WeekStart.Format("2006-01-02"), "reaction": now, "tapped": in.Reaction,
 	})
 	c.JSON(http.StatusOK, gin.H{"reaction": now, "reactions": reactions})
 }
 
-// ReactToResult sets the person's ✅ (yes) or ❌ (no) on an agent's result in an entry; the same
-// again takes it back.
+// ReactToGroup sets the person's ✅ (yes) or ❌ (no), or 📤 (sent), on a group in an entry (Group
+// summary); the same again takes it back.
+func (pc *PlatformController) ReactToGroup(c *gin.Context) {
+	_, scope, ok := pc.scope(c)
+	if !ok {
+		return
+	}
+	id, ok := paramID(c)
+	if !ok {
+		return
+	}
+	groupID, err := uuid.Parse(c.Param("group_id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid group id"})
+		return
+	}
+	var in entryReactionInput
+	if !bindJSON(c, &in) {
+		return
+	}
+	entry, group, now, reactions, err := pc.svc.ReactToGroup(c.Request.Context(), id, groupID, in.Reaction, scope, actorOf(c))
+	if err != nil {
+		writePlatformError(c, err)
+		return
+	}
+	pc.record(c, actorOf(c), "winlose.group.react", "weekly_entry", id.String(), &entry.BranchID, map[string]interface{}{
+		"title": entry.Title, "week_start": entry.WeekStart.Format("2006-01-02"), "group_id": group.ID.String(), "group": group.Title, "reaction": now, "tapped": in.Reaction,
+	})
+	c.JSON(http.StatusOK, gin.H{"reaction": now, "reactions": reactions})
+}
+
+// ReactToAgent sets the person's ✅ (yes) or ❌ (no), or 📤 (sent), on an agent in an entry (Group
+// summary: with or without a result there); the same again takes it back.
+func (pc *PlatformController) ReactToAgent(c *gin.Context) {
+	_, scope, ok := pc.scope(c)
+	if !ok {
+		return
+	}
+	id, ok := paramID(c)
+	if !ok {
+		return
+	}
+	platformID, err := uuid.Parse(c.Param("platform_id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid agent id"})
+		return
+	}
+	var in entryReactionInput
+	if !bindJSON(c, &in) {
+		return
+	}
+	entry, agent, now, reactions, err := pc.svc.ReactToAgent(c.Request.Context(), id, platformID, in.Reaction, scope, actorOf(c))
+	if err != nil {
+		writePlatformError(c, err)
+		return
+	}
+	pc.record(c, actorOf(c), "winlose.agent.react", "weekly_entry", id.String(), &entry.BranchID, map[string]interface{}{
+		"title": entry.Title, "week_start": entry.WeekStart.Format("2006-01-02"), "platform_id": agent.ID.String(), "agent": agent.Code, "reaction": now, "tapped": in.Reaction,
+	})
+	c.JSON(http.StatusOK, gin.H{"reaction": now, "reactions": reactions})
+}
+
+// ReactToResult sets the person's ✅ (yes) or ❌ (no), or 📤 (sent), on an agent's result in an entry
+// (the agent in that entry); the same again takes it back.
 func (pc *PlatformController) ReactToResult(c *gin.Context) {
 	_, scope, ok := pc.scope(c)
 	if !ok {
@@ -725,7 +794,7 @@ func (pc *PlatformController) ReactToResult(c *gin.Context) {
 		writePlatformError(c, err)
 		return
 	}
-	details := map[string]interface{}{"platform_id": result.PlatformID.String(), "week_start": result.WeekStart.Format("2006-01-02"), "reaction": now}
+	details := map[string]interface{}{"platform_id": result.PlatformID.String(), "week_start": result.WeekStart.Format("2006-01-02"), "reaction": now, "tapped": in.Reaction}
 	if result.EntryID != nil {
 		details["entry_id"] = result.EntryID.String()
 	}
@@ -771,74 +840,6 @@ func (pc *PlatformController) ListEntries(c *gin.Context) {
 		return
 	}
 	pagedJSON(c, orEmpty(rows), total, page, size, on)
-}
-
-// ===== Settlements =====
-
-func (pc *PlatformController) ListSettlements(c *gin.Context) {
-	_, scope, ok := pc.scope(c)
-	if !ok {
-		return
-	}
-	// No branch_id: the person's own group.
-	branchID, ok := pc.ownGroupUnless(c, scope)
-	if !ok {
-		return
-	}
-	list, err := pc.svc.Settlements(c.Request.Context(), c.Query("week_start"), branchID, scope)
-	if err != nil {
-		writePlatformError(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"items": orEmpty(list)})
-}
-
-func (pc *PlatformController) FinalizeWeek(c *gin.Context) {
-	_, scope, ok := pc.scope(c)
-	if !ok {
-		return
-	}
-	var in services.FinalizeInput
-	if !bindJSON(c, &in) {
-		return
-	}
-	actor, _ := getActorID(c)
-	st, err := pc.svc.FinalizeWeek(c.Request.Context(), in, scope, actor)
-	if err != nil {
-		writePlatformError(c, err)
-		return
-	}
-	pc.record(c, actor, "winlose.settlement.finalize", "weekly_settlement", st.ID.String(), &st.BranchID, map[string]interface{}{
-		"week_start": st.WeekStart.Format("2006-01-02"), "totals": st.Totals,
-	})
-	c.JSON(http.StatusOK, st)
-}
-
-func (pc *PlatformController) ReopenWeek(c *gin.Context) {
-	_, scope, ok := pc.scope(c)
-	if !ok {
-		return
-	}
-	id, ok := paramID(c)
-	if !ok {
-		return
-	}
-	var in struct {
-		Reason string `json:"reason" binding:"max=512"`
-	}
-	if !bindJSON(c, &in) {
-		return
-	}
-	actor, _ := getActorID(c)
-	st, err := pc.svc.ReopenWeek(c.Request.Context(), id, in.Reason, scope, actor)
-	if err != nil {
-		writePlatformError(c, err)
-		return
-	}
-	pc.record(c, actor, "winlose.settlement.reopen", "weekly_settlement", st.ID.String(), &st.BranchID, map[string]interface{}{
-		"week_start": st.WeekStart.Format("2006-01-02"), "reason": st.ReopenReason,
-	})
-	c.JSON(http.StatusOK, st)
 }
 
 // ===== Reports =====

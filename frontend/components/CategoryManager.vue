@@ -24,6 +24,7 @@
       <button type="button" class="filter-reset" :disabled="!categoryFiltersActive" @click="scopeFilter = ''; statusFilter = ''"><RotateCcw :size="15" /> Reset</button>
     </FilterCard>
 
+    <p v-if="activeBranch" class="text-xs text-muted">Showing {{ activeBranch.name }}’s own categories. Choose All branches in the top bar to see the shared ones.</p>
     <div v-if="loading" class="rounded-xl border border-border bg-white p-6 text-center text-sm text-muted">Loading categories…</div>
     <div v-else-if="error" class="flex items-center justify-between gap-3 rounded-xl border border-red-100 bg-white p-4 text-sm text-expense">
       <span>{{ error }}</span><button class="font-semibold text-primary" @click="load">Try again</button>
@@ -43,7 +44,7 @@
         <button v-if="canEdit(category)" class="action-chip action-edit shrink-0" @click="openEdit(category)"><Pencil :size="13" /> Edit</button>
       </article>
       <div v-if="!categories.length && !search" class="p-8 text-center text-sm text-muted">No categories yet. Add a category to make it available on {{ copy.forms }}.</div>
-      <div v-else-if="!visibleCategories.length" class="p-8 text-center text-sm text-muted">{{ search ? `No categories match “${search}”.` : 'No categories match these filters.' }}</div>
+      <div v-else-if="!visibleCategories.length" class="p-8 text-center text-sm text-muted">{{ search ? `No categories match “${search}”.` : activeBranch && !categoryFiltersActive ? `${activeBranch.name} has no categories of its own yet.` : 'No categories match these filters.' }}</div>
     </div>
 
     <div v-if="modalOpen" class="fixed inset-0 z-[90] flex items-end justify-center bg-slate-950/50 p-0 backdrop-blur-sm sm:items-center sm:p-5" @click.self="close">
@@ -84,6 +85,7 @@
 </template>
 
 <script setup lang="ts">
+import { branchLabel } from '~/composables/useBranchOptions'
 import { Pencil, Plus, RotateCcw, X } from 'lucide-vue-next'
 import type { Branch, Category } from '~/types/api'
 import { useToast } from '~/composables/useToast'
@@ -102,15 +104,16 @@ const copy = computed(() => props.type === 'inv_expense'
 const { api } = useApi()
 const { user } = useAuth()
 const { can, hasFullAccess } = usePermissions()
-const { activeBranchId } = useActiveBranch()
+// A branch picked in the top bar: only that branch's own categories (shared ones show under All branches).
+const { activeBranch, activeBranchId } = useActiveBranch()
 const canManage = computed(() => can(props.type === 'inv_expense' ? 'inventory.manage' : 'categories.manage'))
 const everyBranch = ref<Branch[]>([])
 const branches = computed(() => (activeBranchId.value ? everyBranch.value.filter(b => b.id === activeBranchId.value) : everyBranch.value))
 // Shared categories belong to the owner/admin; branch managers only work in their branches.
 const SHARED = ''
 const scopeOptions = computed(() => [
-  ...(hasFullAccess.value ? [{ value: SHARED, label: 'Shared — every branch' }] : []),
-  ...branches.value.map(branch => ({ value: branch.id, label: `${branch.code} — ${branch.name}` })),
+  ...(hasFullAccess.value && !activeBranchId.value ? [{ value: SHARED, label: 'Shared — every branch' }] : []),
+  ...branches.value.map(branch => ({ value: branch.id, label: branchLabel(branch) })),
 ])
 
 // Filters (client-side: the list is already limited to what this user may see)
@@ -119,8 +122,8 @@ const scopeFilter = ref('')
 const statusFilter = ref('')
 const scopeFilterOptions = computed(() => [
   { value: '', label: 'All categories' },
-  { value: SHARED_ONLY, label: 'Shared only' },
-  ...branches.value.map(branch => ({ value: branch.id, label: `${branch.code} — ${branch.name}` })),
+  ...(activeBranchId.value ? [] : [{ value: SHARED_ONLY, label: 'Shared only' }]),
+  ...branches.value.map(branch => ({ value: branch.id, label: branchLabel(branch) })),
 ])
 const statusOptions = [
   { value: '', label: 'Any status' },
@@ -128,6 +131,7 @@ const statusOptions = [
   { value: 'inactive', label: 'Inactive' },
 ]
 const visibleCategories = computed(() => categories.value.filter((category) => {
+  if (activeBranchId.value && category.branch_id !== activeBranchId.value) return false
   if (scopeFilter.value === SHARED_ONLY && category.branch_id) return false
   if (scopeFilter.value && scopeFilter.value !== SHARED_ONLY && category.branch_id !== scopeFilter.value) return false
   if (statusFilter.value === 'active' && !category.is_active) return false
@@ -201,7 +205,7 @@ watch(search, () => load())
 function openCreate() {
   formMode.value = 'create'
   editing.value = null
-  Object.assign(form, { name: '', code: '', description: '', is_active: true, branch_id: hasFullAccess.value ? SHARED : branches.value[0]?.id || SHARED })
+  Object.assign(form, { name: '', code: '', description: '', is_active: true, branch_id: activeBranchId.value || (hasFullAccess.value ? SHARED : branches.value[0]?.id || SHARED) })
   codeEdited.value = false
   formError.value = ''
   formCheck.reset()

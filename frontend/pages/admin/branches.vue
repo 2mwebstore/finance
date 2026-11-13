@@ -23,9 +23,8 @@
     >
       <template #icon><Building2 :size="20" /></template>
       <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <!-- Codes are made up by the API (BR-001, BR-002…) and can't be changed here -->
-        <label class="space-y-1 text-xs font-medium text-muted">Branch code<input :value="form.code" readonly tabindex="-1" class="w-full cursor-default rounded-lg border border-border bg-canvas px-3 py-2 font-mono text-sm text-muted" :placeholder="editing ? '' : 'Made automatically'" /><small v-if="!editing" class="block font-normal">Given automatically when the branch is created.</small></label>
-        <label class="space-y-1 text-xs font-medium text-muted">Branch name<input v-model.trim="form.name" required minlength="2" maxlength="128" :aria-invalid="formCheck.invalid('name')" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" placeholder="Phnom Penh HQ" /></label>
+        <!-- Branches are shown by name only (the API still gives each a code of its own, BR-001…) -->
+        <label class="space-y-1 text-xs font-medium text-muted sm:col-span-2">Branch name<input v-model.trim="form.name" required minlength="2" maxlength="128" :aria-invalid="formCheck.invalid('name')" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" placeholder="Phnom Penh HQ" /></label>
         <label class="space-y-1 text-xs font-medium text-muted">Address<input v-model.trim="form.address" maxlength="512" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" /></label>
         <label class="space-y-1 text-xs font-medium text-muted">Phone<input v-model.trim="form.phone" maxlength="32" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" /></label>
         <label class="space-y-1 text-xs font-medium text-muted sm:col-span-2">Email<input v-model.trim="form.email" type="email" maxlength="255" :aria-invalid="formCheck.invalid('email')" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" /></label>
@@ -39,18 +38,18 @@
 
     <BranchTelegramModal :model-value="!!telegramBranch" :branch="telegramBranch" @update:model-value="(open) => { if (!open) telegramBranch = null }" @saved="onTelegramSaved" />
 
-    <ListSearch v-model="search" placeholder="Search by code, name, address, phone or email…" />
+    <ListSearch v-model="search" placeholder="Search by name, address, phone or email…" />
+    <p v-if="activeBranch" class="text-xs text-muted">Showing only {{ activeBranch.name }}. Choose All branches in the top bar to see every branch.</p>
     <div v-if="loading" class="text-sm text-muted">Loading…</div>
     <AppAlert v-else-if="err" title="Couldn’t load branches" :message="err"><template #action><button type="button" @click="load">Try again</button></template></AppAlert>
     <ul v-else class="divide-y divide-border rounded-xl border border-border bg-white">
-      <li v-for="branch in items" :key="branch.id" class="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+      <li v-for="branch in shownBranches" :key="branch.id" class="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
         <div class="min-w-0">
           <div class="flex flex-wrap items-center gap-2">
             <h2 class="text-sm font-semibold text-navy">{{ branch.name }}</h2>
             <span class="rounded-full px-2 py-1 text-[10px] font-semibold uppercase" :class="branch.is_active ? 'bg-green-50 text-income' : 'bg-slate-100 text-muted'">{{ branch.is_active ? 'Active' : 'Inactive' }}</span>
             <span v-if="branch.telegram_enabled" class="inline-flex items-center gap-1 rounded-full bg-sky-50 px-2 py-1 text-[10px] font-semibold text-sky-700" title="Sends transaction updates to Telegram"><Send :size="10" /> Telegram</span>
           </div>
-          <p class="mt-1 font-mono text-xs text-muted">{{ branch.code }}</p>
           <p v-if="branch.address || branch.phone || branch.email" class="mt-1 break-words text-xs text-muted">
             <span v-if="branch.address">{{ branch.address }}</span><span v-if="branch.phone"> · {{ branch.phone }}</span><span v-if="branch.email"> · {{ branch.email }}</span>
           </p>
@@ -62,13 +61,13 @@
           <button v-else-if="canManage" type="button" class="action-chip action-success" :disabled="saving" @click="setActive(branch, true)"><RotateCcw :size="13" /> Restore</button>
         </div>
       </li>
-      <li v-if="!items.length" class="p-6 text-center text-sm text-muted">{{ search ? `No branches match “${search}”.` : 'No branches' }}</li>
+      <li v-if="!shownBranches.length" class="p-6 text-center text-sm text-muted">{{ search ? `No branches match “${search}”.` : 'No branches' }}</li>
     </ul>
 
     <div v-if="archiveTarget" class="fixed inset-0 z-[100] flex items-end justify-center bg-slate-950/55 p-0 backdrop-blur-sm sm:items-center sm:p-4" @click.self="archiveTarget = null">
       <section class="w-full max-w-md rounded-t-2xl border border-border bg-white p-5 shadow-2xl sm:rounded-2xl" role="dialog" aria-modal="true" aria-labelledby="archive-branch-title">
         <h2 id="archive-branch-title" class="text-base font-bold text-navy">Delete {{ archiveTarget.name }}?</h2>
-        <p class="mt-2 text-sm text-muted">This archives the branch and keeps its transaction history. You can restore it later.</p>
+        <p class="mt-2 text-sm text-muted">This archives the branch and keeps its transaction history: its data stays in the reports. People who work only in this branch are signed out and can’t sign in until you restore it.</p>
         <AppAlert v-if="archiveError" class="mt-3" compact :message="archiveError" />
         <footer class="mt-5 flex flex-col-reverse gap-2 border-t border-border pt-3 sm:flex-row sm:justify-end">
           <button type="button" class="rounded-lg border border-border px-4 py-2 text-xs font-semibold text-muted" :disabled="saving" @click="archiveTarget = null">Cancel</button>
@@ -92,6 +91,9 @@ const canCreate = canCreateBranch
 const canEdit = computed(() => can('branches.edit', 'branches.manage'))
 const canManage = computed(() => can('branches.manage'))
 const items = ref<Branch[]>([])
+// A branch picked in the top bar: only that branch is listed.
+const { activeBranch, activeBranchId } = useActiveBranch()
+const shownBranches = computed(() => (activeBranchId.value ? items.value.filter(branch => branch.id === activeBranchId.value) : items.value))
 const loading = ref(true)
 const err = ref('')
 const toast = useToast()
@@ -108,7 +110,7 @@ function onTelegramSaved(settings: BranchTelegramSettings) {
   const branch = items.value.find(item => item.id === telegramBranch.value?.id)
   if (branch) branch.telegram_enabled = settings.enabled && !!settings.chat_id
 }
-const form = reactive({ code: '', name: '', address: '', phone: '', email: '' })
+const form = reactive({ name: '', address: '', phone: '', email: '' })
 
 const search = ref('')
 let loadRequest = 0
@@ -138,7 +140,7 @@ const formCheck = reactive(useFormErrors(
 ))
 
 function resetForm() {
-  Object.assign(form, { code: '', name: '', address: '', phone: '', email: '' })
+  Object.assign(form, { name: '', address: '', phone: '', email: '' })
   formError.value = ''
   formCheck.reset()
 }
@@ -147,15 +149,12 @@ function openCreate() {
   editing.value = null
   resetForm()
   showCreate.value = true
-  // Show the code it will get (the API gives it for real when saving).
-  api<{ code: string }>('/branches/next-code').then((r) => { if (showCreate.value && !editing.value) form.code = r.code }).catch(() => {})
 }
 
 function openEdit(branch: Branch) {
   showCreate.value = false
   editing.value = branch
   Object.assign(form, {
-    code: branch.code,
     name: branch.name,
     address: branch.address || '',
     phone: branch.phone || '',
@@ -184,10 +183,9 @@ async function save() {
   // The code is never sent: a new branch gets the next one, and an existing one keeps its own.
   const body = { name: form.name.trim(), address: form.address.trim(), phone: form.phone.trim(), email: form.email.trim() }
   try {
-    let code = editing.value?.code || ''
     if (editing.value) await api(`/branches/${editing.value.id}`, { method: 'PATCH', body })
-    else code = (await api<Branch>('/branches', { method: 'POST', body })).code
-    toast.success(`${code} · ${body.name} is saved.`, { title: editing.value ? 'Branch updated' : 'Branch created' })
+    else await api<Branch>('/branches', { method: 'POST', body })
+    toast.success(`${body.name} is saved.`, { title: editing.value ? 'Branch updated' : 'Branch created' })
     showCreate.value = false
     editing.value = null
     resetForm()

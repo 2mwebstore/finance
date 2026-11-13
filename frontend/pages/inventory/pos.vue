@@ -144,7 +144,7 @@
 import { ArrowLeft, Clock, Minus, Pencil, Plus, ReceiptText, ScanBarcode, ShoppingCart, Trash2, X } from 'lucide-vue-next'
 import type { DocLineForm, Paged, Product, Sale } from '~/types/api'
 import { useToast, sentence } from '~/composables/useToast'
-import { useBranchOptions } from '~/composables/useBranchOptions'
+import { branchLabel as pickerLabel, useBranchOptions } from '~/composables/useBranchOptions'
 import { usePaymentMethods } from '~/composables/usePaymentMethods'
 import { useCurrency } from '~/composables/useCurrency'
 import { useHeldSales, usePosCart, type PosPayment } from '~/composables/usePosCart'
@@ -165,7 +165,7 @@ const { can } = usePermissions()
 const toast = useToast()
 const canViewSales = computed(() => can('sales.view'))
 const { branches } = useBranchOptions()
-const branchChoices = computed(() => branches.value.map(b => ({ value: b.id, label: `${b.code} — ${b.name}` })))
+const branchChoices = computed(() => branches.value.map(b => ({ value: b.id, label: pickerLabel(b) })))
 const { methods: paymentMethods, defaultId: defaultPayment, load: loadPayments } = usePaymentMethods()
 const { active: activeCurrencies, defaultCurrency, load: loadCurrency, fromUSD, convert } = useCurrency()
 
@@ -179,7 +179,7 @@ const branchKey = computed(() => `pos-branch:${user.value?.id || ''}`)
 const branchId = computed(() => cart.value.branch_id)
 const branchLabel = computed(() => {
   const b = branches.value.find(item => item.id === branchId.value)
-  return b ? `${b.code} — ${b.name}` : ''
+  return b ? pickerLabel(b) : ''
 })
 function pickBranch() {
   const ids = branches.value.map(b => b.id)

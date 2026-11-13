@@ -82,7 +82,6 @@ const (
 	WinLoseReportsView         = "winlose-reports.view"
 	WinLoseReportsConsolidated = "winlose-reports.consolidated"
 	WinLoseReportsRates        = "winlose-reports.rates"
-	WinLoseSettlementsFinalize = "winlose-settlements.finalize"
 )
 
 // AllPermissions returns the full list for seeding.
@@ -166,7 +165,6 @@ func AllPermissions() []struct {
 		{WinLoseReportsView, "View Report", "Win/Lose Reports", "The Report and the group summary for your groups, one group at a time"},
 		{WinLoseReportsConsolidated, "View Consolidated Win/Lose", "Win/Lose Reports", "Combined totals across all your groups"},
 		{WinLoseReportsRates, "View Rates in Reports", "Win/Lose Reports", "Show each agent's rate on the Report and the Group Summary; without it the rates are hidden"},
-		{WinLoseSettlementsFinalize, "Finalize Weekly Settlements", "Win/Lose Reports", "Finalize or reopen a group's week; a finalized week can't be changed"},
 	}
 }
 
@@ -216,7 +214,7 @@ func DefaultRoles() map[string]struct {
 				PlatformsView, PlatformsCreate, PlatformsEdit, PlatformsDelete,
 				PlatformAssignmentsView, PlatformAssignmentsCreate, PlatformAssignmentsEdit, PlatformAssignmentsDelete,
 				WinLoseView, WinLoseCreate, WinLoseEdit, WinLoseDelete, WinLoseReact,
-				WinLoseReportsView, WinLoseReportsConsolidated, WinLoseReportsRates, WinLoseSettlementsFinalize,
+				WinLoseReportsView, WinLoseReportsConsolidated, WinLoseReportsRates,
 			},
 		},
 		"manager": {

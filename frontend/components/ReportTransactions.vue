@@ -37,7 +37,7 @@
             <td class="whitespace-nowrap px-3 py-2">{{ formatDocDate(t.transaction_date) }}</td>
             <td class="whitespace-nowrap px-3 py-2 font-mono text-[11px]">{{ t.transaction_number }}</td>
             <td v-if="type === 'expense'" class="px-3 py-2">{{ t.category?.name || '—' }}</td>
-            <td class="whitespace-nowrap px-3 py-2">{{ t.branch?.code || '—' }}</td>
+            <td class="whitespace-nowrap px-3 py-2">{{ t.branch?.name || '—' }}</td>
             <td class="px-3 py-2">{{ t.created_by?.name || '—' }}</td>
             <td class="px-3 py-2 capitalize">{{ t.status }}</td>
             <td class="whitespace-nowrap px-3 py-2 text-right font-semibold tabular-nums" :class="type === 'income' ? 'text-income' : 'text-expense'">{{ formatMoney(t.amount, t.currency as SupportedCurrency) }}</td>
@@ -163,7 +163,7 @@ async function exportCsv() {
     const escape = (value: string) => /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value
     const lines = [
       ['Date', 'Number', 'Category', 'Branch', 'By', 'Status', 'Currency', 'Amount'].join(','),
-      ...rows.map(t => [t.transaction_date.slice(0, 10), t.transaction_number, t.category?.name || '', t.branch?.code || '', t.created_by?.name || '', t.status, t.currency, t.amount].map(v => escape(String(v ?? ''))).join(',')),
+      ...rows.map(t => [t.transaction_date.slice(0, 10), t.transaction_number, t.category?.name || '', t.branch?.name || '', t.created_by?.name || '', t.status, t.currency, t.amount].map(v => escape(String(v ?? ''))).join(',')),
       ...footer.value.map(row => ['', `Total ${props.type} (approved)`, '', '', '', '', row.currency, row.amount].map(v => escape(String(v))).join(',')),
     ]
     const blob = new Blob(['﻿' + lines.join('\n')], { type: 'text/csv;charset=utf-8' })

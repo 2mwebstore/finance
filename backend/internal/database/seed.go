@@ -105,7 +105,7 @@ func EnsureRequiredPermissions(db *gorm.DB) error {
 		permissions.SalesEdit, permissions.PurchasesEdit,
 		// RP: agents (platforms), group agent assignments, Data entry and the Report.
 		permissions.PlatformsView, permissions.WinLoseView, permissions.WinLoseCreate, permissions.WinLoseEdit,
-		permissions.WinLoseReportsView, permissions.WinLoseReportsConsolidated, permissions.WinLoseReportsRates, permissions.WinLoseSettlementsFinalize,
+		permissions.WinLoseReportsView, permissions.WinLoseReportsConsolidated, permissions.WinLoseReportsRates,
 	} {
 		required[code] = []string{permissions.BranchesManage}
 	}
@@ -163,13 +163,15 @@ func EnsureRequiredPermissions(db *gorm.DB) error {
 			}
 		}
 	}
-	return retirePermissions(db, retiredPlatformsManage, retiredAssignmentsManage)
+	return retirePermissions(db, retiredPlatformsManage, retiredAssignmentsManage, retiredSettlementsFinalize)
 }
 
-// Retired permissions: what they allowed is now split into view/add/update/delete.
+// Retired permissions: what the first two allowed is now split into view/add/update/delete; weekly
+// settlements (finalizing and reopening a week) are gone.
 const (
-	retiredPlatformsManage   = "platforms.manage"
-	retiredAssignmentsManage = "platform-assignments.manage"
+	retiredPlatformsManage     = "platforms.manage"
+	retiredAssignmentsManage   = "platform-assignments.manage"
+	retiredSettlementsFinalize = "winlose-settlements.finalize"
 )
 
 // retirePermissions removes permissions no longer in the catalog, from roles too. Run after the

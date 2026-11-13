@@ -101,9 +101,10 @@ type GroupAgent struct {
 
 type GroupRow struct {
 	models.AssignmentGroup
-	// BranchID and BranchCode: the branch the group is in.
+	// BranchID, BranchCode and BranchName: the branch the group is in.
 	BranchID   uuid.UUID    `json:"branch_id"`
 	BranchCode string       `json:"branch_code"`
+	BranchName string       `json:"branch_name"`
 	Agents     []GroupAgent `json:"agents"`
 	// Partners are the same on every agent (by name).
 	Partners []AssignmentPartnerRow `json:"partners"`
@@ -111,8 +112,10 @@ type GroupRow struct {
 	Weeks     int64  `json:"weeks"`
 	CreatedBy string `json:"created_by"`
 	// CountedWeeks (on a save only): weeks saved before an agent was put in the group that count
-	// in it now (see countSavedWeeks).
-	CountedWeeks int `json:"counted_weeks,omitempty"`
+	// in it now (see countSavedWeeks). ReworkedWeeks: saved weeks worked out again at the agents'
+	// new rates (see applyCurrentRates).
+	CountedWeeks  int `json:"counted_weeks,omitempty"`
+	ReworkedWeeks int `json:"reworked_weeks,omitempty"`
 }
 
 type GroupFilter struct {
@@ -226,7 +229,7 @@ func (s *PlatformService) groupRows(ctx context.Context, list []models.Assignmen
 		return nil, err
 	}
 	for i, g := range list {
-		row := GroupRow{AssignmentGroup: g, BranchID: g.BranchID, BranchCode: branches[g.BranchID].Code, Agents: []GroupAgent{}, Partners: []AssignmentPartnerRow{}, Weeks: weeks[g.ID], CreatedBy: names[g.CreatedByID]}
+		row := GroupRow{AssignmentGroup: g, BranchID: g.BranchID, BranchCode: branches[g.BranchID].Code, BranchName: branches[g.BranchID].Name, Agents: []GroupAgent{}, Partners: []AssignmentPartnerRow{}, Weeks: weeks[g.ID], CreatedBy: names[g.CreatedByID]}
 		mine := agents[g.ID]
 		sort.Slice(mine, func(a, b int) bool { return agentBefore(mine[a].PlatformCode, mine[b].PlatformCode) })
 		for _, a := range mine {
@@ -319,8 +322,8 @@ func (s *PlatformService) GroupByID(ctx context.Context, id uuid.UUID, scope Bra
 
 // UpdateGroup changes a group's title, agents (each at its rate) and currency, and takes off any
 // partners it had. An agent taken out is ended if weeks were entered for it (history), else
-// removed; one put in starts today (or on the group's first day, if that is later). Weeks already
-// saved keep what they were worked out with.
+// removed; one put in starts today (or on the group's first day, if that is later). Saved weeks
+// are worked out again at the agents' new rates and types.
 func (s *PlatformService) UpdateGroup(ctx context.Context, id uuid.UUID, in GroupUpdateInput, scope BranchScope, actor uuid.UUID) (before, after *GroupRow, err error) {
 	title, err := groupTitle(in.Title)
 	if err != nil {
@@ -337,7 +340,7 @@ func (s *PlatformService) UpdateGroup(ctx context.Context, id uuid.UUID, in Grou
 	if before, err = s.groupRow(ctx, id); err != nil {
 		return nil, nil, err
 	}
-	counted := 0
+	counted, reworked := 0, 0
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		g, err := lockGroup(tx, id, scope)
 		if err != nil {
@@ -398,6 +401,9 @@ func (s *PlatformService) UpdateGroup(ctx context.Context, id uuid.UUID, in Grou
 				return err
 			}
 		}
+		if reworked, err = applyCurrentRates(tx, func(q *gorm.DB) *gorm.DB { return q.Where("g.group_id = ?", g.ID) }); err != nil {
+			return err
+		}
 		return tx.Model(g).Updates(map[string]interface{}{"title": title, "currency": plan.currency, "updated_at": now}).Error
 	})
 	if err != nil {
@@ -406,7 +412,7 @@ func (s *PlatformService) UpdateGroup(ctx context.Context, id uuid.UUID, in Grou
 	if after, err = s.groupRow(ctx, id); err != nil {
 		return nil, nil, err
 	}
-	after.CountedWeeks = counted
+	after.CountedWeeks, after.ReworkedWeeks = counted, reworked
 	return before, after, nil
 }
 
@@ -477,11 +483,13 @@ type GroupChanges struct {
 	Changed []string `json:"changed,omitempty"`
 	// Weeks: weeks saved before it was put in a group that count in it now (see countSavedWeeks).
 	Weeks int `json:"weeks,omitempty"`
+	// Reworked: saved weeks worked out again at its new rates (applyCurrentRates).
+	Reworked int `json:"reworked,omitempty"`
 }
 
 // Any reports whether the agent's groups changed.
 func (c *GroupChanges) Any() bool {
-	return c != nil && len(c.Added)+len(c.Removed)+len(c.Changed) > 0
+	return c != nil && (len(c.Added)+len(c.Removed)+len(c.Changed) > 0 || c.Reworked > 0)
 }
 
 // setPlatformGroups puts an agent in exactly the groups given, as a group's page would: one taken
@@ -579,6 +587,12 @@ func (s *PlatformService) setPlatformGroups(ctx context.Context, tx *gorm.DB, p 
 		}
 		changes.Added, changes.Weeks = append(changes.Added, g.Title), changes.Weeks+counted
 	}
+	// Its saved weeks take its new rates and types.
+	reworked, err := applyCurrentRates(tx, func(q *gorm.DB) *gorm.DB { return q.Where("r.platform_id = ?", p.ID) })
+	if err != nil {
+		return nil, err
+	}
+	changes.Reworked = reworked
 	return changes, nil
 }
 
@@ -587,8 +601,8 @@ func (s *PlatformService) setPlatformGroups(ctx context.Context, tx *gorm.DB, p 
 // week): each week from the assignment's first day on, saved while the agent wasn't in that group,
 // gets its Total in the group at the assignment's rate and type (with the formula the week was
 // saved with), and the result's Total and rate become its groups' added up again. Older weeks,
-// finalized weeks, weeks of a group that is turned off and weeks saved under an assignment from
-// before groups are left as they are. It returns how many weeks now count in a group.
+// weeks of a group that is turned off and weeks saved under an assignment from before groups are
+// left as they are. It returns how many weeks now count in a group.
 func countSavedWeeks(tx *gorm.DB, made []Assignment) (int, error) {
 	counted := 0
 	now := time.Now()
@@ -605,9 +619,7 @@ func countSavedWeeks(tx *gorm.DB, made []Assignment) (int, error) {
 		}
 		q := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("branch_id = ? AND platform_id = ? AND week_end >= ?", a.BranchID, a.PlatformID, dayString(a.StartsOn)).
-			Where("NOT EXISTS (SELECT 1 FROM weekly_group_results g WHERE g.result_id = weekly_platform_results.id AND (g.group_id = ? OR g.group_id IS NULL))", *a.GroupID).
-			Where(`NOT EXISTS (SELECT 1 FROM weekly_settlements st WHERE st.branch_id = weekly_platform_results.branch_id
-				AND st.week_start = weekly_platform_results.week_start AND st.status = ? AND st.deleted_at IS NULL)`, models.SettlementFinalized)
+			Where("NOT EXISTS (SELECT 1 FROM weekly_group_results g WHERE g.result_id = weekly_platform_results.id AND (g.group_id = ? OR g.group_id IS NULL))", *a.GroupID)
 		if a.EndsOn != nil {
 			q = q.Where("week_start <= ?", dayString(*a.EndsOn))
 		}

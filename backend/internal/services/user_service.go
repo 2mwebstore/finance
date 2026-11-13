@@ -31,11 +31,15 @@ func NewUserService(db *gorm.DB) *UserService {
 	return &UserService{db: db}
 }
 
+// CreateUserInput: the Users form sends Name (full_name), Username (name@branch, what they sign in
+// with) and Info. Email is optional: without one it is the username (it must be unique, and signing
+// in takes either).
 type CreateUserInput struct {
 	Username        string   `json:"username" binding:"required,min=3,max=64"`
-	Email           string   `json:"email" binding:"required,email"`
+	Email           string   `json:"email" binding:"omitempty,email"`
 	Password        string   `json:"password" binding:"required,min=4,max=64"`
-	FullName        string   `json:"full_name" binding:"required,min=2"`
+	FullName        string   `json:"full_name" binding:"required,min=2,max=128"`
+	Info            string   `json:"info" binding:"max=255"`
 	RoleCodes       []string `json:"role_codes"`
 	BranchIDs       []string `json:"branch_ids"`
 	ManagerIDs      []string `json:"manager_ids"`
@@ -43,22 +47,30 @@ type CreateUserInput struct {
 	IsActive        *bool    `json:"is_active"`
 }
 
+// UpdateUserInput: a new username (the Users form changes it with the Name or branch) takes the
+// email along when the email was the old username.
 type UpdateUserInput struct {
+	Username        *string `json:"username" binding:"omitempty,min=3,max=64"`
 	Email           *string `json:"email" binding:"omitempty,email"`
-	FullName        *string `json:"full_name" binding:"omitempty,min=2"`
+	FullName        *string `json:"full_name" binding:"omitempty,min=2,max=128"`
+	Info            *string `json:"info" binding:"omitempty,max=255"`
 	DefaultBranchID *string `json:"default_branch_id"`
 }
 
 func (s *UserService) Create(ctx context.Context, in CreateUserInput, actorID uuid.UUID, actorIsSuperAdmin bool) (*models.User, error) {
 	username := strings.TrimSpace(in.Username)
 	email := strings.ToLower(strings.TrimSpace(in.Email))
+	if email == "" {
+		email = strings.ToLower(username)
+	}
 
+	// A username can't be anyone's username or email (signing in takes either).
 	var count int64
-	s.db.WithContext(ctx).Model(&models.User{}).Where("username = ?", username).Count(&count)
+	s.db.WithContext(ctx).Model(&models.User{}).Where("username = ? OR email = ?", username, username).Count(&count)
 	if count > 0 {
 		return nil, ErrUsernameTaken
 	}
-	s.db.WithContext(ctx).Model(&models.User{}).Where("email = ?", email).Count(&count)
+	s.db.WithContext(ctx).Model(&models.User{}).Where("email = ? OR username = ?", email, email).Count(&count)
 	if count > 0 {
 		return nil, ErrEmailTaken
 	}
@@ -79,6 +91,7 @@ func (s *UserService) Create(ctx context.Context, in CreateUserInput, actorID uu
 		Email:        email,
 		PasswordHash: hash,
 		FullName:     strings.TrimSpace(in.FullName),
+		Info:         strings.TrimSpace(in.Info),
 		IsActive:     active,
 		IsSuperAdmin: false, // only setup or explicit super_admin role assignment by super admin
 	}
@@ -172,6 +185,21 @@ func (s *UserService) Update(ctx context.Context, id uuid.UUID, in UpdateUserInp
 
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		updates := map[string]interface{}{}
+		if in.Username != nil {
+			username := strings.TrimSpace(*in.Username)
+			if username != user.Username {
+				var c int64
+				tx.Model(&models.User{}).Where("(username = ? OR email = ?) AND id != ?", username, username, id).Count(&c)
+				if c > 0 {
+					return ErrUsernameTaken
+				}
+				updates["username"] = username
+				// An email that was the username follows it.
+				if in.Email == nil && strings.EqualFold(user.Email, user.Username) {
+					updates["email"] = strings.ToLower(username)
+				}
+			}
+		}
 		if in.Email != nil {
 			email := strings.ToLower(strings.TrimSpace(*in.Email))
 			var c int64
@@ -183,6 +211,9 @@ func (s *UserService) Update(ctx context.Context, id uuid.UUID, in UpdateUserInp
 		}
 		if in.FullName != nil {
 			updates["full_name"] = strings.TrimSpace(*in.FullName)
+		}
+		if in.Info != nil {
+			updates["info"] = strings.TrimSpace(*in.Info)
 		}
 		if in.DefaultBranchID != nil {
 			if *in.DefaultBranchID == "" {
@@ -303,7 +334,7 @@ func (s *UserService) List(ctx context.Context, f UserListFilter) ([]models.User
 	q := s.db.WithContext(ctx).Model(&models.User{})
 	if strings.TrimSpace(f.Search) != "" {
 		like := textsearch.Contains(f.Search)
-		q = q.Where("username LIKE ? OR email LIKE ? OR full_name LIKE ?", like, like, like)
+		q = q.Where("username LIKE ? OR email LIKE ? OR full_name LIKE ? OR info LIKE ?", like, like, like, like)
 	}
 	if f.IsActive != nil {
 		q = q.Where("is_active = ?", *f.IsActive)

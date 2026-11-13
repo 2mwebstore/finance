@@ -1,7 +1,7 @@
 // Package winlose works out Jame-PS (shown in the app as "Total") from a platform's weekly
-// win/lose. The formula lives only here. Each formula is a version: a saved week keeps the rate
-// and currency it was worked out with; a finalized week also keeps its version, while weeks not
-// finalized follow the current one (see PlatformService.RecalculateOpenWeeks).
+// win/lose. The formula lives only here. Each formula is a version: a saved week keeps the currency
+// it was worked out with and follows the current version and its agents' current rates (see
+// PlatformService.RecalculateWeeks and ApplyCurrentRates).
 package winlose
 
 import (

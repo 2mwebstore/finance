@@ -9,9 +9,11 @@
     <article class="rounded-xl border border-border bg-white p-4 sm:p-5">
       <h2 class="text-sm font-semibold text-navy">Account details</h2>
       <dl class="mt-3 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
-        <div><dt class="text-xs text-muted">Full name</dt><dd class="mt-1 font-medium text-navy">{{ user?.full_name || '—' }}</dd></div>
-        <div><dt class="text-xs text-muted">Username</dt><dd class="mt-1 font-medium text-navy">{{ user?.username || '—' }}</dd></div>
-        <div><dt class="text-xs text-muted">Email</dt><dd class="mt-1 break-all font-medium text-navy">{{ user?.email || '—' }}</dd></div>
+        <div><dt class="text-xs text-muted">Name</dt><dd class="mt-1 font-medium text-navy">{{ user?.full_name || '—' }}</dd></div>
+        <div><dt class="text-xs text-muted">Username</dt><dd class="mt-1 break-all font-medium text-navy">{{ user?.username || '—' }}</dd></div>
+        <div v-if="user?.info"><dt class="text-xs text-muted">Info</dt><dd class="mt-1 font-medium text-navy">{{ user.info }}</dd></div>
+        <!-- Only an email of its own (without one it is the username) -->
+        <div v-if="user?.email && user.email.toLowerCase() !== user.username.toLowerCase()"><dt class="text-xs text-muted">Email</dt><dd class="mt-1 break-all font-medium text-navy">{{ user.email }}</dd></div>
         <div><dt class="text-xs text-muted">Roles</dt><dd class="mt-1 font-medium text-navy">{{ (user?.roles || []).join(', ') || '—' }}</dd></div>
       </dl>
     </article>

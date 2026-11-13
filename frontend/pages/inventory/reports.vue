@@ -137,7 +137,7 @@ const columns = computed<Column[]>(() => {
     case 'low':
       return [
         { key: 'name', label: 'Product', format: row => `${row.name} (${row.sku})` },
-        { key: 'branch_code', label: 'Branch', format: plain('branch_code') },
+        { key: 'branch_name', label: 'Branch', format: plain('branch_name') },
         { key: 'quantity', label: 'In stock', num: true, format: qty('quantity'), csv: plain('quantity'), cls: () => 'text-amber-700 font-semibold' },
         { key: 'reorder_level', label: 'Low-stock level', num: true, format: qty('reorder_level'), csv: plain('reorder_level') },
       ]

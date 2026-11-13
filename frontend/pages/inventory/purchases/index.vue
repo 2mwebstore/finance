@@ -27,7 +27,7 @@
             <span class="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-blue-50 text-primary"><Truck :size="18" /></span>
             <div class="min-w-0">
               <div class="flex flex-wrap items-center gap-2"><strong class="font-mono text-sm text-navy">{{ purchase.number }}</strong><InventoryStatusBadge :status="purchase.status" /></div>
-              <p class="mt-0.5 truncate text-xs text-muted">{{ formatDocDate(purchase.purchase_date) }} · {{ purchase.branch_code }}<template v-if="purchase.supplier"> · {{ purchase.supplier }}</template> · {{ purchase.lines.length }} {{ purchase.lines.length === 1 ? 'item' : 'items' }}</p>
+              <p class="mt-0.5 truncate text-xs text-muted">{{ formatDocDate(purchase.purchase_date) }} · {{ purchase.branch_name }}<template v-if="purchase.supplier"> · {{ purchase.supplier }}</template> · {{ purchase.lines.length }} {{ purchase.lines.length === 1 ? 'item' : 'items' }}</p>
               <p class="mt-0.5 text-[11px] text-slate-400">by {{ purchase.created_by }}<template v-if="purchase.decided_by"> · {{ purchase.status === 'rejected' ? 'rejected' : 'approved' }} by {{ purchase.decided_by }}</template></p>
             </div>
           </div>
@@ -42,7 +42,7 @@
     <InventoryPager v-model:page="page" :page-size="pageSize" :total="total" />
 
     <!-- Details -->
-    <AppModal :model-value="!!detail" :title="detail?.number || ''" eyebrow="PURCHASE" :subtitle="detail ? `${formatDocDate(detail.purchase_date)} · ${detail.branch_code} — ${detail.branch_name}` : ''" width="640px" @update:model-value="(open) => { if (!open) detail = null }">
+    <AppModal :model-value="!!detail" :title="detail?.number || ''" eyebrow="PURCHASE" :subtitle="detail ? `${formatDocDate(detail.purchase_date)} · ${detail.branch_name}` : ''" width="640px" @update:model-value="(open) => { if (!open) detail = null }">
       <template #icon><Truck :size="20" /></template>
       <template v-if="detail">
         <div class="flex flex-wrap items-center gap-2 text-xs text-muted">

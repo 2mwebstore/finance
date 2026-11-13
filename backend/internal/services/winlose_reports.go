@@ -36,7 +36,8 @@ type ReportFilter struct {
 	// EntryID: only one data entry's results.
 	EntryID *uuid.UUID
 	// Everyone: every switched-on group and agent is listed, at 0 when it has no results in the
-	// range (the Report and the Group summary). Not with PartnerID, ByWeek or EntryID.
+	// range (the Group summary). With EntryID, those of the entry's branch, in the entry's lines too
+	// (with their ✅ / ❌ there). Not with PartnerID or ByWeek.
 	Everyone bool
 }
 
@@ -83,8 +84,9 @@ type ReportLine struct {
 	Partners []LineShare `json:"partners"`
 	// Formula: the version every week of the line was worked out with ("" when they differ).
 	Formula string `json:"formula"`
-	// ResultID: an entry's line is the agent's one result in it (by_entry), with people's ✅ and ❌
-	// on it, the same as on the agent's row in Data entry. Left out of lines that add results up.
+	// ResultID: an entry's line is the agent's one result in it (by_entry). Reactions: people's ✅
+	// and ❌ on the agent in the entry, the same as on its row in Data entry (also on a line at 0 in
+	// an entry: Everyone). Left out of lines that add results up.
 	ResultID  *uuid.UUID      `json:"result_id,omitempty"`
 	Reactions []EntryReaction `json:"reactions,omitempty"`
 	Sums
@@ -115,6 +117,8 @@ type GroupTotalsRow struct {
 	RateMax decimal.Decimal `json:"rate_max"`
 	Formula string          `json:"formula"`
 	Totals  []Sums          `json:"totals"`
+	// Reactions: people's ✅ and ❌ on the group in the report's one entry (entry_id; not otherwise).
+	Reactions []EntryReaction `json:"reactions,omitempty"`
 }
 
 // ReportEntry is a data entry of a report by entry (nil ID: results saved before entries), with
@@ -305,18 +309,6 @@ func (s *PlatformService) Report(ctx context.Context, f ReportFilter, scope Bran
 	if out.Weeks, err = weekTotals(results(), jame); err != nil {
 		return nil, err
 	}
-	if f.ByEntry {
-		entryLines, _, _, err := s.reportLines(ctx, results, "r.entry_id, "+group, rate, jame, formula, f.PartnerID)
-		if err != nil {
-			return nil, err
-		}
-		if err := s.withResultReactions(ctx, results, entryLines); err != nil {
-			return nil, err
-		}
-		if out.Entries, err = s.reportEntries(ctx, entryLines); err != nil {
-			return nil, err
-		}
-	}
 	for key, p := range parts {
 		p.Totals = sortedSums(partSums[key])
 		out.Partners = append(out.Partners, *p)
@@ -333,8 +325,44 @@ func (s *PlatformService) Report(ctx context.Context, f ReportFilter, scope Bran
 		p.Totals = sortedSums(platSums[id])
 		out.Platforms = append(out.Platforms, *p)
 	}
-	if f.Everyone && f.PartnerID == nil && !f.ByWeek && f.EntryID == nil {
-		if err := s.addEveryone(ctx, out, f, from, to, branchID, scope); err != nil {
+	// Everyone at 0: over the dates, the branches covered; in one data entry, the entry's branch (and
+	// they are in its lines too).
+	var everyoneIn *uuid.UUID
+	if f.Everyone && f.PartnerID == nil && !f.ByWeek {
+		if f.EntryID == nil {
+			if err := s.addEveryone(ctx, out, f, from, to, branchID, scope); err != nil {
+				return nil, err
+			}
+		} else if entry, err := findEntry(s.db.WithContext(ctx), f.EntryID.String(), scope, false); err == nil && (branchID == nil || *branchID == entry.BranchID) {
+			if err := s.addEveryone(ctx, out, f, from, to, &entry.BranchID, scope); err != nil {
+				return nil, err
+			}
+			everyoneIn = &entry.ID
+		}
+	}
+	if f.EntryID != nil {
+		if err := s.withGroupReactions(ctx, *f.EntryID, out.Groups); err != nil {
+			return nil, err
+		}
+	}
+	if f.ByEntry {
+		entryLines, _, _, err := s.reportLines(ctx, results, "r.entry_id, "+group, rate, jame, formula, f.PartnerID)
+		if err != nil {
+			return nil, err
+		}
+		if everyoneIn != nil {
+			for _, l := range out.Lines {
+				if l.Entries == 0 { // at 0: no results
+					l.EntryID = everyoneIn
+					entryLines = append(entryLines, l)
+				}
+			}
+			sortLines(entryLines)
+		}
+		if err := s.withAgentReactions(ctx, results, entryLines); err != nil {
+			return nil, err
+		}
+		if out.Entries, err = s.reportEntries(ctx, entryLines); err != nil {
 			return nil, err
 		}
 	}
@@ -481,21 +509,43 @@ func (s *PlatformService) addEveryone(ctx context.Context, out *WinLoseReport, f
 		l := ReportLine{PlatformID: id, PlatformCode: p.Code, PlatformName: p.Name, Partners: []LineShare{}, Sums: Sums{Currency: p.DefaultCurrency}}
 		if f.GroupID != nil {
 			l.RateMin, l.RateMax, l.Formula = rateIn(*f.GroupID, id)
+		} else {
+			// Its current rates in its switched-on groups added up, as a result's line has them (none:
+			// in no group, no rate).
+			in := false
+			for _, g := range groups {
+				if !g.IsActive || len(inGroup[[2]uuid.UUID{g.ID, id}]) == 0 {
+					continue
+				}
+				lo, hi, _ := rateIn(g.ID, id)
+				l.RateMin, l.RateMax, in = l.RateMin.Add(lo), l.RateMax.Add(hi), true
+			}
+			if in {
+				l.Formula = formula.Version
+			}
 		}
 		out.Lines = append(out.Lines, l)
 		out.Platforms = append(out.Platforms, PlatformTotals{PlatformID: id, PlatformCode: p.Code, PlatformName: p.Name, Totals: []Sums{{Currency: p.DefaultCurrency}}})
 	}
 	sortLines(out.Lines)
 
-	// Groups (not for one group): the agent's, or every switched-on one.
-	if f.GroupID != nil {
-		return nil
-	}
+	// Groups: the agent's, or every switched-on one; for one group, that one (at 0 when it has no
+	// results: Group summary's ✅ / ❌ on it).
 	has := map[uuid.UUID]int{}
 	for i, g := range out.Groups {
 		if g.GroupID != nil {
 			has[*g.GroupID] = i
 		}
+	}
+	if f.GroupID != nil {
+		if g, ok := groupOf[*f.GroupID]; ok && g.IsActive && f.PlatformID == nil {
+			if _, listed := has[g.ID]; !listed {
+				id := g.ID
+				out.Groups = append(out.Groups, GroupTotalsRow{GroupID: &id, Title: g.Title, Totals: zeroSums(groupCurrencies(g, members[g.ID], platformOf))})
+				sortGroups(out.Groups)
+			}
+		}
+		return nil
 	}
 	for _, g := range groups {
 		if !g.IsActive {
@@ -622,7 +672,7 @@ func sortGroups(groups []GroupTotalsRow) {
 // Switched off: an agent, and a group with everything in it, are left out of the reports (and
 // Data entry) until switched on again; nothing is deleted. A result is shown when its agent is on
 // and it is in no group or in a switched-on one, and its Total and rate are its switched-on groups'
-// parts (a result in no group: its own). Settlements still add up every result of the week.
+// parts (a result in no group: its own).
 const (
 	shownResult = "r.platform_id IN (SELECT id FROM platforms WHERE is_active = 1) AND (" +
 		"NOT EXISTS (SELECT 1 FROM weekly_group_results vg WHERE vg.result_id = r.id AND vg.group_id IS NOT NULL) OR " +
@@ -837,36 +887,87 @@ func (s *PlatformService) reportEntries(ctx context.Context, lines []ReportLine)
 	return out, nil
 }
 
-// withResultReactions gives each line of a data entry its result (an agent has one in an entry)
-// and people's ✅ and ❌ on it. Lines of results saved before entries can add up several weeks, so
-// they get none.
-func (s *PlatformService) withResultReactions(ctx context.Context, results func() *gorm.DB, lines []ReportLine) error {
+// withGroupReactions gives each titled group its reactions in the entry (Group summary's ✅ / ❌ on a
+// group).
+func (s *PlatformService) withGroupReactions(ctx context.Context, entryID uuid.UUID, groups []GroupTotalsRow) error {
+	var ids []uuid.UUID
+	for _, g := range groups {
+		if g.GroupID != nil {
+			ids = append(ids, *g.GroupID)
+		}
+	}
+	reactions, err := s.reactionsWhere(ctx, groupReactions, ids, map[string]interface{}{"entry_id": entryID})
+	if err != nil {
+		return err
+	}
+	for i := range groups {
+		if groups[i].GroupID != nil {
+			groups[i].Reactions = orNone(reactions[*groups[i].GroupID])
+		}
+	}
+	return nil
+}
+
+// withAgentReactions gives each line of a data entry its result (an agent has one in an entry, or
+// none: a line at 0) and people's ✅ and ❌ on the agent in the entry. Lines of results saved before
+// entries can add up several weeks, so they get none.
+func (s *PlatformService) withAgentReactions(ctx context.Context, results func() *gorm.DB, lines []ReportLine) error {
 	var rows []struct {
 		ID, EntryID, PlatformID uuid.UUID
 	}
 	if err := results().Where("r.entry_id IS NOT NULL").Select("r.id, r.entry_id, r.platform_id").Scan(&rows).Error; err != nil {
 		return err
 	}
-	resultOf := make(map[string]uuid.UUID, len(rows))
-	ids := make([]uuid.UUID, len(rows))
-	for i, r := range rows {
-		resultOf[r.EntryID.String()+"|"+r.PlatformID.String()] = r.ID
-		ids[i] = r.ID
+	resultOf := make(map[[2]uuid.UUID]uuid.UUID, len(rows))
+	for _, r := range rows {
+		resultOf[[2]uuid.UUID{r.EntryID, r.PlatformID}] = r.ID
 	}
-	reactions, err := s.reactionsOf(ctx, resultReactions, ids)
+	var entries, agents []uuid.UUID
+	for _, l := range lines {
+		if l.EntryID != nil && l.Entries <= 1 {
+			entries, agents = append(entries, *l.EntryID), append(agents, l.PlatformID)
+		}
+	}
+	reactions, err := s.agentReactionsIn(ctx, entries, agents)
 	if err != nil {
 		return err
 	}
 	for i := range lines {
 		l := &lines[i]
-		if l.EntryID == nil || l.Entries != 1 {
+		if l.EntryID == nil || l.Entries > 1 {
 			continue
 		}
-		if id, ok := resultOf[l.EntryID.String()+"|"+l.PlatformID.String()]; ok {
-			l.ResultID, l.Reactions = &id, orNone(reactions[id])
+		key := [2]uuid.UUID{*l.EntryID, l.PlatformID}
+		if id, ok := resultOf[key]; ok {
+			l.ResultID = &id
 		}
+		l.Reactions = orNone(reactions[key])
 	}
 	return nil
+}
+
+// agentReactionsIn lists the reactions on agents in entries, by entry and agent, as they were last
+// given.
+func (s *PlatformService) agentReactionsIn(ctx context.Context, entries, agents []uuid.UUID) (map[[2]uuid.UUID][]EntryReaction, error) {
+	out := map[[2]uuid.UUID][]EntryReaction{}
+	if len(entries) == 0 {
+		return out, nil
+	}
+	var rows []models.WeeklyAgentReaction
+	if err := s.db.WithContext(ctx).Where("entry_id IN ? AND platform_id IN ?", entries, agents).Order("updated_at, id").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	users := make([]uuid.UUID, len(rows))
+	for i, r := range rows {
+		users[i] = r.UserID
+	}
+	names := s.userNames(ctx, users)
+	for _, r := range rows {
+		key := [2]uuid.UUID{r.EntryID, r.PlatformID}
+		out[key] = append(out[key], reactionsOfRow(r.Reaction, r.UpdatedAt, r.SentAt, r.UserID, names[r.UserID])...)
+	}
+	byWhen(out)
+	return out, nil
 }
 
 // weekTotals adds the results up by week and currency (jame: the Total's column).

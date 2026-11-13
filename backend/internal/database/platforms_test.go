@@ -31,7 +31,7 @@ func TestPlatformMigrationMatchesStartupSQL(t *testing.T) {
 			t.Errorf("migration 000013 doesn't let %s.%s be empty", c.table, c.column)
 		}
 	}
-	for _, fill := range []string{fillResultEntries, fillGroupResults} {
+	for _, fill := range []string{fillResultEntries, fillGroupResults, fillAgentReactions} {
 		if !strings.Contains(migration, squash(fill)) {
 			t.Errorf("migration 000013 is missing:\n%s", fill)
 		}

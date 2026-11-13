@@ -30,7 +30,7 @@
             <span class="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-emerald-50 text-income"><ShoppingCart :size="18" /></span>
             <div class="min-w-0">
               <div class="flex flex-wrap items-center gap-2"><strong class="font-mono text-sm text-navy">{{ sale.number }}</strong><InventoryStatusBadge :status="sale.status" /></div>
-              <p class="mt-0.5 truncate text-xs text-muted">{{ formatDocDate(sale.sale_date) }} · {{ sale.branch_code }}<template v-if="sale.customer"> · {{ sale.customer }}</template><template v-if="sale.due_date"> · due {{ formatDocDate(sale.due_date) }}</template> · {{ sale.lines.length }} {{ sale.lines.length === 1 ? 'item' : 'items' }}</p>
+              <p class="mt-0.5 truncate text-xs text-muted">{{ formatDocDate(sale.sale_date) }} · {{ sale.branch_name }}<template v-if="sale.customer"> · {{ sale.customer }}</template><template v-if="sale.due_date"> · due {{ formatDocDate(sale.due_date) }}</template> · {{ sale.lines.length }} {{ sale.lines.length === 1 ? 'item' : 'items' }}</p>
               <p class="mt-0.5 text-[11px] text-slate-400">by {{ sale.created_by }}</p>
             </div>
           </div>
@@ -45,7 +45,7 @@
     <InventoryPager v-model:page="page" :page-size="pageSize" :total="total" />
 
     <!-- Details -->
-    <AppModal :model-value="!!detail" :title="detail?.number || ''" eyebrow="SALE" :subtitle="detail ? `${formatDocDate(detail.sale_date)} · ${detail.branch_code} — ${detail.branch_name}` : ''" width="640px" @update:model-value="(open) => { if (!open) detail = null }">
+    <AppModal :model-value="!!detail" :title="detail?.number || ''" eyebrow="SALE" :subtitle="detail ? `${formatDocDate(detail.sale_date)} · ${detail.branch_name}` : ''" width="640px" @update:model-value="(open) => { if (!open) detail = null }">
       <template #icon><ShoppingCart :size="20" /></template>
       <template v-if="detail">
         <div class="flex flex-wrap items-center gap-2 text-xs text-muted">

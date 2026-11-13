@@ -2,7 +2,7 @@
   <AppModal
     :model-value="modelValue"
     form
-    :title="branch ? `Telegram · ${branch.code}` : 'Telegram'"
+    :title="branch ? `Telegram · ${branch.name}` : 'Telegram'"
     eyebrow="BRANCH TELEGRAM"
     subtitle="This branch's transaction updates go to its own Telegram chat."
     :busy="saving || testing"
@@ -153,7 +153,7 @@ async function save() {
     })
     apply(result.settings)
     emit('saved', result.settings)
-    toast.success(result.settings.ready ? `${props.branch.code} updates go to Telegram.` : `${props.branch.code} won’t send updates to Telegram.`, { title: 'Telegram saved' })
+    toast.success(result.settings.ready ? `${props.branch.name} updates go to Telegram.` : `${props.branch.name} won’t send updates to Telegram.`, { title: 'Telegram saved' })
   } catch (e: any) {
     if (!formCheck.fromApi(e)) formError.value = e?.data?.error || 'Could not save the Telegram settings.'
   } finally {

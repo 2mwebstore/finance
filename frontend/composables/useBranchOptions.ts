@@ -1,5 +1,11 @@
 import type { Branch } from '~/types/api'
 
+/** A branch in a picker: its name, and "(inactive)" after an inactive one (still listed so its
+ *  data can be looked at in the reports; its people with no other branch can't sign in). */
+export function branchLabel(branch: { name: string; is_active?: boolean }) {
+  return `${branch.name}${branch.is_active === false ? ' (inactive)' : ''}`
+}
+
 /**
  * Branches the signed-in user can see (their roles' data scope), for branch filters on lists.
  * GET /branches is limited the same way; people who cannot call it use scope_branches from
@@ -18,14 +24,14 @@ export function useBranchOptions(allLabel = 'All branches') {
 
   const options = computed(() => [
     { value: '', label: allLabel },
-    ...branches.value.map(branch => ({ value: branch.id, label: `${branch.code} — ${branch.name}` })),
+    ...branches.value.map(branch => ({ value: branch.id, label: branchLabel(branch) })),
   ])
   // A filter only helps when there is more than one branch to choose from.
   const showFilter = computed(() => branches.value.length > 1)
 
   function labelFor(id: string) {
     const branch = branches.value.find(item => item.id === id)
-    return branch ? branch.code : allLabel
+    return branch ? branch.name : allLabel
   }
 
   async function load() {

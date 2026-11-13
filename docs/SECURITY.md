@@ -2,7 +2,7 @@
 
 ## Authentication
 
-- Login: username **or** email + PIN of 4 to 6 digits (people may choose 6 for extra safety)
+- Login: username (name@branch for people added on Users) **or** email + PIN of 4 to 6 digits (people may choose 6 for extra safety)
 - Password hashing: Argon2id (preferred) or bcrypt cost ≥ 12
 - Access token: short-lived JWT (15 min default), stored in memory on client
 - Refresh token: rotating, stored in HttpOnly + Secure + SameSite=Strict cookie

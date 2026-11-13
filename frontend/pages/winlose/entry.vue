@@ -37,16 +37,16 @@
               <td class="px-2 py-2.5 text-[10px] text-muted sm:whitespace-nowrap sm:px-3 sm:text-xs"><span class="block sm:inline">{{ formatDocDate(e.created_at) }}</span><template v-if="e.created_by"><span class="hidden sm:inline"> · </span><span class="block whitespace-nowrap font-medium text-navy sm:inline">{{ e.created_by }}</span></template></td>
               <td class="px-2 py-2.5 sm:px-3">
                 <span class="block font-semibold">{{ e.title }}</span>
-                <span v-if="rp.show.value && e.branch_code" class="block text-[11px] text-muted">{{ e.branch_code }}</span>
+                <span v-if="rp.show.value && e.branch_code" class="block text-[11px] text-muted">{{ e.branch_name || e.branch_code }}</span>
                 <!-- ✅ / ❌: hovering (or tapping) one shows who -->
                 <div class="mt-1"><WinloseEntryReactions :url="`/winlose/entries/${e.id}/reactions`" :reactions="e.reactions || []" /></div>
               </td>
               <td class="px-2 py-2 sm:px-3">
-                <!-- A finalized week can only be viewed. On phones the buttons are icons only. -->
+                <!-- On phones the buttons are icons only. -->
                 <div class="flex justify-end gap-1 sm:flex-wrap sm:gap-1.5">
                   <NuxtLink :to="`/winlose/entries/${e.id}`" class="action-chip" title="View"><Eye :size="13" /> <span class="max-sm:sr-only">View</span></NuxtLink>
-                  <button v-if="!e.locked && (canCreate || canEdit)" type="button" class="action-chip action-edit" title="Update" @click="openEdit(e)"><Pencil :size="13" /> <span class="max-sm:sr-only">Update</span></button>
-                  <button v-if="!e.locked && canDelete" type="button" class="action-chip action-danger" title="Delete" @click="deleting = e"><Trash2 :size="13" /> <span class="max-sm:sr-only">Delete</span></button>
+                  <button v-if="canCreate || canEdit" type="button" class="action-chip action-edit" title="Update" @click="openEdit(e)"><Pencil :size="13" /> <span class="max-sm:sr-only">Update</span></button>
+                  <button v-if="canDelete" type="button" class="action-chip action-danger" title="Delete" @click="deleting = e"><Trash2 :size="13" /> <span class="max-sm:sr-only">Delete</span></button>
                 </div>
               </td>
             </tr>
@@ -71,7 +71,7 @@
       <div v-if="rp.show.value" class="space-y-1">
         <span class="block text-xs font-medium text-muted">Branch</span>
         <SearchSelect v-if="form.mode === 'new' && !sheet?.entry" v-model="form.branch_id" :options="rp.optionsFor(false)" :searchable="false" aria-label="Entry branch" />
-        <p v-else class="h-10 rounded-lg border border-border bg-canvas px-3 py-2.5 text-sm text-muted">{{ sheet?.branch_code }}<template v-if="sheet?.branch_name"> — {{ sheet.branch_name }}</template></p>
+        <p v-else class="h-10 rounded-lg border border-border bg-canvas px-3 py-2.5 text-sm text-muted">{{ sheet?.branch_name || sheet?.branch_code }}</p>
       </div>
       <div class="space-y-1">
         <label for="entry-title" class="block text-xs font-medium text-muted">Title</label>
@@ -84,7 +84,6 @@
       <div v-if="loading" class="text-sm text-muted">Loading the week…</div>
       <AppAlert v-else-if="error" title="Couldn’t load the week" :message="error"><template #action><button type="button" @click="load">Try again</button></template></AppAlert>
       <template v-else-if="sheet">
-        <AppAlert v-if="sheet.locked" type="warning" title="This week is finalized" :message="`The week of ${formatDocDate(sheet.week_start)} – ${formatDocDate(sheet.week_end)} is settled. Reopen it on the Report to change it.`" />
         <!-- Finds an agent by user or name, and puts each currency's agents A to Z or Z to A; what was
              typed in the others stays -->
         <div v-if="sheet.rows.length" class="flex flex-wrap items-center gap-2">
@@ -363,7 +362,7 @@ const titleMissing = computed(() => !!saveError.value && !title.value.trim())
 const dirty = computed(() => !!sheet.value && (titleChanged.value || sheet.value.rows.some(changed)))
 const hasInvalid = computed(() => Object.values(edits).some(e => invalid(e.win_lose) || invalid(e.commission)))
 // Saving needs Enter Win/Lose for a new entry or new rows, Correct Win/Lose for saved ones.
-const canSave = computed(() => !!sheet.value && !sheet.value.locked && (canCreate.value || canEdit.value))
+const canSave = computed(() => !!sheet.value && (canCreate.value || canEdit.value))
 
 function editable(row: WeekSheetRow) {
   if (!canSave.value) return false

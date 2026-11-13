@@ -265,7 +265,7 @@ func (s *BranchTelegramService) SendTest(ctx context.Context, branch *models.Bra
 	if token == "" {
 		return fieldError("bot_token", "save a bot token first; no default bot is set up on the Backups page")
 	}
-	text := fmt.Sprintf("✅ Test from Income & Expense\n%s · %s\nThis chat will get the branch's transaction updates.", branch.Code, branch.Name)
+	text := fmt.Sprintf("✅ Test from Income & Expense\n%s\nThis chat will get the branch's transaction updates.", branch.Name)
 	return s.send(ctx, token, st.ChatID, text)
 }
 
@@ -341,7 +341,7 @@ func transactionMessage(event string, t *models.Transaction, creator, actor, not
 	}
 	lines := []string{head}
 	if t.Branch != nil {
-		lines = append(lines, "Branch: "+t.Branch.Code+" · "+t.Branch.Name)
+		lines = append(lines, "Branch: "+t.Branch.Name)
 	}
 	number := t.TransactionNumber
 	if reverses != "" {

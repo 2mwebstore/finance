@@ -41,13 +41,6 @@ func (s *PlatformService) Formula(ctx context.Context) (winlose.Formula, error) 
 // result's Total is worked out in each group the agent is in that week, at the group's rate for
 // it (an agent in two groups counts in both; in none, its Total is 0), and kept with the rates.
 
-type SettlementState struct {
-	ID        uuid.UUID `json:"id"`
-	Status    string    `json:"status"`
-	WeekStart string    `json:"week_start"`
-	WeekEnd   string    `json:"week_end"`
-}
-
 // PartnerShare is one partner's part of a Total: at their %. Partners are only on assignments (and
 // weeks) from before each group had its own rate for an agent.
 type PartnerShare struct {
@@ -108,10 +101,7 @@ type WeekSheet struct {
 	BranchName string           `json:"branch_name"`
 	Entry      *EntryState      `json:"entry"`
 	Formula    winlose.Formula  `json:"formula"`
-	Settlement *SettlementState `json:"settlement"`
-	// Locked: the week is finalized, so nothing can be changed.
-	Locked bool           `json:"locked"`
-	Rows   []WeekSheetRow `json:"rows"`
+	Rows       []WeekSheetRow   `json:"rows"`
 }
 
 // share is an assignment a result counts in: an agent in a group, at the group's rate for it.
@@ -140,8 +130,7 @@ type entryParts struct {
 	partners  map[uuid.UUID]models.Partner
 	platforms map[uuid.UUID]models.Platform // every agent that is on, and those saved
 	// offOnly: agents in groups that week, all of them switched off (left out of the entry).
-	offOnly    map[uuid.UUID]bool
-	settlement *models.WeeklySettlement
+	offOnly map[uuid.UUID]bool
 }
 
 // loadEntry reads an entry (nil: a new one) of a branch's week. An agent counts in a group (one
@@ -269,13 +258,6 @@ func (s *PlatformService) loadEntry(tx *gorm.DB, branchID uuid.UUID, start time.
 	for _, pl := range active {
 		p.platforms[pl.ID] = pl
 	}
-	var st models.WeeklySettlement
-	err = tx.Where("branch_id = ? AND week_start = ?", branchID, dayString(start)).First(&st).Error
-	if err == nil {
-		p.settlement = &st
-	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, err
-	}
 	return p, nil
 }
 
@@ -308,10 +290,6 @@ func (p *entryParts) hidden(platformID uuid.UUID) bool {
 		}
 	}
 	return inGroups && !on
-}
-
-func (p *entryParts) locked() bool {
-	return p.settlement != nil && p.settlement.Status == models.SettlementFinalized
 }
 
 // newShares are the groups an agent is in that week, each at the group's rate for it.
@@ -405,8 +383,7 @@ func (p *entryParts) groupShares(list []share) []GroupShare {
 }
 
 // OwnGroup is the group (branch) a person works in on the PLATFORMS pages (entries, assignments,
-// settlements, reports without consolidated access): their default branch, else their only
-// branch. Those pages don't ask for one.
+// reports without consolidated access): their default branch, else their only branch. Those pages don't ask for one.
 func (s *PlatformService) OwnGroup(ctx context.Context, actor uuid.UUID, scope BranchScope) (uuid.UUID, error) {
 	var user models.User
 	if err := s.db.WithContext(ctx).Preload("Branches").First(&user, "id = ?", actor).Error; err != nil {
@@ -475,20 +452,22 @@ func (s *PlatformService) EntrySheet(ctx context.Context, entryID, week, group s
 		return nil, err
 	}
 	sheet := s.sheet(ctx, parts, formula)
-	// The reactions on its saved agents.
+	// The reactions on its saved agents (in the entry).
 	var ids []uuid.UUID
 	for _, r := range sheet.Rows {
 		if r.ResultID != nil {
-			ids = append(ids, *r.ResultID)
+			ids = append(ids, r.PlatformID)
 		}
 	}
-	reactions, err := s.reactionsOf(ctx, resultReactions, ids)
-	if err != nil {
-		return nil, err
+	reactions := map[uuid.UUID][]EntryReaction{}
+	if sheet.Entry != nil && sheet.Entry.ID != uuid.Nil {
+		if reactions, err = s.reactionsWhere(ctx, agentReactions, ids, map[string]interface{}{"entry_id": sheet.Entry.ID}); err != nil {
+			return nil, err
+		}
 	}
 	for i, r := range sheet.Rows {
 		if r.ResultID != nil {
-			sheet.Rows[i].Reactions = orNone(reactions[*r.ResultID])
+			sheet.Rows[i].Reactions = orNone(reactions[r.PlatformID])
 		} else {
 			sheet.Rows[i].Reactions = []EntryReaction{}
 		}
@@ -523,10 +502,7 @@ func (s *PlatformService) entryFor(ctx context.Context, tx *gorm.DB, in WeekEntr
 
 func (s *PlatformService) sheet(ctx context.Context, p *entryParts, formula winlose.Formula) *WeekSheet {
 	out := &WeekSheet{WeekStart: dayString(p.start), WeekEnd: dayString(p.start.AddDate(0, 0, 6)), BranchID: p.branch.ID, BranchCode: p.branch.Code, BranchName: p.branch.Name,
-		Formula: formula, Locked: p.locked(), Rows: []WeekSheetRow{}}
-	if p.settlement != nil {
-		out.Settlement = &SettlementState{ID: p.settlement.ID, Status: p.settlement.Status, WeekStart: dayString(p.settlement.WeekStart), WeekEnd: dayString(p.settlement.WeekEnd)}
-	}
+		Formula: formula, Rows: []WeekSheetRow{}}
 	var users []uuid.UUID
 	for _, r := range p.results {
 		users = append(users, r.CreatedByID)
@@ -664,7 +640,7 @@ func workOut(version string, kind winlose.Kind, wl, cm, rate decimal.Decimal, sh
 
 // plan works out every filled-in row with the current formula: a saved one in the groups and at
 // the rates it was worked out with, a new one in the agent's groups that week. Blank rows are left
-// out. (Only a week that isn't finalized can be changed, and those follow the current formula.)
+// out. (Saved weeks follow the current formula.)
 func (s *PlatformService) plan(p *entryParts, rows []WeekEntryRow, formula winlose.Formula) ([]rowPlan, error) {
 	var out []rowPlan
 	seen := map[uuid.UUID]bool{}
@@ -766,7 +742,7 @@ func (s *PlatformService) Preview(ctx context.Context, in WeekEntryInput, scope 
 // Total in every group the agent is in. With no entry id it makes a new entry (a new entry's first
 // save); the sheet returned has its id for the saves after. A new entry and new rows need
 // winlose.create; changing a saved row or the title needs winlose.edit (a saved row also a
-// reason). A finalized week can't be changed.
+// reason).
 func (s *PlatformService) SaveWeek(ctx context.Context, in WeekEntryInput, scope BranchScope, can func(string) bool, actor uuid.UUID) (*WeekSheet, []Correction, error) {
 	title := strings.TrimSpace(in.Title)
 	if title == "" {
@@ -783,9 +759,6 @@ func (s *PlatformService) SaveWeek(ctx context.Context, in WeekEntryInput, scope
 		parts, err := s.entryFor(ctx, tx, in, scope, actor, true)
 		if err != nil {
 			return err
-		}
-		if parts.locked() {
-			return fmt.Errorf("the week of %s is finalized for %s; reopen it to make changes", dayString(parts.start), parts.branch.Code)
 		}
 		plans, err := s.plan(parts, in.Rows, formula)
 		if err != nil {
@@ -884,10 +857,9 @@ func (s *PlatformService) SaveWeek(ctx context.Context, in WeekEntryInput, scope
 	return sheet, corrections, err
 }
 
-// RecalculateOpenWeeks works every saved week that isn't finalized out again with the current
-// formula when it was saved with another, so a formula change applies to it; finalized weeks keep
-// what they were settled with. Run at start-up. It returns how many results changed.
-func (s *PlatformService) RecalculateOpenWeeks(ctx context.Context) (int, error) {
+// RecalculateWeeks works every saved week out again with the current formula when it was saved with
+// another, so a formula change applies to it. Run at start-up. It returns how many results changed.
+func (s *PlatformService) RecalculateWeeks(ctx context.Context) (int, error) {
 	formula, err := s.Formula(ctx)
 	if err != nil {
 		return 0, err
@@ -895,8 +867,6 @@ func (s *PlatformService) RecalculateOpenWeeks(ctx context.Context) (int, error)
 	var results []models.WeeklyPlatformResult
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("formula_version <> ?", formula.Version).
-			Where(`NOT EXISTS (SELECT 1 FROM weekly_settlements st WHERE st.branch_id = weekly_platform_results.branch_id
-				AND st.week_start = weekly_platform_results.week_start AND st.status = ? AND st.deleted_at IS NULL)`, models.SettlementFinalized).
 			Find(&results).Error; err != nil {
 			return err
 		}
@@ -964,10 +934,90 @@ func recalculate(tx *gorm.DB, formula winlose.Formula, results []models.WeeklyPl
 	return nil
 }
 
+// applyCurrentRates puts saved weeks on their agents' current rates: where a result's part in a
+// group is at a rate or type (PO / GI) that is no longer its assignment's, the result's parts take
+// their assignments' and its Total and rate are worked out again (with the formula it was saved
+// with). Results with partners (from before groups had their own rates) keep theirs. narrow limits which ones (by g, the group
+// part, a, its assignment, and r, the result; nil: all). It returns how many results changed.
+func applyCurrentRates(tx *gorm.DB, narrow func(*gorm.DB) *gorm.DB) (int, error) {
+	q := tx.Table("weekly_group_results g").
+		Joins("JOIN hq_platform_assignments a ON a.id = g.assignment_id").
+		Joins("JOIN weekly_platform_results r ON r.id = g.result_id").
+		Where("r.deleted_at IS NULL").
+		Where("(g.commission_rate <> a.commission_rate OR g.calc_type <> (CASE WHEN a.calc_type = 'GI' THEN 'GI' ELSE 'PO' END))").
+		Where("NOT EXISTS (SELECT 1 FROM weekly_partner_results wp WHERE wp.result_id = r.id)").
+		Where("NOT EXISTS (SELECT 1 FROM weekly_group_results g2 JOIN assignment_partners l ON l.assignment_id = g2.assignment_id WHERE g2.result_id = r.id)")
+	if narrow != nil {
+		q = narrow(q)
+	}
+	var ids []uuid.UUID
+	if err := q.Distinct("g.result_id").Pluck("g.result_id", &ids).Error; err != nil {
+		return 0, err
+	}
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	var results []models.WeeklyPlatformResult
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id IN ?", ids).Find(&results).Error; err != nil {
+		return 0, err
+	}
+	var parts []struct {
+		ID, ResultID uuid.UUID
+		Rate         decimal.Decimal
+		Kind         string
+	}
+	if err := tx.Table("weekly_group_results g").Joins("JOIN hq_platform_assignments a ON a.id = g.assignment_id").
+		Select("g.id, g.result_id, a.commission_rate AS rate, a.calc_type AS kind").Where("g.result_id IN ?", ids).Scan(&parts).Error; err != nil {
+		return 0, err
+	}
+	partsOf := map[uuid.UUID][]int{}
+	for i, p := range parts {
+		partsOf[p.ResultID] = append(partsOf[p.ResultID], i)
+	}
+	now := time.Now()
+	for _, r := range results {
+		total, rate := decimal.Zero, decimal.Zero
+		for _, i := range partsOf[r.ID] {
+			p := parts[i]
+			kind := winlose.PO
+			if winlose.Kind(p.Kind) == winlose.GI {
+				kind = winlose.GI
+			}
+			res, err := workOut(r.FormulaVersion, kind, r.WinLose, r.Commission, p.Rate, nil)
+			if err != nil {
+				return 0, err
+			}
+			if err := tx.Model(&models.WeeklyGroupResult{}).Where("id = ?", p.ID).UpdateColumns(map[string]interface{}{
+				"commission_rate": p.Rate, "calc_type": string(kind), "jame_ps": res.JamePS, "updated_at": now,
+			}).Error; err != nil {
+				return 0, err
+			}
+			total, rate = total.Add(res.JamePS), rate.Add(p.Rate)
+		}
+		if err := tx.Model(&models.WeeklyPlatformResult{}).Where("id = ?", r.ID).UpdateColumns(map[string]interface{}{
+			"commission_rate": rate, "jame_ps": total, "updated_at": now,
+		}).Error; err != nil {
+			return 0, err
+		}
+	}
+	return len(results), nil
+}
+
+// ApplyCurrentRates puts every saved week on its agents' current rates (applyCurrentRates). Run at start-up, for weeks saved before a rate change that came before this.
+func (s *PlatformService) ApplyCurrentRates(ctx context.Context) (int, error) {
+	n := 0
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var err error
+		n, err = applyCurrentRates(tx, nil)
+		return err
+	})
+	return n, err
+}
+
 // ===== Entries =====
 
 // DeleteEntry removes an entry and its agents' results (all or nothing). It needs a reason (audit
-// log); a finalized week can't be changed. It returns what was removed.
+// log). It returns what was removed.
 func (s *PlatformService) DeleteEntry(ctx context.Context, id uuid.UUID, reason string, scope BranchScope) (*models.WeeklyEntry, []models.WeeklyPlatformResult, error) {
 	reason = strings.TrimSpace(reason)
 	if len(reason) < 3 {
@@ -979,15 +1029,6 @@ func (s *PlatformService) DeleteEntry(ctx context.Context, id uuid.UUID, reason 
 		var err error
 		if entry, err = findEntry(tx, id.String(), scope, true); err != nil {
 			return err
-		}
-		week := dayString(entry.WeekStart)
-		var finalized int64
-		if err := tx.Model(&models.WeeklySettlement{}).Where("branch_id = ? AND week_start = ? AND status = ?", entry.BranchID, week, models.SettlementFinalized).
-			Count(&finalized).Error; err != nil {
-			return err
-		}
-		if finalized > 0 {
-			return fmt.Errorf("the week of %s is finalized; reopen it on the Report to delete the entry", week)
 		}
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("entry_id = ?", entry.ID).Find(&removed).Error; err != nil {
 			return err
@@ -1014,6 +1055,12 @@ func (s *PlatformService) DeleteEntry(ctx context.Context, id uuid.UUID, reason 
 		if err := tx.Where("entry_id = ?", entry.ID).Delete(&models.WeeklyEntryReaction{}).Error; err != nil {
 			return err
 		}
+		if err := tx.Where("entry_id = ?", entry.ID).Delete(&models.WeeklyGroupReaction{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("entry_id = ?", entry.ID).Delete(&models.WeeklyAgentReaction{}).Error; err != nil {
+			return err
+		}
 		return tx.Delete(entry).Error
 	})
 	if err != nil {
@@ -1024,7 +1071,8 @@ func (s *PlatformService) DeleteEntry(ctx context.Context, id uuid.UUID, reason 
 
 // ===== Reactions =====
 
-// EntryReaction is a person's ✅ (yes) or ❌ (no) on an entry.
+// EntryReaction is a person's ✅ (yes), ❌ (no) or 📤 (sent: the report was sent) on an entry, or on
+// a group or agent in it. A person has at most one of ✅ / ❌, and 📤 beside it.
 type EntryReaction struct {
 	Reaction string    `json:"reaction"`
 	UserID   uuid.UUID `json:"user_id"`
@@ -1033,8 +1081,9 @@ type EntryReaction struct {
 }
 
 // ReactToEntry sets the person's reaction on an entry they can see: the same one again takes it
-// back, the other one replaces it. It returns the entry, the person's reaction now ("" when taken
-// back) and the entry's reactions.
+// back; ✅ replaces their ❌ and the other way round, while 📤 is given or taken back on its own. It
+// returns the entry, the person's reaction of that kind now ("" when taken back) and the entry's
+// reactions.
 func (s *PlatformService) ReactToEntry(ctx context.Context, id uuid.UUID, reaction string, scope BranchScope, actor uuid.UUID) (*models.WeeklyEntry, string, []EntryReaction, error) {
 	if err := checkReaction(reaction); err != nil {
 		return nil, "", nil, err
@@ -1057,68 +1106,193 @@ func (s *PlatformService) ReactToEntry(ctx context.Context, id uuid.UUID, reacti
 }
 
 // ReactToResult sets the person's reaction on an agent's result in an entry they can see, the same
-// way. It returns the result, the reaction now and the result's reactions.
+// way: it is the agent's in that entry (ReactToAgent). It returns the result, the reaction now and
+// the agent's reactions in the entry.
 func (s *PlatformService) ReactToResult(ctx context.Context, id uuid.UUID, reaction string, scope BranchScope, actor uuid.UUID) (*models.WeeklyPlatformResult, string, []EntryReaction, error) {
 	if err := checkReaction(reaction); err != nil {
 		return nil, "", nil, err
 	}
 	var result models.WeeklyPlatformResult
-	var now string
-	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.First(&result, "id = ?", id).Error; err != nil || !scope.Has(result.BranchID) {
-			return ErrEntryNotFound
-		}
-		var err error
-		now, err = toggleReaction(tx, resultReactions, result.ID, actor, reaction)
-		return err
-	})
+	if err := s.db.WithContext(ctx).First(&result, "id = ?", id).Error; err != nil || !scope.Has(result.BranchID) || result.EntryID == nil {
+		return nil, "", nil, ErrEntryNotFound
+	}
+	_, _, now, list, err := s.ReactToAgent(ctx, *result.EntryID, result.PlatformID, reaction, scope, actor)
 	if err != nil {
 		return nil, "", nil, err
 	}
-	list, err := s.reactionsOf(ctx, resultReactions, []uuid.UUID{result.ID})
-	return &result, now, orNone(list[result.ID]), err
+	return &result, now, list, nil
 }
 
-// The reactions' tables: on entries and on agents' results in them.
+// ReactToAgent sets the person's reaction on an agent in an entry they can see (its result there,
+// or 0 when it has none, as Group summary lists it), the same way. The agent has a result in the
+// entry, or is a switched-on one of the entry's branch (or shared). It returns the entry, the
+// agent, the reaction now and the agent's reactions in the entry.
+func (s *PlatformService) ReactToAgent(ctx context.Context, entryID, platformID uuid.UUID, reaction string, scope BranchScope, actor uuid.UUID) (*models.WeeklyEntry, *models.Platform, string, []EntryReaction, error) {
+	if err := checkReaction(reaction); err != nil {
+		return nil, nil, "", nil, err
+	}
+	var entry *models.WeeklyEntry
+	var agent models.Platform
+	var now string
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var err error
+		if entry, err = findEntry(tx, entryID.String(), scope, false); err != nil {
+			return err
+		}
+		if err := tx.First(&agent, "id = ?", platformID).Error; err != nil {
+			return ErrPlatformNotFound
+		}
+		if !agent.IsActive || (agent.BranchID != nil && *agent.BranchID != entry.BranchID) {
+			var n int64
+			if err := tx.Model(&models.WeeklyPlatformResult{}).Where("entry_id = ? AND platform_id = ?", entry.ID, agent.ID).Count(&n).Error; err != nil {
+				return err
+			}
+			if n == 0 {
+				return ErrPlatformNotFound // not one of the entry's agents
+			}
+		}
+		now, err = toggleReactionWhere(tx, agentReactions, map[string]interface{}{"entry_id": entry.ID, "platform_id": agent.ID}, actor, reaction)
+		return err
+	})
+	if err != nil {
+		return nil, nil, "", nil, err
+	}
+	list, err := s.reactionsWhere(ctx, agentReactions, []uuid.UUID{agent.ID}, map[string]interface{}{"entry_id": entry.ID})
+	return entry, &agent, now, orNone(list[agent.ID]), err
+}
+
+// ReactToGroup sets the person's reaction on a group in an entry they can see (its agents' results
+// there, or 0 when it has none, as Group summary lists it), the same way. The group has results in
+// the entry, or is a switched-on group of the entry's branch. It returns the entry, the group, the
+// reaction now and the group's reactions in the entry.
+func (s *PlatformService) ReactToGroup(ctx context.Context, entryID, groupID uuid.UUID, reaction string, scope BranchScope, actor uuid.UUID) (*models.WeeklyEntry, *models.AssignmentGroup, string, []EntryReaction, error) {
+	if err := checkReaction(reaction); err != nil {
+		return nil, nil, "", nil, err
+	}
+	var entry *models.WeeklyEntry
+	var group models.AssignmentGroup
+	var now string
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var err error
+		if entry, err = findEntry(tx, entryID.String(), scope, false); err != nil {
+			return err
+		}
+		if err := tx.First(&group, "id = ?", groupID).Error; err != nil {
+			return ErrGroupNotFound
+		}
+		if !group.IsActive || group.BranchID != entry.BranchID {
+			var n int64
+			if err := tx.Table("weekly_group_results AS g").Joins("JOIN weekly_platform_results r ON r.id = g.result_id").
+				Where("r.entry_id = ? AND g.group_id = ? AND r.deleted_at IS NULL", entry.ID, group.ID).Count(&n).Error; err != nil {
+				return err
+			}
+			if n == 0 {
+				return ErrGroupNotFound // not one of the entry's groups
+			}
+		}
+		now, err = toggleReactionWhere(tx, groupReactions, map[string]interface{}{"entry_id": entry.ID, "group_id": group.ID}, actor, reaction)
+		return err
+	})
+	if err != nil {
+		return nil, nil, "", nil, err
+	}
+	list, err := s.reactionsWhere(ctx, groupReactions, []uuid.UUID{group.ID}, map[string]interface{}{"entry_id": entry.ID})
+	return entry, &group, now, orNone(list[group.ID]), err
+}
+
+// The reactions' tables: on entries, and on groups and agents in them (by group_id or platform_id,
+// within an entry_id).
 type reactionTable struct{ table, column string }
 
 var (
-	entryReactions  = reactionTable{"weekly_entry_reactions", "entry_id"}
-	resultReactions = reactionTable{"weekly_result_reactions", "result_id"}
+	entryReactions = reactionTable{"weekly_entry_reactions", "entry_id"}
+	groupReactions = reactionTable{"weekly_group_reactions", "group_id"}
+	agentReactions = reactionTable{"weekly_agent_reactions", "platform_id"}
 )
 
 func checkReaction(reaction string) error {
-	if reaction != models.ReactionYes && reaction != models.ReactionNo {
-		return fieldError("reaction", "react with yes (✅) or no (❌)")
+	if reaction != models.ReactionYes && reaction != models.ReactionNo && reaction != models.ReactionSent {
+		return fieldError("reaction", "react with yes (✅), no (❌) or sent (📤)")
 	}
 	return nil
 }
 
-// toggleReaction sets the person's reaction on id: the same one again takes it back, the other
-// replaces it (one each). It returns the reaction now ("" when taken back).
+// toggleReaction sets the person's reaction on id: the same one again takes it back, ✅ and ❌
+// replace each other (one of them each), and 📤 is given or taken back on its own (sent_at, on the
+// same row). It returns the reaction of that kind now ("" when taken back).
 func toggleReaction(tx *gorm.DB, t reactionTable, id, actor uuid.UUID, reaction string) (string, error) {
+	return toggleReactionWhere(tx, t, map[string]interface{}{t.column: id}, actor, reaction)
+}
+
+// toggleReactionWhere is toggleReaction on what keys names (column → value; a group's reaction is
+// on its group_id in an entry_id).
+func toggleReactionWhere(tx *gorm.DB, t reactionTable, keys map[string]interface{}, actor uuid.UUID, reaction string) (string, error) {
 	var mine struct {
 		ID       uuid.UUID
 		Reaction string
+		SentAt   *time.Time
 	}
-	err := tx.Table(t.table).Clauses(clause.Locking{Strength: "UPDATE"}).Select("id, reaction").Where(t.column+" = ? AND user_id = ?", id, actor).Take(&mine).Error
+	q := tx.Table(t.table).Clauses(clause.Locking{Strength: "UPDATE"}).Select("id, reaction, sent_at").Where("user_id = ?", actor)
+	for column, value := range keys {
+		q = q.Where(column+" = ?", value)
+	}
+	err := q.Take(&mine).Error
 	now := time.Now()
+	sent := reaction == models.ReactionSent
 	switch {
 	case errors.Is(err, gorm.ErrRecordNotFound):
-		return reaction, tx.Table(t.table).Create(map[string]interface{}{
-			"id": uuid.New(), t.column: id, "user_id": actor, "reaction": reaction, "created_at": now, "updated_at": now,
-		}).Error
+		row := map[string]interface{}{"id": uuid.New(), "user_id": actor, "reaction": reaction, "created_at": now, "updated_at": now}
+		if sent {
+			row["reaction"], row["sent_at"] = "", now // 📤 only
+		}
+		for column, value := range keys {
+			row[column] = value
+		}
+		return reaction, tx.Table(t.table).Create(row).Error
 	case err != nil:
 		return "", err
-	case mine.Reaction == reaction:
+	case sent && mine.SentAt == nil:
+		return reaction, tx.Table(t.table).Where("id = ?", mine.ID).Update("sent_at", now).Error
+	case sent && mine.Reaction != "":
+		return "", tx.Table(t.table).Where("id = ?", mine.ID).Update("sent_at", nil).Error
+	case !sent && mine.Reaction == reaction && mine.SentAt != nil:
+		return "", tx.Table(t.table).Where("id = ?", mine.ID).Updates(map[string]interface{}{"reaction": "", "updated_at": now}).Error
+	case sent || mine.Reaction == reaction:
+		// Nothing of theirs is left on it.
 		return "", tx.Exec("DELETE FROM "+t.table+" WHERE id = ?", mine.ID).Error
 	default:
 		return reaction, tx.Table(t.table).Where("id = ?", mine.ID).Updates(map[string]interface{}{"reaction": reaction, "updated_at": now}).Error
 	}
 }
 
+// reactionsOfRow is what a person's row of a reactions table shows: their ✅ or ❌ (as last given),
+// and their 📤.
+func reactionsOfRow(reaction string, at time.Time, sentAt *time.Time, user uuid.UUID, name string) []EntryReaction {
+	var out []EntryReaction
+	if reaction != "" {
+		out = append(out, EntryReaction{Reaction: reaction, UserID: user, UserName: name, At: at})
+	}
+	if sentAt != nil {
+		out = append(out, EntryReaction{Reaction: models.ReactionSent, UserID: user, UserName: name, At: *sentAt})
+	}
+	return out
+}
+
+// byWhen puts each list of reactions in the order they were given (a 📤 by when it was given, not
+// by its row's ✅ / ❌).
+func byWhen[K comparable](lists map[K][]EntryReaction) {
+	for _, list := range lists {
+		sort.SliceStable(list, func(i, j int) bool { return list[i].At.Before(list[j].At) })
+	}
+}
+
 // reactionsOf lists the reactions on ids by id, as they were last given.
 func (s *PlatformService) reactionsOf(ctx context.Context, t reactionTable, ids []uuid.UUID) (map[uuid.UUID][]EntryReaction, error) {
+	return s.reactionsWhere(ctx, t, ids, nil)
+}
+
+// reactionsWhere is reactionsOf with more to match (column → value: the entry of groups' reactions).
+func (s *PlatformService) reactionsWhere(ctx context.Context, t reactionTable, ids []uuid.UUID, also map[string]interface{}) (map[uuid.UUID][]EntryReaction, error) {
 	out := map[uuid.UUID][]EntryReaction{}
 	if len(ids) == 0 {
 		return out, nil
@@ -1127,10 +1301,14 @@ func (s *PlatformService) reactionsOf(ctx context.Context, t reactionTable, ids 
 		Target    uuid.UUID
 		UserID    uuid.UUID
 		Reaction  string
+		SentAt    *time.Time
 		UpdatedAt time.Time
 	}
-	if err := s.db.WithContext(ctx).Table(t.table).Select(t.column+" AS target, user_id, reaction, updated_at").
-		Where(t.column+" IN ?", ids).Order("updated_at, id").Scan(&rows).Error; err != nil {
+	q := s.db.WithContext(ctx).Table(t.table).Select(t.column+" AS target, user_id, reaction, sent_at, updated_at").Where(t.column+" IN ?", ids)
+	for column, value := range also {
+		q = q.Where(column+" = ?", value)
+	}
+	if err := q.Order("updated_at, id").Scan(&rows).Error; err != nil {
 		return nil, err
 	}
 	users := make([]uuid.UUID, len(rows))
@@ -1139,8 +1317,9 @@ func (s *PlatformService) reactionsOf(ctx context.Context, t reactionTable, ids 
 	}
 	names := s.userNames(ctx, users)
 	for _, r := range rows {
-		out[r.Target] = append(out[r.Target], EntryReaction{Reaction: r.Reaction, UserID: r.UserID, UserName: names[r.UserID], At: r.UpdatedAt})
+		out[r.Target] = append(out[r.Target], reactionsOfRow(r.Reaction, r.UpdatedAt, r.SentAt, r.UserID, names[r.UserID])...)
 	}
+	byWhen(out)
 	return out, nil
 }
 
@@ -1160,10 +1339,9 @@ type EntryRow struct {
 	WeekEnd    string    `json:"week_end"`
 	BranchID   uuid.UUID `json:"branch_id"`
 	BranchCode string    `json:"branch_code"`
+	BranchName string    `json:"branch_name"`
 	CreatedAt  time.Time `json:"created_at"`
 	CreatedBy  string    `json:"created_by"`
-	// Locked: the week is finalized.
-	Locked bool `json:"locked"`
 	// Reactions: people's ✅ and ❌ on the entry.
 	Reactions []EntryReaction `json:"reactions"`
 }
@@ -1248,215 +1426,11 @@ func (s *PlatformService) ListEntriesPage(ctx context.Context, f EntryFilter, sc
 	if err != nil {
 		return nil, 0, err
 	}
-	locked := map[string]bool{}
-	if len(branchIDs) > 0 {
-		var settled []models.WeeklySettlement
-		if err := s.db.WithContext(ctx).Where("branch_id IN ? AND status = ?", branchIDs, models.SettlementFinalized).Find(&settled).Error; err != nil {
-			return nil, 0, err
-		}
-		for _, st := range settled {
-			locked[st.BranchID.String()+dayString(st.WeekStart)] = true
-		}
-	}
 	out := make([]EntryRow, len(list))
 	for i, e := range list {
 		out[i] = EntryRow{ID: e.ID, Title: e.Title, WeekStart: dayString(e.WeekStart), WeekEnd: dayString(e.WeekStart.AddDate(0, 0, 6)),
-			BranchID: e.BranchID, BranchCode: branches[e.BranchID].Code, CreatedAt: e.CreatedAt, CreatedBy: names[e.CreatedByID],
-			Locked: locked[e.BranchID.String()+dayString(e.WeekStart)], Reactions: orNone(reactions[e.ID])}
+			BranchID: e.BranchID, BranchCode: branches[e.BranchID].Code, BranchName: branches[e.BranchID].Name, CreatedAt: e.CreatedAt, CreatedBy: names[e.CreatedByID],
+			Reactions: orNone(reactions[e.ID])}
 	}
 	return out, total, nil
-}
-
-// ===== Weekly settlements =====
-
-type SettlementView struct {
-	models.WeeklySettlement
-	BranchCode  string                         `json:"branch_code"`
-	BranchName  string                         `json:"branch_name"`
-	FinalizedBy string                         `json:"finalized_by"`
-	ReopenedBy  string                         `json:"reopened_by"`
-	Totals      []models.WeeklySettlementTotal `json:"totals"`
-}
-
-// Settlements lists the week's settlements for the HQs in scope (or one HQ).
-func (s *PlatformService) Settlements(ctx context.Context, week string, branchID *uuid.UUID, scope BranchScope) ([]SettlementView, error) {
-	day, err := s.parseDay("week_start", week)
-	if err != nil {
-		return nil, err
-	}
-	q := scope.where(s.db.WithContext(ctx).Model(&models.WeeklySettlement{}), "branch_id").Where("week_start = ?", dayString(weekStart(day)))
-	if branchID != nil {
-		if !scope.Has(*branchID) {
-			return nil, ErrBranchAccessDenied
-		}
-		q = q.Where("branch_id = ?", *branchID)
-	}
-	var list []models.WeeklySettlement
-	if err := q.Find(&list).Error; err != nil {
-		return nil, err
-	}
-	return s.settlementViews(ctx, list)
-}
-
-func (s *PlatformService) settlementViews(ctx context.Context, list []models.WeeklySettlement) ([]SettlementView, error) {
-	var branchIDs, userIDs, ids []uuid.UUID
-	for _, st := range list {
-		branchIDs, ids = append(branchIDs, st.BranchID), append(ids, st.ID)
-		userIDs = append(userIDs, st.FinalizedByID)
-		if st.ReopenedByID != nil {
-			userIDs = append(userIDs, *st.ReopenedByID)
-		}
-	}
-	branches, err := s.branchesIn(ctx, branchIDs)
-	if err != nil {
-		return nil, err
-	}
-	users := s.userNames(ctx, userIDs)
-	totals := map[uuid.UUID][]models.WeeklySettlementTotal{}
-	if len(ids) > 0 {
-		var rows []models.WeeklySettlementTotal
-		if err := s.db.WithContext(ctx).Where("settlement_id IN ?", ids).Order("currency").Find(&rows).Error; err != nil {
-			return nil, err
-		}
-		for _, t := range rows {
-			totals[t.SettlementID] = append(totals[t.SettlementID], t)
-		}
-	}
-	out := make([]SettlementView, len(list))
-	for i, st := range list {
-		v := SettlementView{WeeklySettlement: st, BranchCode: branches[st.BranchID].Code, BranchName: branches[st.BranchID].Name,
-			FinalizedBy: users[st.FinalizedByID], Totals: totals[st.ID]}
-		if v.Totals == nil {
-			v.Totals = []models.WeeklySettlementTotal{}
-		}
-		if st.ReopenedByID != nil {
-			v.ReopenedBy = users[*st.ReopenedByID]
-		}
-		out[i] = v
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].BranchCode < out[j].BranchCode })
-	return out, nil
-}
-
-type FinalizeInput struct {
-	// Empty: the person's own group.
-	BranchID  string `json:"branch_id" binding:"omitempty,uuid"`
-	WeekStart string `json:"week_start" binding:"required"` // a Monday
-}
-
-// FinalizeWeek freezes an HQ's week: its totals per currency are kept and the week locked. A
-// reopened week can be finalized again (the totals are worked out afresh).
-func (s *PlatformService) FinalizeWeek(ctx context.Context, in FinalizeInput, scope BranchScope, actor uuid.UUID) (*SettlementView, error) {
-	branchID, err := s.groupFor(ctx, in.BranchID, scope, actor)
-	if err != nil {
-		return nil, err
-	}
-	start, err := s.parseDay("week_start", in.WeekStart)
-	if err != nil {
-		return nil, err
-	}
-	if start.Weekday() != time.Monday {
-		return nil, fieldError("week_start", "a week starts on a Monday")
-	}
-	end := start.AddDate(0, 0, 6)
-	if end.After(s.today()) {
-		return nil, fieldError("week_start", "a week can be finalized from its Sunday ("+dayString(end)+")")
-	}
-	var id uuid.UUID
-	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var st models.WeeklySettlement
-		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("branch_id = ? AND week_start = ?", branchID, dayString(start)).First(&st).Error
-		switch {
-		case err == nil && st.Status == models.SettlementFinalized:
-			return errors.New("this week is already finalized")
-		case err == nil:
-		case errors.Is(err, gorm.ErrRecordNotFound):
-			st = models.WeeklySettlement{Base: models.Base{ID: uuid.New()}, BranchID: branchID, WeekStart: start, WeekEnd: end}
-		default:
-			return err
-		}
-		sums, err := s.sumByCurrency(tx, branchID, start)
-		if err != nil {
-			return err
-		}
-		st.Status, st.FinalizedByID, st.FinalizedAt = models.SettlementFinalized, actor, time.Now()
-		if err := tx.Save(&st).Error; err != nil {
-			if isDuplicate(err) {
-				return errors.New("this week was just finalized by someone else")
-			}
-			return err
-		}
-		if err := tx.Where("settlement_id = ?", st.ID).Delete(&models.WeeklySettlementTotal{}).Error; err != nil {
-			return err
-		}
-		for _, t := range sums {
-			t.ID, t.SettlementID = uuid.New(), st.ID
-			if err := tx.Create(&t).Error; err != nil {
-				return err
-			}
-		}
-		id = st.ID
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return s.settlementByID(ctx, id)
-}
-
-// ReopenWeek unlocks a finalized week so it can be corrected; it must be finalized again.
-func (s *PlatformService) ReopenWeek(ctx context.Context, id uuid.UUID, reason string, scope BranchScope, actor uuid.UUID) (*SettlementView, error) {
-	reason = strings.TrimSpace(reason)
-	if len(reason) < 3 {
-		return nil, fieldError("reason", "give a reason for reopening the week")
-	}
-	formula, err := s.Formula(ctx)
-	if err != nil {
-		return nil, err
-	}
-	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var st models.WeeklySettlement
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&st, "id = ?", id).Error; err != nil || !scope.Has(st.BranchID) {
-			return ErrSettlementNotFound
-		}
-		if st.Status != models.SettlementFinalized {
-			return errors.New("this week is not finalized")
-		}
-		now := time.Now()
-		if err := tx.Model(&st).Updates(map[string]interface{}{"status": models.SettlementReopened, "reopened_by_id": actor, "reopened_at": now, "reopen_reason": reason, "updated_at": now}).Error; err != nil {
-			return err
-		}
-		// Reopened, the week follows the current formula again.
-		var results []models.WeeklyPlatformResult
-		if err := tx.Where("branch_id = ? AND week_start = ? AND formula_version <> ?", st.BranchID, dayString(st.WeekStart), formula.Version).Find(&results).Error; err != nil {
-			return err
-		}
-		return recalculate(tx, formula, results)
-	})
-	if err != nil {
-		return nil, err
-	}
-	return s.settlementByID(ctx, id)
-}
-
-func (s *PlatformService) settlementByID(ctx context.Context, id uuid.UUID) (*SettlementView, error) {
-	var st models.WeeklySettlement
-	if err := s.db.WithContext(ctx).First(&st, "id = ?", id).Error; err != nil {
-		return nil, ErrSettlementNotFound
-	}
-	views, err := s.settlementViews(ctx, []models.WeeklySettlement{st})
-	if err != nil {
-		return nil, err
-	}
-	return &views[0], nil
-}
-
-// sumByCurrency totals an HQ's week per currency (never mixing currencies).
-func (s *PlatformService) sumByCurrency(tx *gorm.DB, branchID uuid.UUID, start time.Time) ([]models.WeeklySettlementTotal, error) {
-	var rows []models.WeeklySettlementTotal
-	err := tx.Model(&models.WeeklyPlatformResult{}).
-		Select("currency, SUM(win_lose) AS win_lose, SUM(commission) AS commission, SUM(adjusted_amount) AS adjusted_amount, SUM(jame_ps) AS jame_ps, COUNT(*) AS entries").
-		Where("branch_id = ? AND week_start = ?", branchID, dayString(start)).
-		Group("currency").Order("currency").Scan(&rows).Error
-	return rows, err
 }

@@ -28,7 +28,7 @@
                 <span v-if="!g.is_active" class="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase text-muted">Off</span>
               </h2>
               <!-- Its agents are in View -->
-              <p class="mt-0.5 text-[11px] text-muted"><template v-if="rp.show.value && g.branch_code">{{ g.branch_code }} · </template>From {{ formatDocDate(g.starts_on) }} · {{ g.agents.length }} {{ g.agents.length === 1 ? 'agent' : 'agents' }} · {{ g.weeks }} {{ g.weeks === 1 ? 'week' : 'weeks' }} entered<template v-if="g.created_by"> · by {{ g.created_by }}</template></p>
+              <p class="mt-0.5 text-[11px] text-muted"><template v-if="rp.show.value && g.branch_code">{{ g.branch_name || g.branch_code }} · </template>From {{ formatDocDate(g.starts_on) }} · {{ g.agents.length }} {{ g.agents.length === 1 ? 'agent' : 'agents' }} · {{ g.weeks }} {{ g.weeks === 1 ? 'week' : 'weeks' }} entered<template v-if="g.created_by"> · by {{ g.created_by }}</template></p>
             </div>
             <!-- Partners a group still has from before (their % decide the Total until it is updated) -->
             <ul v-if="g.partners.length" class="flex flex-wrap gap-1">

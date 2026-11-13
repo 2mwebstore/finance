@@ -19,8 +19,7 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-// PlatformService: platforms, their assignment to HQs, weekly win/lose, weekly settlements and
-// the win/lose reports. An HQ is a branch, so HQ access is the branch scope: people work only in
+// PlatformService: platforms, their assignment to HQs, weekly win/lose and the win/lose reports. An HQ is a branch, so HQ access is the branch scope: people work only in
 // their own branches (owner/admin in every branch).
 type PlatformService struct {
 	db  *gorm.DB
@@ -34,7 +33,6 @@ func NewPlatformService(db *gorm.DB, timezone string) *PlatformService {
 var (
 	ErrPlatformNotFound   = errors.New("agent not found")
 	ErrAssignmentNotFound = errors.New("assignment not found")
-	ErrSettlementNotFound = errors.New("settlement not found")
 )
 
 var (
@@ -181,8 +179,9 @@ type PlatformGroupInput struct {
 
 type PlatformRow struct {
 	models.Platform
-	// BranchCode is the code of the agent's branch ("" for a shared agent).
+	// BranchCode and BranchName: the agent's branch ("" for a shared agent).
 	BranchCode string `gorm:"column:branch_code" json:"branch_code"`
+	BranchName string `gorm:"column:branch_name" json:"branch_name"`
 	// ActiveHQs ("Groups") is how many switched-on groups have the agent now.
 	// (The column tag matters: GORM would otherwise read "active_h_qs".)
 	ActiveHQs int64 `gorm:"column:active_hqs" json:"active_hqs"`
@@ -275,7 +274,7 @@ func (s *PlatformService) ListPlatformsPage(ctx context.Context, f PlatformFilte
 	// Lower-cased and compared byte by byte, the same order agentBefore gives.
 	q := base.Session(&gorm.Session{}).
 		Joins("LEFT JOIN branches br ON br.id = platforms.branch_id").
-		Select("platforms.*, br.code AS branch_code, (SELECT COUNT(*) FROM hq_platform_assignments a LEFT JOIN assignment_groups g ON g.id = a.group_id "+
+		Select("platforms.*, br.code AS branch_code, br.name AS branch_name, (SELECT COUNT(*) FROM hq_platform_assignments a LEFT JOIN assignment_groups g ON g.id = a.group_id "+
 			"WHERE a.platform_id = platforms.id AND a.active_key = 1 AND a.deleted_at IS NULL AND (g.id IS NULL OR g.is_active = 1)"+groupScope+") AS active_hqs", groupArgs...).
 		Order("LOWER(platforms.code) COLLATE utf8mb4_bin, platforms.code COLLATE utf8mb4_bin")
 	if f.PageSize > 0 {
@@ -933,8 +932,8 @@ func withPartners(tx *gorm.DB, id uuid.UUID) (*Assignment, error) {
 }
 
 // UpdateAssignment changes the partners (and each one's %), the assignment's own % and the
-// currency of an active assignment. Weeks already saved keep the partners, % and currency they
-// were worked out with.
+// currency of an active assignment. Weeks already saved keep the partners and currency they were
+// worked out with; with no partners, they take the new % (applyCurrentRates).
 func (s *PlatformService) UpdateAssignment(ctx context.Context, id uuid.UUID, in AssignmentUpdateInput, scope BranchScope) (before, after *Assignment, err error) {
 	var ownRate *decimal.Decimal
 	if strings.TrimSpace(in.CommissionRate) != "" {
@@ -996,6 +995,9 @@ func (s *PlatformService) UpdateAssignment(ctx context.Context, id uuid.UUID, in
 			return err
 		}
 		if _, err := createPartners(tx, a.ID, shares); err != nil {
+			return err
+		}
+		if _, err := applyCurrentRates(tx, func(q *gorm.DB) *gorm.DB { return q.Where("g.assignment_id = ?", a.ID) }); err != nil {
 			return err
 		}
 		after, err = withPartners(tx, a.ID)

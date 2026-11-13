@@ -1,5 +1,5 @@
 -- Platforms and weekly win/lose (HQ = branch): platforms, partners, titled groups of
--- branch-platform assignments and their partners, weekly results with each partner's share, titled weekly entries (with people's ✅/❌ reactions on them and on each agent's result), and weekly settlements. Same SQL
+-- branch-platform assignments and their partners, weekly results with each partner's share, titled weekly entries (with people's ✅/❌ reactions on them, on each group and on each agent in them). Same SQL
 -- as internal/database/platforms.go. Only adds (but for two replaced unique keys): safe to run again. The tables take the collation of
 -- branches.id, so their foreign keys can be created whichever collation the database uses.
 
@@ -203,6 +203,7 @@ SET @ddl = CONCAT('CREATE TABLE IF NOT EXISTS weekly_entry_reactions (
     entry_id CHAR(36) NOT NULL,
     user_id CHAR(36) NOT NULL,
     reaction VARCHAR(8) NOT NULL,
+    sent_at DATETIME(3) NULL,
     created_at DATETIME(3) NULL,
     updated_at DATETIME(3) NULL,
     PRIMARY KEY (id),
@@ -229,45 +230,56 @@ PREPARE create_table FROM @ddl;
 EXECUTE create_table;
 DEALLOCATE PREPARE create_table;
 
--- weekly_settlements
-SET @ddl = CONCAT('CREATE TABLE IF NOT EXISTS weekly_settlements (
+-- weekly_group_reactions
+SET @ddl = CONCAT('CREATE TABLE IF NOT EXISTS weekly_group_reactions (
     id CHAR(36) NOT NULL,
-    branch_id CHAR(36) NOT NULL,
-    week_start DATE NOT NULL,
-    week_end DATE NOT NULL,
-    status VARCHAR(16) NOT NULL,
-    finalized_by_id CHAR(36) NOT NULL,
-    finalized_at DATETIME(3) NOT NULL,
-    reopened_by_id CHAR(36) NULL,
-    reopened_at DATETIME(3) NULL,
-    reopen_reason VARCHAR(512) NOT NULL DEFAULT '''',
+    entry_id CHAR(36) NOT NULL,
+    group_id CHAR(36) NOT NULL,
+    user_id CHAR(36) NOT NULL,
+    reaction VARCHAR(8) NOT NULL,
+    sent_at DATETIME(3) NULL,
     created_at DATETIME(3) NULL,
     updated_at DATETIME(3) NULL,
-    deleted_at DATETIME(3) NULL,
     PRIMARY KEY (id),
-    UNIQUE KEY uq_weekly_settlement (branch_id, week_start),
-    KEY idx_weekly_settlements_deleted_at (deleted_at)
+    UNIQUE KEY uq_weekly_group_reaction (entry_id, group_id, user_id),
+    KEY idx_weekly_group_reactions_group (group_id),
+    KEY idx_weekly_group_reactions_user (user_id)
 )', ' ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=', @coll);
 PREPARE create_table FROM @ddl;
 EXECUTE create_table;
 DEALLOCATE PREPARE create_table;
 
--- weekly_settlement_totals
-SET @ddl = CONCAT('CREATE TABLE IF NOT EXISTS weekly_settlement_totals (
+-- weekly_agent_reactions (an agent's ✅ / ❌ in an entry, with or without a result there). The ones
+-- given on agents' results before are copied to it once, when it is created (a reaction taken back
+-- after that must not come back).
+SET @agent_reactions_new = (SELECT COUNT(*) FROM information_schema.tables
+      WHERE table_schema = DATABASE() AND table_name = 'weekly_agent_reactions') = 0;
+SET @ddl = CONCAT('CREATE TABLE IF NOT EXISTS weekly_agent_reactions (
     id CHAR(36) NOT NULL,
-    settlement_id CHAR(36) NOT NULL,
-    currency VARCHAR(3) NOT NULL,
-    win_lose DECIMAL(19,4) NOT NULL,
-    commission DECIMAL(19,4) NOT NULL,
-    adjusted_amount DECIMAL(19,4) NOT NULL,
-    jame_ps DECIMAL(19,4) NOT NULL,
-    entries INT NOT NULL DEFAULT 0,
+    entry_id CHAR(36) NOT NULL,
+    platform_id CHAR(36) NOT NULL,
+    user_id CHAR(36) NOT NULL,
+    reaction VARCHAR(8) NOT NULL,
+    sent_at DATETIME(3) NULL,
+    created_at DATETIME(3) NULL,
+    updated_at DATETIME(3) NULL,
     PRIMARY KEY (id),
-    UNIQUE KEY uq_weekly_settlement_total (settlement_id, currency)
+    UNIQUE KEY uq_weekly_agent_reaction (entry_id, platform_id, user_id),
+    KEY idx_weekly_agent_reactions_platform (platform_id),
+    KEY idx_weekly_agent_reactions_user (user_id)
 )', ' ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=', @coll);
 PREPARE create_table FROM @ddl;
 EXECUTE create_table;
 DEALLOCATE PREPARE create_table;
+SET @fill = IF(@agent_reactions_new,
+    'INSERT IGNORE INTO weekly_agent_reactions (id, entry_id, platform_id, user_id, reaction, created_at, updated_at)
+	SELECT x.id, r.entry_id, r.platform_id, x.user_id, x.reaction, x.created_at, x.updated_at
+	FROM weekly_result_reactions x JOIN weekly_platform_results r ON r.id = x.result_id
+	WHERE r.entry_id IS NOT NULL AND r.deleted_at IS NULL',
+    'SELECT 1');
+PREPARE fill_reactions FROM @fill;
+EXECUTE fill_reactions;
+DEALLOCATE PREPARE fill_reactions;
 
 -- Columns added after the first builds, each added only when missing.
 
@@ -311,6 +323,34 @@ SET @col = IF(
     (SELECT COUNT(*) FROM information_schema.columns
       WHERE table_schema = DATABASE() AND table_name = 'weekly_platform_results' AND column_name = 'entry_id') = 0,
     'ALTER TABLE weekly_platform_results ADD COLUMN entry_id CHAR(36) NULL AFTER id',
+    'SELECT 1');
+PREPARE add_column FROM @col;
+EXECUTE add_column;
+DEALLOCATE PREPARE add_column;
+
+-- 📤 (the report was sent), given beside ✅ / ❌.
+SET @col = IF(
+    (SELECT COUNT(*) FROM information_schema.columns
+      WHERE table_schema = DATABASE() AND table_name = 'weekly_entry_reactions' AND column_name = 'sent_at') = 0,
+    'ALTER TABLE weekly_entry_reactions ADD COLUMN sent_at DATETIME(3) NULL AFTER reaction',
+    'SELECT 1');
+PREPARE add_column FROM @col;
+EXECUTE add_column;
+DEALLOCATE PREPARE add_column;
+
+SET @col = IF(
+    (SELECT COUNT(*) FROM information_schema.columns
+      WHERE table_schema = DATABASE() AND table_name = 'weekly_group_reactions' AND column_name = 'sent_at') = 0,
+    'ALTER TABLE weekly_group_reactions ADD COLUMN sent_at DATETIME(3) NULL AFTER reaction',
+    'SELECT 1');
+PREPARE add_column FROM @col;
+EXECUTE add_column;
+DEALLOCATE PREPARE add_column;
+
+SET @col = IF(
+    (SELECT COUNT(*) FROM information_schema.columns
+      WHERE table_schema = DATABASE() AND table_name = 'weekly_agent_reactions' AND column_name = 'sent_at') = 0,
+    'ALTER TABLE weekly_agent_reactions ADD COLUMN sent_at DATETIME(3) NULL AFTER reaction',
     'SELECT 1');
 PREPARE add_column FROM @col;
 EXECUTE add_column;
@@ -643,8 +683,8 @@ DEALLOCATE PREPARE add_fk;
 
 SET @fk = IF(
     (SELECT COUNT(*) FROM information_schema.table_constraints
-      WHERE table_schema = DATABASE() AND table_name = 'weekly_settlements' AND constraint_name = 'fk_weekly_settlements_branch' AND constraint_type = 'FOREIGN KEY') = 0,
-    'ALTER TABLE weekly_settlements ADD CONSTRAINT fk_weekly_settlements_branch FOREIGN KEY (branch_id) REFERENCES branches(id)',
+      WHERE table_schema = DATABASE() AND table_name = 'weekly_group_reactions' AND constraint_name = 'fk_weekly_group_reactions_entry' AND constraint_type = 'FOREIGN KEY') = 0,
+    'ALTER TABLE weekly_group_reactions ADD CONSTRAINT fk_weekly_group_reactions_entry FOREIGN KEY (entry_id) REFERENCES weekly_entries(id) ON DELETE CASCADE',
     'SELECT 1');
 PREPARE add_fk FROM @fk;
 EXECUTE add_fk;
@@ -652,8 +692,8 @@ DEALLOCATE PREPARE add_fk;
 
 SET @fk = IF(
     (SELECT COUNT(*) FROM information_schema.table_constraints
-      WHERE table_schema = DATABASE() AND table_name = 'weekly_settlements' AND constraint_name = 'fk_weekly_settlements_finalized_by' AND constraint_type = 'FOREIGN KEY') = 0,
-    'ALTER TABLE weekly_settlements ADD CONSTRAINT fk_weekly_settlements_finalized_by FOREIGN KEY (finalized_by_id) REFERENCES users(id)',
+      WHERE table_schema = DATABASE() AND table_name = 'weekly_group_reactions' AND constraint_name = 'fk_weekly_group_reactions_group' AND constraint_type = 'FOREIGN KEY') = 0,
+    'ALTER TABLE weekly_group_reactions ADD CONSTRAINT fk_weekly_group_reactions_group FOREIGN KEY (group_id) REFERENCES assignment_groups(id) ON DELETE CASCADE',
     'SELECT 1');
 PREPARE add_fk FROM @fk;
 EXECUTE add_fk;
@@ -661,8 +701,35 @@ DEALLOCATE PREPARE add_fk;
 
 SET @fk = IF(
     (SELECT COUNT(*) FROM information_schema.table_constraints
-      WHERE table_schema = DATABASE() AND table_name = 'weekly_settlement_totals' AND constraint_name = 'fk_weekly_settlement_totals_settlement' AND constraint_type = 'FOREIGN KEY') = 0,
-    'ALTER TABLE weekly_settlement_totals ADD CONSTRAINT fk_weekly_settlement_totals_settlement FOREIGN KEY (settlement_id) REFERENCES weekly_settlements(id) ON DELETE CASCADE',
+      WHERE table_schema = DATABASE() AND table_name = 'weekly_group_reactions' AND constraint_name = 'fk_weekly_group_reactions_user' AND constraint_type = 'FOREIGN KEY') = 0,
+    'ALTER TABLE weekly_group_reactions ADD CONSTRAINT fk_weekly_group_reactions_user FOREIGN KEY (user_id) REFERENCES users(id)',
+    'SELECT 1');
+PREPARE add_fk FROM @fk;
+EXECUTE add_fk;
+DEALLOCATE PREPARE add_fk;
+
+SET @fk = IF(
+    (SELECT COUNT(*) FROM information_schema.table_constraints
+      WHERE table_schema = DATABASE() AND table_name = 'weekly_agent_reactions' AND constraint_name = 'fk_weekly_agent_reactions_entry' AND constraint_type = 'FOREIGN KEY') = 0,
+    'ALTER TABLE weekly_agent_reactions ADD CONSTRAINT fk_weekly_agent_reactions_entry FOREIGN KEY (entry_id) REFERENCES weekly_entries(id) ON DELETE CASCADE',
+    'SELECT 1');
+PREPARE add_fk FROM @fk;
+EXECUTE add_fk;
+DEALLOCATE PREPARE add_fk;
+
+SET @fk = IF(
+    (SELECT COUNT(*) FROM information_schema.table_constraints
+      WHERE table_schema = DATABASE() AND table_name = 'weekly_agent_reactions' AND constraint_name = 'fk_weekly_agent_reactions_platform' AND constraint_type = 'FOREIGN KEY') = 0,
+    'ALTER TABLE weekly_agent_reactions ADD CONSTRAINT fk_weekly_agent_reactions_platform FOREIGN KEY (platform_id) REFERENCES platforms(id) ON DELETE CASCADE',
+    'SELECT 1');
+PREPARE add_fk FROM @fk;
+EXECUTE add_fk;
+DEALLOCATE PREPARE add_fk;
+
+SET @fk = IF(
+    (SELECT COUNT(*) FROM information_schema.table_constraints
+      WHERE table_schema = DATABASE() AND table_name = 'weekly_agent_reactions' AND constraint_name = 'fk_weekly_agent_reactions_user' AND constraint_type = 'FOREIGN KEY') = 0,
+    'ALTER TABLE weekly_agent_reactions ADD CONSTRAINT fk_weekly_agent_reactions_user FOREIGN KEY (user_id) REFERENCES users(id)',
     'SELECT 1');
 PREPARE add_fk FROM @fk;
 EXECUTE add_fk;

@@ -152,6 +152,44 @@ func (rc *RoleController) Create(c *gin.Context) {
 	c.JSON(http.StatusCreated, roleJSON(role))
 }
 
+// Clone copies a role into the branches given (POST /roles/:id/clone {branch_ids}): only the Super
+// Admin. Answers the copies made and the branches skipped (they already have a role of that name).
+func (rc *RoleController) Clone(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	scope, ok := loadScope(c, rc.db)
+	if !ok {
+		return
+	}
+	if !scope.superAdmin {
+		c.JSON(http.StatusForbidden, gin.H{"error": "only the Super Admin can clone roles"})
+		return
+	}
+	var body struct {
+		BranchIDs []string `json:"branch_ids"`
+	}
+	if !bindJSON(c, &body) {
+		return
+	}
+	res, err := rc.svc.Clone(c.Request.Context(), id, body.BranchIDs)
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	created := make([]gin.H, 0, len(res.Created))
+	for i := range res.Created {
+		created = append(created, roleJSON(&res.Created[i]))
+	}
+	skipped := make([]gin.H, 0, len(res.Skipped))
+	for _, b := range res.Skipped {
+		skipped = append(skipped, gin.H{"id": b.ID, "name": b.Name})
+	}
+	c.JSON(http.StatusCreated, gin.H{"created": created, "skipped": skipped})
+}
+
 func (rc *RoleController) Update(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -213,7 +251,10 @@ func (rc *RoleController) List(c *gin.Context) {
 	if !ok {
 		return
 	}
-	f := services.RoleListFilter{Search: c.Query("search"), All: scope.Full, BranchIDs: scope.BranchIDs, HideSuperAdmin: !scope.superAdmin}
+	// The Super Admin role is never listed (nobody manages it on Roles); the user form asks for it with
+	// include_super_admin=true, which only the Super Admin gets.
+	withSuperAdmin := scope.superAdmin && c.Query("include_super_admin") == "true"
+	f := services.RoleListFilter{Search: c.Query("search"), All: scope.Full, BranchIDs: scope.BranchIDs, HideSuperAdmin: !withSuperAdmin}
 	if raw := c.Query("branch_id"); raw != "" {
 		id, err := uuid.Parse(raw)
 		if err != nil || !scope.HasBranch(id) {

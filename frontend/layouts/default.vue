@@ -54,7 +54,7 @@
 
       <div class="sidebar-profile">
         <div class="profile-avatar">{{ initials }}</div>
-        <div class="sidebar-profile-copy"><strong>{{ user?.full_name || 'Account' }}</strong><small>{{ profileRole }}</small></div>
+        <div class="sidebar-profile-copy"><strong>{{ user?.full_name || 'Account' }}</strong><small>{{ profileLine }}</small></div>
         <button class="logout-button" title="Sign out" aria-label="Sign out" @click="onLogout"><LogOut :size="16" /></button>
       </div>
     </aside>
@@ -92,11 +92,11 @@
           <div ref="profileMenuEl" class="topbar-menu-wrap" @keydown.esc="profileMenuOpen = false">
             <button type="button" class="topbar-user" aria-haspopup="menu" :aria-expanded="profileMenuOpen" aria-label="Your account" @click="profileMenuOpen = !profileMenuOpen">
               <div class="profile-avatar topbar-avatar">{{ initials }}</div>
-              <div class="topbar-user-copy"><strong>{{ user?.full_name || 'Account' }}</strong><small>{{ profileRole }}</small></div>
+              <div class="topbar-user-copy"><strong>{{ user?.full_name || 'Account' }}</strong><small>{{ profileLine }}</small></div>
               <ChevronDown :size="15" class="topbar-chevron" :class="{ 'is-open': profileMenuOpen }" />
             </button>
             <div v-if="profileMenuOpen" class="topbar-menu topbar-account-menu" role="menu" aria-label="Account">
-              <div class="topbar-menu-head"><strong>{{ user?.full_name || 'Account' }}</strong><small>{{ profileRole }}</small></div>
+              <div class="topbar-menu-head"><strong>{{ user?.full_name || 'Account' }}</strong><small>{{ profileLine }}</small><small v-if="profileLine !== profileRole">{{ profileRole }}</small></div>
               <NuxtLink to="/profile" role="menuitem" class="topbar-menu-item"><UserRound :size="15" /><span>My profile</span></NuxtLink>
               <button type="button" role="menuitem" class="topbar-menu-item" @click="profileMenuOpen = false; onLogout()"><LogOut :size="15" /><span>Sign out</span></button>
             </div>
@@ -128,7 +128,7 @@
           </div>
         </template>
       </div>
-      <NuxtLink to="/profile" class="drawer-profile" @click="mobileMenuOpen = false"><div class="profile-avatar">{{ initials }}</div><span><strong>{{ user?.full_name || 'Account' }}</strong><small>{{ profileRole }}</small></span><ChevronRight :size="16" /></NuxtLink>
+      <NuxtLink to="/profile" class="drawer-profile" @click="mobileMenuOpen = false"><div class="profile-avatar">{{ initials }}</div><span><strong>{{ user?.full_name || 'Account' }}</strong><small>{{ profileLine }}</small></span><ChevronRight :size="16" /></NuxtLink>
     </aside>
 
     <nav ref="mobileNavEl" class="mobile-nav" :class="{ 'is-ready': lensReady }" aria-label="Mobile navigation">
@@ -148,6 +148,7 @@
 </template>
 
 <script setup lang="ts">
+import { branchLabel } from '~/composables/useBranchOptions'
 import type { Component } from 'vue'
 import { onClickOutside, useResizeObserver } from '@vueuse/core'
 import { useCurrency } from '~/composables/useCurrency'
@@ -253,8 +254,8 @@ const platformsNav = computed<NavItem[]>(() => {
   const items: NavItem[] = []
   if (can('winlose.view', 'winlose.create', 'winlose.edit', 'winlose.delete')) items.push({ label: 'Data Entry', to: '/winlose/entry', icon: NotebookPen })
   if (can('winlose-reports.view')) {
-    items.push({ label: 'Report', to: '/winlose/reports/weekly', icon: CalendarRange })
     items.push({ label: 'Group Summary', to: '/winlose/reports/branch-summary', icon: ChartColumn })
+    items.push({ label: 'Report', to: '/winlose/reports/weekly', icon: CalendarRange })
   }
   if (can('platforms.view', 'platforms.create', 'platforms.edit', 'platforms.delete')) items.push({ label: 'Agents', to: '/admin/platforms', icon: Layers })
   if (can('platform-assignments.view', 'platform-assignments.create', 'platform-assignments.edit', 'platform-assignments.delete')) items.push({ label: 'Group Agent Assignments', to: '/admin/platform-assignments', icon: Network })
@@ -376,10 +377,12 @@ const profileRole = computed(() => isSuperAdmin.value ? 'Super Administrator' : 
 
 // The branch shown in the top bar: the one picked, or all of them ('' without any branch).
 const { myBranches, canSwitch, activeBranch, activeBranchId, setActiveBranch } = useActiveBranch()
-const branchLine = computed(() => activeBranch.value?.name || (canSwitch.value ? 'All branches' : myBranches.value[0]?.name || ''))
+// Under the name: the username (name@branch) for someone in one branch, else the role.
+const profileLine = computed(() => (myBranches.value.length === 1 && user.value?.username ? user.value.username : profileRole.value))
+const branchLine = computed(() => (activeBranch.value ? branchLabel(activeBranch.value) : (canSwitch.value ? 'All branches' : (myBranches.value[0] ? branchLabel(myBranches.value[0]) : ''))))
 const branchChoices = computed(() => [
   { value: '', label: 'All branches' },
-  ...myBranches.value.map(branch => ({ value: branch.id, label: `${branch.code} — ${branch.name}` })),
+  ...myBranches.value.map(branch => ({ value: branch.id, label: branchLabel(branch) })),
 ])
 const branchMenuOpen = ref(false)
 const branchMenuEl = ref<HTMLElement | null>(null)

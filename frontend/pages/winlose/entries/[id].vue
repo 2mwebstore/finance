@@ -5,7 +5,6 @@
       <h1 class="text-xl font-bold text-navy">{{ sheet?.entry?.title || 'Entry' }}</h1>
       <p v-if="sheet" class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
         <span v-if="sheet.entry">Created {{ formatDocDate(sheet.entry.created_at) }}<template v-if="sheet.entry.created_by"> by <span class="font-medium text-navy">{{ sheet.entry.created_by }}</span></template></span>
-        <span v-if="sheet.locked" class="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold uppercase text-emerald-700"><Lock :size="11" /> Finalized</span>
       </p>
     </header>
 
@@ -40,7 +39,7 @@
 </template>
 
 <script setup lang="ts">
-import { ChevronLeft, Lock } from 'lucide-vue-next'
+import { ChevronLeft } from 'lucide-vue-next'
 import type { WeekSheet, WeekSheetRow } from '~/types/api'
 import { formatDocDate } from '~/utils/inventory'
 import { formatAmount } from '~/utils/winlose'

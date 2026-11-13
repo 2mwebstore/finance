@@ -122,6 +122,8 @@ func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config, store storage.Store, 
 				roles.POST("", middleware.RequireAnyPermission(db, permissions.RolesManage), roleCtrl.Create)
 				roles.GET("/:id", middleware.RequireAnyPermission(db, permissions.RolesView, permissions.RolesManage), roleCtrl.Get)
 				roles.PATCH("/:id", middleware.RequireAnyPermission(db, permissions.RolesManage), roleCtrl.Update)
+				// Copies of a role for other branches: only the Super Admin (checked in Clone).
+				roles.POST("/:id/clone", middleware.RequireAnyPermission(db, permissions.RolesManage), roleCtrl.Clone)
 				roles.PUT("/:id/permissions", middleware.RequireAnyPermission(db, permissions.PermissionsManage), roleCtrl.SetPermissions)
 				roles.DELETE("/:id", middleware.RequireAnyPermission(db, permissions.RolesManage), roleCtrl.Delete)
 			}
@@ -278,22 +280,23 @@ func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config, store storage.Store, 
 				wl := api.Group("/winlose")
 				wl.GET("/formula", need(permissions.WinLoseView, permissions.WinLoseCreate, permissions.WinLoseEdit, permissions.WinLoseReportsView), platformCtrl.Formula)
 				// New rows need winlose.create and changed saved rows winlose.edit (checked per row).
-				wl.GET("/entries", need(permissions.WinLoseView, permissions.WinLoseCreate, permissions.WinLoseEdit, permissions.WinLoseDelete), platformCtrl.ListEntries)
+				// Report viewers too: Group summary's Data entry filter lists the entries.
+				wl.GET("/entries", need(permissions.WinLoseView, permissions.WinLoseCreate, permissions.WinLoseEdit, permissions.WinLoseDelete, permissions.WinLoseReportsView), platformCtrl.ListEntries)
 				// Deleting an entry removes saved amounts: Delete Data Entry, with a reason.
 				wl.DELETE("/entries/:id", need(permissions.WinLoseDelete), platformCtrl.DeleteEntry)
 				// ✅ / ❌ on an entry, on Data entry's list and the Report's By week.
 				wl.POST("/entries/:id/reactions", need(permissions.WinLoseReact), platformCtrl.ReactToEntry)
-				// ✅ / ❌ on an agent in an entry (its result).
+				// ✅ / ❌ on an agent in an entry (by its result there, or by the agent: one at 0 too) and on
+				// a group in an entry (Group summary).
 				wl.POST("/results/:id/reactions", need(permissions.WinLoseReact), platformCtrl.ReactToResult)
+				wl.POST("/entries/:id/groups/:group_id/reactions", need(permissions.WinLoseReact), platformCtrl.ReactToGroup)
+				wl.POST("/entries/:id/agents/:platform_id/reactions", need(permissions.WinLoseReact), platformCtrl.ReactToAgent)
 				// An entry by entry_id; without one, a new entry for this week in the person's own group.
 				wl.GET("/entry", need(permissions.WinLoseView, permissions.WinLoseCreate, permissions.WinLoseEdit), platformCtrl.WeekSheet)
 				wl.POST("/entry/preview", need(permissions.WinLoseCreate, permissions.WinLoseEdit), platformCtrl.Preview)
 				wl.PUT("/entry", need(permissions.WinLoseCreate, permissions.WinLoseEdit), platformCtrl.SaveWeek)
 				// Totals across HQs also need winlose-reports.consolidated (checked in the service).
 				wl.GET("/reports", need(permissions.WinLoseReportsView), platformCtrl.Report)
-				wl.GET("/settlements", need(permissions.WinLoseReportsView, permissions.WinLoseSettlementsFinalize), platformCtrl.ListSettlements)
-				wl.POST("/settlements", need(permissions.WinLoseSettlementsFinalize), platformCtrl.FinalizeWeek)
-				wl.POST("/settlements/:id/reopen", need(permissions.WinLoseSettlementsFinalize), platformCtrl.ReopenWeek)
 			}
 
 			api.GET("/audit-logs", middleware.RequireAnyPermission(db, permissions.AuditLogsView), auditCtrl.List)

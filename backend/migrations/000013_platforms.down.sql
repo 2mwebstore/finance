@@ -3,6 +3,8 @@
 DROP TABLE IF EXISTS weekly_settlement_totals;
 DROP TABLE IF EXISTS weekly_settlements;
 DROP TABLE IF EXISTS weekly_entry_reactions;
+DROP TABLE IF EXISTS weekly_agent_reactions;
+DROP TABLE IF EXISTS weekly_group_reactions;
 DROP TABLE IF EXISTS weekly_result_reactions;
 DROP TABLE IF EXISTS weekly_entries;
 DROP TABLE IF EXISTS weekly_partner_results;

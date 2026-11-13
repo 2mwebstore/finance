@@ -1,4 +1,4 @@
-import { useBranchOptions } from '~/composables/useBranchOptions'
+import { branchLabel, useBranchOptions } from '~/composables/useBranchOptions'
 
 /**
  * The branch an RP page (Data Entry, Report, Group Summary, Group Agent Assignments) works in.
@@ -33,9 +33,9 @@ export function useRpBranch() {
   /** Options for a Branch select; allowAll adds "All branches" ('' = every branch in scope). */
   const optionsFor = (allowAll: boolean) => [
     ...(allowAll ? [{ value: '', label: 'All branches' }] : []),
-    ...branches.value.map(b => ({ value: b.id, label: `${b.code} — ${b.name}` })),
+    ...branches.value.map(b => ({ value: b.id, label: branchLabel(b) })),
   ]
-  const labelFor = (id: string) => branches.value.find(b => b.id === id)?.code || ''
+  const labelFor = (id: string) => branches.value.find(b => b.id === id)?.name || ''
 
   return { branches, show, branchId, effective, defaultBranchId, optionsFor, labelFor }
 }

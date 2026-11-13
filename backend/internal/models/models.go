@@ -29,6 +29,8 @@ type User struct {
 	Email          string     `gorm:"size:255;uniqueIndex;not null" json:"email"`
 	PasswordHash   string     `gorm:"size:255;not null" json:"-"`
 	FullName       string     `gorm:"size:128;not null" json:"full_name"`
+	// Info: anything about the person (the form's Info); optional.
+	Info           string     `gorm:"size:255;not null;default:''" json:"info"`
 	IsActive       bool       `gorm:"default:true;not null" json:"is_active"`
 	IsSuperAdmin   bool       `gorm:"default:false;not null" json:"is_super_admin"`
 	DefaultBranchID *uuid.UUID `gorm:"type:char(36);index" json:"default_branch_id,omitempty"`

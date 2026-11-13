@@ -150,27 +150,6 @@ type WeeklyGroupResult struct {
 
 func (WeeklyGroupResult) TableName() string { return "weekly_group_results" }
 
-// Weekly settlement statuses.
-const (
-	SettlementFinalized = "finalized"
-	SettlementReopened  = "reopened"
-)
-
-// WeeklySettlement freezes an HQ's week (Monday to Sunday): its totals per currency are kept in
-// weekly_settlement_totals and its days can't be changed while it is finalized.
-type WeeklySettlement struct {
-	Base
-	BranchID      uuid.UUID  `gorm:"type:char(36);not null" json:"branch_id"`
-	WeekStart     time.Time  `gorm:"type:date;not null" json:"week_start"`
-	WeekEnd       time.Time  `gorm:"type:date;not null" json:"week_end"`
-	Status        string     `gorm:"size:16;not null" json:"status"`
-	FinalizedByID uuid.UUID  `gorm:"type:char(36);not null" json:"finalized_by_id"`
-	FinalizedAt   time.Time  `gorm:"not null" json:"finalized_at"`
-	ReopenedByID  *uuid.UUID `gorm:"type:char(36)" json:"reopened_by_id,omitempty"`
-	ReopenedAt    *time.Time `json:"reopened_at,omitempty"`
-	ReopenReason  string     `gorm:"size:512" json:"reopen_reason"`
-}
-
 // WeeklyEntry is a titled set of agents' results (weekly_platform_results) for a group's
 // (branch's) week, as people see it on Data Entry. A week can have several entries.
 type WeeklyEntry struct {
@@ -186,27 +165,31 @@ type WeeklyEntry struct {
 
 func (WeeklyEntry) TableName() string { return "weekly_entries" }
 
-// Reactions to an entry: ✅ and ❌.
+// Reactions to an entry (and a group or agent in it): ✅ and ❌, and 📤 (the report was sent), which
+// a person gives on its own, beside their ✅ or ❌.
 const (
-	ReactionYes = "yes"
-	ReactionNo  = "no"
+	ReactionYes  = "yes"
+	ReactionNo   = "no"
+	ReactionSent = "sent"
 )
 
-// WeeklyEntryReaction is one person's ✅ (yes) or ❌ (no) on an entry: one each, changed or taken
-// back by them. Removed with the entry.
+// WeeklyEntryReaction is one person's ✅ (yes) or ❌ (no) on an entry, and their 📤 (SentAt): one row
+// each, changed or taken back by them (Reaction is empty when they gave only 📤). Removed with the
+// entry.
 type WeeklyEntryReaction struct {
-	ID        uuid.UUID `gorm:"type:char(36);primaryKey" json:"-"`
-	EntryID   uuid.UUID `gorm:"type:char(36);not null" json:"entry_id"`
-	UserID    uuid.UUID `gorm:"type:char(36);not null" json:"user_id"`
-	Reaction  string    `gorm:"size:8;not null" json:"reaction"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID        uuid.UUID  `gorm:"type:char(36);primaryKey" json:"-"`
+	EntryID   uuid.UUID  `gorm:"type:char(36);not null" json:"entry_id"`
+	UserID    uuid.UUID  `gorm:"type:char(36);not null" json:"user_id"`
+	Reaction  string     `gorm:"size:8;not null" json:"reaction"`
+	SentAt    *time.Time `json:"sent_at,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
 }
 
 func (WeeklyEntryReaction) TableName() string { return "weekly_entry_reactions" }
 
-// WeeklyResultReaction is one person's ✅ (yes) or ❌ (no) on an agent's result in an entry: one
-// each, like WeeklyEntryReaction. Removed with the result.
+// WeeklyResultReaction is how an agent's ✅ / ❌ in an entry were kept before WeeklyAgentReaction (on
+// its result, so an agent with none couldn't have one). They were copied there once; no longer used.
 type WeeklyResultReaction struct {
 	ID        uuid.UUID `gorm:"type:char(36);primaryKey" json:"-"`
 	ResultID  uuid.UUID `gorm:"type:char(36);not null" json:"result_id"`
@@ -218,14 +201,33 @@ type WeeklyResultReaction struct {
 
 func (WeeklyResultReaction) TableName() string { return "weekly_result_reactions" }
 
-// WeeklySettlementTotal is a finalized week's totals in one currency.
-type WeeklySettlementTotal struct {
-	ID             uuid.UUID       `gorm:"type:char(36);primaryKey" json:"-"`
-	SettlementID   uuid.UUID       `gorm:"type:char(36);not null" json:"-"`
-	Currency       string          `gorm:"size:3;not null" json:"currency"`
-	WinLose        decimal.Decimal `gorm:"type:decimal(19,4);not null" json:"win_lose"`
-	Commission     decimal.Decimal `gorm:"type:decimal(19,4);not null" json:"commission"`
-	AdjustedAmount decimal.Decimal `gorm:"type:decimal(19,4);not null" json:"adjusted_amount"`
-	JamePS         decimal.Decimal `gorm:"column:jame_ps;type:decimal(19,4);not null" json:"jame_ps"`
-	Entries        int             `gorm:"not null" json:"entries"`
+// WeeklyGroupReaction is one person's ✅ (yes) or ❌ (no) and 📤 on a group in an entry (its agents'
+// results there, as Group summary shows them): one row each, like WeeklyEntryReaction. Removed with
+// the entry.
+type WeeklyGroupReaction struct {
+	ID        uuid.UUID  `gorm:"type:char(36);primaryKey" json:"-"`
+	EntryID   uuid.UUID  `gorm:"type:char(36);not null" json:"entry_id"`
+	GroupID   uuid.UUID  `gorm:"type:char(36);not null" json:"group_id"`
+	UserID    uuid.UUID  `gorm:"type:char(36);not null" json:"user_id"`
+	Reaction  string     `gorm:"size:8;not null" json:"reaction"`
+	SentAt    *time.Time `json:"sent_at,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
 }
+
+func (WeeklyGroupReaction) TableName() string { return "weekly_group_reactions" }
+
+// WeeklyAgentReaction is one person's ✅ (yes) or ❌ (no) and 📤 on an agent in an entry (its result
+// there, or 0 when it has none): one row each, like WeeklyEntryReaction. Removed with the entry.
+type WeeklyAgentReaction struct {
+	ID         uuid.UUID  `gorm:"type:char(36);primaryKey" json:"-"`
+	EntryID    uuid.UUID  `gorm:"type:char(36);not null" json:"entry_id"`
+	PlatformID uuid.UUID  `gorm:"type:char(36);not null" json:"platform_id"`
+	UserID     uuid.UUID  `gorm:"type:char(36);not null" json:"user_id"`
+	Reaction   string     `gorm:"size:8;not null" json:"reaction"`
+	SentAt     *time.Time `json:"sent_at,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
+}
+
+func (WeeklyAgentReaction) TableName() string { return "weekly_agent_reactions" }

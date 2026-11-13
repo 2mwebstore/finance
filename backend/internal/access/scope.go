@@ -36,3 +36,19 @@ func BranchScope(user *models.User) (ids []uuid.UUID, all bool) {
 	}
 	return ids, false
 }
+
+// BranchesInactive reports a user who can't sign in because every branch they work in is
+// inactive (deleted or switched off): not the owner or an admin, nor someone with no branch at all
+// (user loaded with Branches and Roles.Permissions). Someone who also works in an active branch
+// still signs in. Their data stays in the reports.
+func BranchesInactive(user *models.User) bool {
+	if IsFullAccess(user) || len(user.Branches) == 0 {
+		return false
+	}
+	for _, b := range user.Branches {
+		if b.IsActive {
+			return false
+		}
+	}
+	return true
+}

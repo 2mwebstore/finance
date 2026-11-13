@@ -1,4 +1,4 @@
 <template>
-  <!-- Weeks by group and agent, with the week's settlement (components/winlose/ReportPage.vue) -->
+  <!-- Weeks by group and agent (components/winlose/ReportPage.vue) -->
   <WinloseReportPage />
 </template>

@@ -150,6 +150,7 @@
 </template>
 
 <script setup lang="ts">
+import { branchLabel } from '~/composables/useBranchOptions'
 import { ArrowDownLeft, ArrowUpRight, Clock3, FileText, ImageIcon, Paperclip, Trash2, X } from 'lucide-vue-next'
 import { MAX_ATTACHMENTS, filesOfStage, type Branch, type Category, type Transaction } from '~/types/api'
 import { richTextToPlain } from '~/utils/richText'
@@ -221,7 +222,7 @@ const saving = ref(false)
 const error = ref('')
 // The record was saved but its file upload failed.
 const partialSave = ref(false)
-const branchOptions = computed(() => branches.value.map(branch => ({ value: branch.id, label: `${branch.code} — ${branch.name}` })))
+const branchOptions = computed(() => branches.value.map(branch => ({ value: branch.id, label: branchLabel(branch) })))
 const categoryOptions = computed(() => categories.value.map(category => ({
   value: category.id,
   label: `${category.name}${category.is_active ? '' : ' (inactive)'}`,

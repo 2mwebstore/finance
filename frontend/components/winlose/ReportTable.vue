@@ -21,18 +21,20 @@
         <tbody class="divide-y divide-border">
           <tr v-for="line in part.rows" :key="`${line.platform_id}-${line.currency}`" class="text-navy">
             <td class="name">
-              <!-- On phones the rate is next to the agent, on the same line -->
-              <span class="whitespace-nowrap">
-                <button v-if="selectable" type="button" class="code font-mono font-semibold text-primary hover:underline" @click="emit('select', line.platform_id)">{{ line.platform_code }}</button>
-                <span v-else class="code font-mono font-semibold">{{ line.platform_code }}</span>
-                <span v-if="showRates" class="ml-1 text-muted sm:hidden">{{ usedRate(line.rate_min, line.rate_max, line.formula) }}</span>
+              <!-- On the same line: the agent, on phones its rate, and in an entry its ✅ / ❌ (left out
+                   of the picture) -->
+              <span class="inline-flex items-center gap-2 whitespace-nowrap">
+                <span>
+                  <button v-if="selectable" type="button" class="code font-mono font-semibold text-primary hover:underline" @click="emit('select', line.platform_id)">{{ line.platform_code }}</button>
+                  <span v-else class="code font-mono font-semibold">{{ line.platform_code }}</span>
+                  <span v-if="showRates" class="ml-1 text-muted sm:hidden">{{ rateOf(line) }}</span>
+                </span>
+                <WinloseEntryReactions v-if="reactions && reactionUrl(line)" data-capture-skip :url="reactionUrl(line)" :reactions="line.reactions || []" />
               </span>
-              <!-- The agent's result in an entry: its ✅ / ❌ (left out of the picture) -->
-              <div v-if="reactions && line.result_id" class="mt-1" data-capture-skip><WinloseEntryReactions :url="`/winlose/results/${line.result_id}/reactions`" :reactions="line.reactions || []" /></div>
             </td>
             <td class="amount" :class="tone(line.win_lose)">{{ formatAmount(line.win_lose, line.currency) }}</td>
             <td class="amount">{{ formatAmount(line.commission, line.currency) }}</td>
-            <td v-if="showRates" class="amount hidden sm:table-cell">{{ usedRate(line.rate_min, line.rate_max, line.formula) }}</td>
+            <td v-if="showRates" class="amount hidden sm:table-cell">{{ rateOf(line) }}</td>
             <td class="amount font-bold" :class="tone(line.jame_ps)">{{ formatAmount(line.jame_ps, line.currency) }}</td>
           </tr>
           <!-- The currency's total -->
@@ -52,15 +54,14 @@
 
 <script setup lang="ts">
 import { Layers } from 'lucide-vue-next'
-import type { WinLoseReport } from '~/types/api'
+import type { WinLoseReport, WinLoseReportLine } from '~/types/api'
 import { currencyTables, formatAmount, totalsIn, usedRate } from '~/utils/winlose'
 
 /**
  * A win/lose report's lines by agent, one table per currency (USD first, each A to Z) with its
  * total (`jame_ps` is the Total). For one group (byGroup) each agent also shows the rate its Total
  * is at (an agent at 60%: 40%). Selectable: an agent's code opens its detail (`select` with its id).
- * With reactions, an agent's line that is its result in an entry (result_id) has its ✅ / ❌ under
- * it. Title: each table is headed "<title> · USD" (else just the currency); hint goes beside the
+ * With reactions, an agent's line in an entry (entry_id; at 0 too) has its ✅ / ❌ beside it. Title: each table is headed "<title> · USD" (else just the currency); hint goes beside the
  * first one.
  */
 const props = withDefaults(defineProps<{ report: Pick<WinLoseReport, 'lines' | 'totals'>; byGroup?: boolean; selectable?: boolean; reactions?: boolean; title?: string; hint?: string }>(), { byGroup: false, selectable: false, reactions: false, title: '', hint: '' })
@@ -69,6 +70,17 @@ const { can } = usePermissions()
 const showRates = computed(() => props.byGroup && can('winlose-reports.rates'))
 const tables = computed(() => currencyTables(props.report.lines, l => l.currency))
 const emit = defineEmits<{ select: [platformId: string] }>()
+
+// An agent at 0 with no rate to show (no results, and not one group's agent): —.
+function rateOf(line: WinLoseReportLine) {
+  return !line.entries && !line.formula ? '—' : usedRate(line.rate_min, line.rate_max, line.formula)
+}
+
+// An agent in an entry (with a result there or at 0); a result's line from before (result_id only).
+function reactionUrl(line: WinLoseReportLine) {
+  if (line.entry_id) return `/winlose/entries/${line.entry_id}/agents/${line.platform_id}/reactions`
+  return line.result_id ? `/winlose/results/${line.result_id}/reactions` : ''
+}
 
 function tone(value: string) {
   return Number(value) < 0 ? 'text-expense' : ''

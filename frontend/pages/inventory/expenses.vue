@@ -28,7 +28,7 @@
             <span class="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-rose-50 text-expense"><ReceiptText :size="18" /></span>
             <div class="min-w-0">
               <div class="flex flex-wrap items-center gap-2"><strong class="text-sm text-navy">{{ expense.category_name || 'Expense' }}</strong><InventoryStatusBadge :status="expense.status" /></div>
-              <p class="mt-0.5 truncate text-xs text-muted"><span class="font-mono">{{ expense.number }}</span> · {{ formatDocDate(expense.expense_date) }} · {{ expense.branch_code }}<template v-if="expense.payee"> · {{ expense.payee }}</template></p>
+              <p class="mt-0.5 truncate text-xs text-muted"><span class="font-mono">{{ expense.number }}</span> · {{ formatDocDate(expense.expense_date) }} · {{ expense.branch_name }}<template v-if="expense.payee"> · {{ expense.payee }}</template></p>
               <p class="mt-0.5 text-[11px] text-slate-400">by {{ expense.created_by }}<template v-if="expense.payment_method"> · {{ expense.payment_method }}</template></p>
             </div>
           </div>
@@ -59,7 +59,7 @@
       </template>
     </AppModal>
 
-    <AppModal :model-value="!!detail" :title="detail ? `${detail.category_name} · ${formatMoney(detail.amount, detail.currency)}` : ''" eyebrow="INVENTORY EXPENSE" :subtitle="detail ? `${detail.number} · ${formatDocDate(detail.expense_date)} · ${detail.branch_code} — ${detail.branch_name}` : ''" width="560px" @update:model-value="(open) => { if (!open) detail = null }">
+    <AppModal :model-value="!!detail" :title="detail ? `${detail.category_name} · ${formatMoney(detail.amount, detail.currency)}` : ''" eyebrow="INVENTORY EXPENSE" :subtitle="detail ? `${detail.number} · ${formatDocDate(detail.expense_date)} · ${detail.branch_name}` : ''" width="560px" @update:model-value="(open) => { if (!open) detail = null }">
       <template #icon><ReceiptText :size="20" /></template>
       <template v-if="detail">
         <div class="flex flex-wrap items-center gap-2 text-xs text-muted">
@@ -87,7 +87,7 @@ import { Plus, ReceiptText } from 'lucide-vue-next'
 import type { Category, Currency, InventoryExpense, Paged } from '~/types/api'
 import { useToast } from '~/composables/useToast'
 import { useFormErrors } from '~/composables/useFormErrors'
-import { useBranchOptions } from '~/composables/useBranchOptions'
+import { branchLabel, useBranchOptions } from '~/composables/useBranchOptions'
 import { usePaymentMethods } from '~/composables/usePaymentMethods'
 import { useCurrency } from '~/composables/useCurrency'
 import { rule } from '~/utils/validation'
@@ -100,7 +100,7 @@ const { can } = usePermissions()
 const toast = useToast()
 const canCreate = computed(() => can('inventory-expenses.create'))
 const { branches, options: branchOptions, showFilter: showBranchFilter } = useBranchOptions('All branches')
-const branchChoices = computed(() => branches.value.map(b => ({ value: b.id, label: `${b.code} — ${b.name}` })))
+const branchChoices = computed(() => branches.value.map(b => ({ value: b.id, label: branchLabel(b) })))
 const { options: paymentOptions, defaultId: defaultPayment, load: loadPayments } = usePaymentMethods()
 const { currencyOptions, rateLabel, defaultCurrency, load: loadCurrency, convert } = useCurrency()
 const statusOptions = [{ value: '', label: 'All statuses' }, { value: 'completed', label: 'Done' }, { value: 'voided', label: 'Voided' }]

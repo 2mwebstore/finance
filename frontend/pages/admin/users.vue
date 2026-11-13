@@ -8,12 +8,13 @@
     <AppModal v-model="showCreate" form title="Create user" eyebrow="NEW USER" subtitle="Give them a role and a branch. Managers are optional." :busy="saving" width="660px" @submit="create">
       <template #icon><UserPlus :size="20" /></template>
       <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <label class="space-y-1 text-xs font-medium text-muted">Username<input v-model.trim="createForm.username" required minlength="3" maxlength="64" :aria-invalid="createCheck.invalid('username')" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" /></label>
-        <label class="space-y-1 text-xs font-medium text-muted">Email<input v-model.trim="createForm.email" type="email" required :aria-invalid="createCheck.invalid('email')" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" /></label>
-        <label class="space-y-1 text-xs font-medium text-muted">Full name<input v-model.trim="createForm.full_name" required minlength="2" :aria-invalid="createCheck.invalid('full_name')" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" /></label>
+        <label class="space-y-1 text-xs font-medium text-muted">Name<input v-model.trim="createForm.full_name" required minlength="2" maxlength="128" :aria-invalid="createCheck.invalid('full_name')" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" placeholder="e.g. dara" /></label>
+        <div class="space-y-1 text-xs font-medium text-muted"><span class="block">Branch</span><SearchSelect v-model="createForm.branch_id" :options="branchOptions" placeholder="Select a branch" search-placeholder="Search branches…" aria-label="User branch" :aria-invalid="createCheck.invalid('branch_ids')" /></div>
+        <!-- name@branch, filled in from the Name and the Branch: what they sign in with -->
+        <label class="space-y-1 text-xs font-medium text-muted">Username<input :value="createUsername" readonly tabindex="-1" :aria-invalid="createCheck.invalid('username')" class="w-full cursor-default rounded-lg border border-border bg-canvas px-3 py-2 text-sm text-muted" placeholder="Name and branch fill it in" /><small class="block font-normal">They sign in with it.</small></label>
+        <label class="space-y-1 text-xs font-medium text-muted">Info <small>(optional)</small><input v-model.trim="createForm.info" maxlength="255" :aria-invalid="createCheck.invalid('info')" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" placeholder="e.g. cashier, morning shift" /></label>
         <label class="space-y-1 text-xs font-medium text-muted">Temporary password ({{ MIN_PASSWORD_LENGTH }}–{{ MAX_PASSWORD_LENGTH }} characters)<input v-model="createForm.password" type="password" :maxlength="MAX_PASSWORD_LENGTH" :minlength="MIN_PASSWORD_LENGTH" required autocomplete="new-password" autocapitalize="off" autocorrect="off" spellcheck="false" :aria-invalid="createCheck.invalid('password')" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" placeholder="Letters, digits or signs" /></label>
         <div class="space-y-1 text-xs font-medium text-muted"><span class="block">Role</span><SearchSelect v-model="createForm.role_code" :options="createRoleOptions" placeholder="Select a role" search-placeholder="Search roles…" :empty-text="createRoleOptions.length ? undefined : createForm.branch_id ? 'No roles for this branch yet: add one in Roles & Permissions' : 'Choose a branch first'" aria-label="User role" :aria-invalid="createCheck.invalid('role_codes')" /></div>
-        <div class="space-y-1 text-xs font-medium text-muted"><span class="block">Branch</span><SearchSelect v-model="createForm.branch_id" :options="branchOptions" placeholder="Select a branch" search-placeholder="Search branches…" aria-label="User branch" :aria-invalid="createCheck.invalid('branch_ids')" /></div>
         <div class="space-y-1 text-xs font-medium text-muted sm:col-span-2">
           <span class="block">Managers <small>(approve or reject this user's transactions · optional)</small></span>
           <SearchSelect v-model="createForm.manager_ids" :options="managerOptions(null, createForm.branch_id ? [createForm.branch_id] : [])" multiple :disabled="!createForm.branch_id" :placeholder="createForm.branch_id ? 'Anyone with approval rights' : 'Choose a branch first'" search-placeholder="Search people…" aria-label="User managers" />
@@ -26,11 +27,13 @@
       </template>
     </AppModal>
 
-    <AppModal :model-value="!!editingUser" form :title="`Edit ${editingUser?.full_name || ''}`" eyebrow="EDIT USER" :subtitle="editingUser ? `@${editingUser.username}` : ''" :busy="saving" width="660px" @update:model-value="(open) => { if (!open) cancelEdit() }" @submit="saveEdit">
+    <AppModal :model-value="!!editingUser" form :title="`Edit ${editingUser?.full_name || ''}`" eyebrow="EDIT USER" :subtitle="editingUser ? editingUser.username : ''" :busy="saving" width="660px" @update:model-value="(open) => { if (!open) cancelEdit() }" @submit="saveEdit">
       <template #icon><UserPen :size="20" /></template>
       <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <label class="space-y-1 text-xs font-medium text-muted">Full name<input v-model.trim="editForm.full_name" required minlength="2" :aria-invalid="editCheck.invalid('full_name')" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" /></label>
-        <label class="space-y-1 text-xs font-medium text-muted">Email<input v-model.trim="editForm.email" type="email" required :aria-invalid="editCheck.invalid('email')" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" /></label>
+        <label class="space-y-1 text-xs font-medium text-muted">Name<input v-model.trim="editForm.full_name" required minlength="2" maxlength="128" :aria-invalid="editCheck.invalid('full_name')" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" /></label>
+        <!-- Changes with the Name or the branch (name@branch); they then sign in with the new one -->
+        <label class="space-y-1 text-xs font-medium text-muted">Username<input :value="editForm.username" readonly tabindex="-1" :aria-invalid="editCheck.invalid('username')" class="w-full cursor-default rounded-lg border border-border bg-canvas px-3 py-2 text-sm text-muted" /><small v-if="editingUser && editForm.username !== editingUser.username" class="block font-normal text-amber-700">Was {{ editingUser.username }}: they’ll sign in with the new one.</small></label>
+        <label class="space-y-1 text-xs font-medium text-muted sm:col-span-2">Info <small>(optional)</small><input v-model.trim="editForm.info" maxlength="255" :aria-invalid="editCheck.invalid('info')" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" /></label>
         <div v-if="canManageUsers && !isEditingSelf" class="space-y-1 text-xs font-medium text-muted"><span class="block">Roles <small>(select one or more)</small></span><SearchSelect v-model="editForm.role_codes" :options="editRoleOptions" multiple placeholder="Select roles" search-placeholder="Search roles…" aria-label="User roles" :aria-invalid="editCheck.invalid('role_codes')" /></div>
         <div v-if="canManageUsers && !isEditingSelf && branches.length" class="space-y-1 text-xs font-medium text-muted"><span class="block">Branches <small>(select one or more)</small></span><SearchSelect v-model="editForm.branch_ids" :options="branchOptions" multiple placeholder="Select branches" search-placeholder="Search branches…" aria-label="User branches" :aria-invalid="editCheck.invalid('branch_ids')" /></div>
         <div v-if="canManageUsers && !isEditingSelf" class="space-y-1 text-xs font-medium text-muted sm:col-span-2">
@@ -45,7 +48,7 @@
       </template>
     </AppModal>
 
-    <ListSearch v-model="search" placeholder="Search by name, username or email…" />
+    <ListSearch v-model="search" placeholder="Search by name, username or info…" />
     <FilterCard :summary="userFilterSummary" :active="userFiltersActive">
       <div v-if="branches.length > 1 && !activeBranchId" class="filter-field">
         <span>Branch</span>
@@ -68,13 +71,13 @@
               <span class="truncate text-sm font-semibold text-navy">{{ item.full_name }}</span>
               <span class="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase" :class="item.is_active ? 'bg-green-50 text-income' : 'bg-slate-100 text-muted'">{{ item.is_active ? 'Active' : 'Inactive' }}</span>
             </div>
-            <div class="truncate text-xs text-muted">@{{ item.username }} · {{ item.email }}</div>
+            <div class="truncate text-xs text-muted">{{ item.username }}<template v-if="item.info"> · {{ item.info }}</template></div>
             <div class="mt-2 flex flex-wrap gap-1.5">
               <span v-if="item.is_super_admin" class="rounded-full bg-primary/10 px-2 py-1 text-[10px] font-semibold text-primary">Super Admin</span>
               <span v-for="role in item.roles || []" :key="role.id || role.code" class="rounded-full bg-blue-50 px-2 py-1 text-[10px] font-medium text-primary">{{ role.name }}</span>
               <span v-if="!(item.roles || []).length && !item.is_super_admin" class="text-xs text-muted">No role assigned</span>
             </div>
-            <p class="mt-2 text-xs text-muted">Branches: <span class="text-navy">{{ (item.branches || []).map(branch => branch.code).join(', ') || '—' }}</span></p>
+            <p class="mt-2 text-xs text-muted">Branches: <span class="text-navy">{{ (item.branches || []).map(branch => branch.name).join(', ') || '—' }}</span></p>
             <!-- Data scope from the user's roles: whose data they actually see. -->
             <p class="mt-1 text-xs text-muted" :title="scopeTitle(item)">Sees data of: <span class="font-medium" :class="item.data_scope?.all ? 'text-income' : 'text-navy'">{{ scopeText(item) }}</span></p>
             <p v-if="(item.managers || []).length" class="mt-1 text-xs text-muted">Managers: <span class="font-medium text-navy">{{ (item.managers || []).map(manager => manager.full_name || manager.username).join(', ') }}</span></p>
@@ -118,6 +121,7 @@
 </template>
 
 <script setup lang="ts">
+import { branchLabel } from '~/composables/useBranchOptions'
 import { KeyRound, Pencil, Power, RotateCcw, UserPen, UserPlus } from 'lucide-vue-next'
 import type { AdminUser, Branch, Role } from '~/types/api'
 import { useToast } from '~/composables/useToast'
@@ -147,17 +151,42 @@ const editingUser = ref<AdminUser | null>(null)
 const passwordTarget = ref<AdminUser | null>(null)
 const passwordError = ref('')
 const expandedPerms = ref<Record<string, boolean>>({})
-const createForm = reactive({ username: '', email: '', full_name: '', password: '', role_code: '', branch_id: activeBranchId.value, manager_ids: [] as string[] })
-const editForm = reactive({ email: '', full_name: '', role_codes: [] as string[], branch_ids: [] as string[], manager_ids: [] as string[] })
+const createForm = reactive({ full_name: '', info: '', password: '', role_code: '', branch_id: activeBranchId.value, manager_ids: [] as string[] })
+const editForm = reactive({ full_name: '', info: '', username: '', role_codes: [] as string[], branch_ids: [] as string[], manager_ids: [] as string[] })
+
+// The username is the Name and the branch, each in small letters without spaces: "dara@phnompenh"
+// ('' until both are there). A user in several branches goes by their default one, else the first.
+function usernameFor(name: string, branchId: string | undefined) {
+  const branch = branches.value.find(b => b.id === branchId)
+  const part = (text: string) => text.toLowerCase().replace(/[\s@]+/g, '')
+  return part(name) && branch ? `${part(name)}@${part(branch.name)}` : ''
+}
+const createUsername = computed(() => usernameFor(createForm.full_name, createForm.branch_id))
+function usernameBranch(branchIds: string[]) {
+  const own = editingUser.value?.default_branch_id
+  return own && branchIds.includes(own) ? own : branchIds[0]
+}
+// On Edit the username follows the Name and the branches once either is changed (opening the
+// form leaves it as it is).
+let editStart = { name: '', branches: '' }
+watch(() => [editForm.full_name, editForm.branch_ids.join(',')], ([name, ids]) => {
+  if (!editingUser.value) return
+  if (name === editStart.name && ids === editStart.branches) {
+    editForm.username = editingUser.value.username
+    return
+  }
+  const next = usernameFor(editForm.full_name, usernameBranch(editForm.branch_ids))
+  if (next) editForm.username = next
+})
 const passwordForm = reactive({ password: '' })
 
 // Same rules as the API (CreateUserInput, UpdateUserInput, the roles/branches and password endpoints).
 const createCheck = reactive(useFormErrors(
-  () => ({ ...createForm, role_codes: createForm.role_code, branch_ids: createForm.branch_id }),
+  () => ({ ...createForm, username: createUsername.value, role_codes: createForm.role_code, branch_ids: createForm.branch_id }),
   () => ({
-    username: [rule.required('username'), rule.minLength('username', 3), rule.maxLength('username', 64)],
-    email: [rule.required('email'), rule.email('email')],
-    full_name: [rule.required('full name'), rule.minLength('full name', 2)],
+    full_name: [rule.required('name'), rule.minLength('name', 2), rule.maxLength('name', 128)],
+    username: [rule.minLength('username', 3), rule.maxLength('username', 64)],
+    info: [rule.maxLength('info', 255)],
     password: [rule.required('password'), rule.password('password')],
     role_codes: [rule.required('role')],
     branch_ids: [rule.required('branch')],
@@ -166,8 +195,9 @@ const createCheck = reactive(useFormErrors(
 const editCheck = reactive(useFormErrors(
   () => ({ ...editForm }),
   () => ({
-    full_name: [rule.required('full name'), rule.minLength('full name', 2)],
-    email: [rule.required('email'), rule.email('email')],
+    full_name: [rule.required('name'), rule.minLength('name', 2), rule.maxLength('name', 128)],
+    username: [rule.required('username'), rule.minLength('username', 3), rule.maxLength('username', 64)],
+    info: [rule.maxLength('info', 255)],
     ...(canManageUsers.value && !isEditingSelf.value ? { role_codes: [rule.chooseOne('roles')] } : {}),
     ...(canManageUsers.value && !isEditingSelf.value && branches.value.length ? { branch_ids: [rule.chooseOne('branches')] } : {}),
   }),
@@ -186,12 +216,14 @@ const assignableRoles = computed(() => roles.value.filter((role) => {
 function defaultBranchId() {
   return activeBranchId.value || (branches.value.length === 1 ? branches.value[0]!.id : '')
 }
-// Built-in roles (only the owner/admin get them from the API), and roles for the branches the user
-// is in (a branch role is only for its branch).
+// The roles of the branches the user is in (a branch role is only for its branch). The system roles
+// stay out (the Super Admin clones one into a branch on Roles to give it there), except the Super
+// Admin role for the Super Admin. Someone who already holds one keeps it (editRoleOptions).
 function roleOptionsFor(branchIds: string[]) {
   return assignableRoles.value
+    .filter(role => !role.is_system || role.code === 'super_admin')
     .filter(role => !role.branch_id || branchIds.includes(role.branch_id))
-    .map(role => ({ value: role.code, label: role.branch_id ? `${role.name} (${role.branch?.code || 'branch'})` : role.name }))
+    .map(role => ({ value: role.code, label: role.branch_id ? `${role.name} (${role.branch?.name || 'branch'})` : role.name }))
 }
 const createRoleOptions = computed(() => roleOptionsFor(createForm.branch_id ? [createForm.branch_id] : []))
 // A role the editor can't give stays on the list for someone who already has it, so it still shows.
@@ -208,7 +240,7 @@ function fitsBranches(code: string, branchIds: string[]) {
 }
 watch(() => createForm.branch_id, () => { if (createForm.role_code && !fitsBranches(createForm.role_code, createForm.branch_id ? [createForm.branch_id] : [])) createForm.role_code = '' })
 watch(() => [...editForm.branch_ids], () => { editForm.role_codes = editForm.role_codes.filter(code => fitsBranches(code, editForm.branch_ids)) })
-const branchOptions = computed(() => branches.value.map(branch => ({ value: branch.id, label: `${branch.code} — ${branch.name}` })))
+const branchOptions = computed(() => branches.value.map(branch => ({ value: branch.id, label: branchLabel(branch) })))
 const isEditingSelf = computed(() => editingUser.value?.id === currentUserId.value)
 
 function togglePerms(userId: string) {
@@ -219,12 +251,12 @@ function initials(name: string) {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map(part => part[0]!.toUpperCase()).join('')
 }
 
-// "All branches" (owner/admin), or the codes of the user's own branches.
+// "All branches" (owner/admin), or the names of the user’s own branches.
 function scopeText(item: AdminUser) {
   if (item.is_super_admin || item.data_scope?.all) return 'All branches'
   const ids = item.data_scope?.branch_ids || []
   if (!ids.length) return 'No branches'
-  const codes = ids.map(id => branches.value.find(branch => branch.id === id)?.code).filter(Boolean)
+  const codes = ids.map(id => branches.value.find(branch => branch.id === id)?.name).filter(Boolean)
   const hidden = ids.length - codes.length
   return [codes.join(', '), hidden ? `${hidden} more` : ''].filter(Boolean).join(' + ')
 }
@@ -248,7 +280,7 @@ const userFiltersActive = computed(() => !!branchFilter.value || !!roleFilter.va
 const userFilterSummary = computed(() => {
   const branch = branches.value.find(item => item.id === branchFilter.value)
   const role = roles.value.find(item => item.code === roleFilter.value)
-  return `${branch ? branch.code : 'All branches'} · ${role ? role.name : 'All roles'}`
+  return `${branch ? branch.name : 'All branches'} · ${role ? role.name : 'All roles'}`
 })
 
 function fetchUsers() {
@@ -278,7 +310,8 @@ async function load() {
   try {
     const [userResult, roleResult, branchResult, everyone] = await Promise.all([
       fetchUsers(),
-      api<{ items: Role[] }>('/roles', { everyBranch: true }).catch(() => ({ items: [] })),
+      // include_super_admin: the Super Admin can give the Super Admin role (the API leaves it out for anyone else).
+      api<{ items: Role[] }>('/roles', { everyBranch: true, query: { include_super_admin: 'true' } }).catch(() => ({ items: [] })),
       api<{ items: Branch[] }>('/branches?page_size=100').catch(() => ({ items: [] })),
       // Unfiltered list for the Managers picker (the visible list may be filtered).
       api<{ items: AdminUser[] }>('/users', { query: { page_size: 100, is_active: 'true' }, everyBranch: true }).catch(() => ({ items: [] })),
@@ -346,7 +379,7 @@ function managerOptions(forUser: AdminUser | null, branchIds: string[]) {
       if (!full && !APPROVER_CODES.some(code => codes.includes(code))) return false
       return full || (candidate.branches || []).some(branch => branchIds.includes(branch.id))
     })
-    .map(candidate => ({ value: candidate.id, label: `${candidate.full_name} (@${candidate.username})` }))
+    .map(candidate => ({ value: candidate.id, label: `${candidate.full_name} (${candidate.username})` }))
 }
 // Drop managers who stop qualifying when the user's branches change.
 watch(() => [...editForm.branch_ids], () => {
@@ -364,15 +397,16 @@ async function create() {
   if (!createCheck.check()) return
   saving.value = true
   try {
+    const username = createUsername.value
     await api('/users', { method: 'POST', body: {
-      username: createForm.username.trim(), email: createForm.email.trim(), full_name: createForm.full_name.trim(),
+      username, full_name: createForm.full_name.trim(), info: createForm.info.trim(),
       password: createForm.password, role_codes: [createForm.role_code], branch_ids: [createForm.branch_id],
       manager_ids: createForm.manager_ids,
     } })
-    const name = createForm.full_name.trim() || createForm.username.trim()
-    Object.assign(createForm, { username: '', email: '', full_name: '', password: '', role_code: '', branch_id: defaultBranchId(), manager_ids: [] })
+    const name = createForm.full_name.trim()
+    Object.assign(createForm, { full_name: '', info: '', password: '', role_code: '', branch_id: defaultBranchId(), manager_ids: [] })
     showCreate.value = false
-    toast.success(`${name} can sign in with their username and password.`, { title: 'User created' })
+    toast.success(`${name} can sign in with ${username} and their password.`, { title: 'User created' })
     await load()
   } catch (e: any) {
     if (!createCheck.fromApi(e)) createError.value = e?.data?.error || 'Could not create this user.'
@@ -383,9 +417,11 @@ async function create() {
 
 function beginEdit(item: AdminUser) {
   editingUser.value = item
+  editStart = { name: item.full_name, branches: (item.branches || []).map(branch => branch.id).join(',') }
   Object.assign(editForm, {
-    email: item.email,
     full_name: item.full_name,
+    info: item.info || '',
+    username: item.username,
     role_codes: (item.roles || []).map((role) => role.code),
     branch_ids: (item.branches || []).map((branch) => branch.id),
     manager_ids: (item.managers || []).map((manager) => manager.id),
@@ -406,7 +442,8 @@ async function saveEdit() {
   const target = editingUser.value
   saving.value = true
   try {
-    await api(`/users/${target.id}`, { method: 'PATCH', body: { email: editForm.email.trim(), full_name: editForm.full_name.trim() } })
+    const renamed = editForm.username !== target.username
+    await api(`/users/${target.id}`, { method: 'PATCH', body: { full_name: editForm.full_name.trim(), info: editForm.info.trim(), ...(renamed ? { username: editForm.username } : {}) } })
     if (canManageUsers.value && target.id !== currentUserId.value) {
       // Branches first: a role for a branch needs the user in that branch.
       if (branches.value.length) await api(`/users/${target.id}/branches`, { method: 'POST', body: { branch_ids: editForm.branch_ids } })
@@ -414,7 +451,7 @@ async function saveEdit() {
       await api(`/users/${target.id}/managers`, { method: 'POST', body: { manager_ids: editForm.manager_ids } })
     }
     editingUser.value = null
-    toast.success(`${editForm.full_name.trim() || target.full_name}’s details are saved.`, { title: 'User updated' })
+    toast.success(`${editForm.full_name.trim() || target.full_name}’s details are saved.${renamed ? ` They now sign in with ${editForm.username}.` : ''}`, { title: 'User updated' })
     await load()
   } catch (e: any) {
     if (!editCheck.fromApi(e)) editError.value = e?.data?.error || 'Could not update this user.'

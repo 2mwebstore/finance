@@ -30,7 +30,7 @@
       <!-- Each group picked, with the agent's type and rate in it -->
       <ul v-if="showGroups && !groupsLoading && !groupsError && chosenGroups.length" class="space-y-1.5">
         <li v-for="g in chosenGroups" :key="g.id" class="flex flex-wrap items-center gap-x-2 gap-y-1.5 rounded-lg border border-border px-2.5 py-2">
-          <span class="min-w-0 flex-1 basis-full truncate text-sm font-semibold text-navy sm:basis-0">{{ g.title }}<span v-if="!g.is_active" class="ml-1 text-[11px] font-normal text-muted">(off)</span><span v-if="!agentBranch && g.branch_code" class="ml-1 text-[11px] font-normal text-muted">· {{ g.branch_code }}</span></span>
+          <span class="min-w-0 flex-1 basis-full truncate text-sm font-semibold text-navy sm:basis-0">{{ g.title }}<span v-if="!g.is_active" class="ml-1 text-[11px] font-normal text-muted">(off)</span><span v-if="!agentBranch && g.branch_code" class="ml-1 text-[11px] font-normal text-muted">· {{ g.branch_name || g.branch_code }}</span></span>
           <select v-model="groupKinds[g.id]" :aria-label="`Type in ${g.title}`" class="h-9 rounded-lg border border-border bg-white px-2 text-sm font-semibold text-navy">
             <option v-for="t in CALC_TYPES" :key="t.value" :value="t.value">{{ t.label }}</option>
           </select>
@@ -57,7 +57,7 @@ import type { AssignmentGroup, Platform } from '~/types/api'
 import { useToast } from '~/composables/useToast'
 import { useFormErrors } from '~/composables/useFormErrors'
 import { useCurrency } from '~/composables/useCurrency'
-import { useBranchOptions } from '~/composables/useBranchOptions'
+import { branchLabel, useBranchOptions } from '~/composables/useBranchOptions'
 import { rule } from '~/utils/validation'
 import { CALC_TYPES, totalRate } from '~/utils/winlose'
 
@@ -87,7 +87,7 @@ const form = reactive({ code: '', name: '', default_currency: 'USD', branch_id: 
 const formBranchOptions = computed(() => [
   ...(editing.value ? [] : [{ value: '', label: 'My own branch' }]),
   ...(editing.value && !editing.value.branch_id ? [{ value: '', label: 'Shared — choose a branch to move it' }] : []),
-  ...branches.value.map(branch => ({ value: branch.id, label: `${branch.code} — ${branch.name}` })),
+  ...branches.value.map(branch => ({ value: branch.id, label: branchLabel(branch) })),
 ])
 
 // Same rules as the API (services.PlatformInput / SavePlatform).
@@ -129,7 +129,7 @@ const groupFits = (g: AssignmentGroup) => !agentBranch.value || g.branch_id === 
 // Switched-on groups of the agent's branch, plus any it is in now (one turned off since stays listed).
 const groupOptions = computed(() => groups.value
   .filter(g => groupFits(g) && (g.is_active || startGroupIds.value.includes(g.id)))
-  .map(g => ({ value: g.id, label: `${g.title}${!agentBranch.value && g.branch_code ? ` · ${g.branch_code}` : ''}${g.is_active ? '' : ' (off)'}` })))
+  .map(g => ({ value: g.id, label: `${g.title}${!agentBranch.value && g.branch_code ? ` · ${g.branch_name || g.branch_code}` : ''}${g.is_active ? '' : ' (off)'}` })))
 const chosenGroups = computed(() => groupIds.value
   .map(id => groups.value.find(g => g.id === id))
   .filter((g): g is AssignmentGroup => !!g && groupFits(g)))
@@ -230,13 +230,15 @@ async function save() {
       ...(sendGroups ? { groups: chosenGroups.value.map(g => ({ group_id: g.id, commission_rate: groupRates[g.id] || '0', calc_type: groupKinds[g.id] || 'PO' })) } : {}),
     }
     const result = editing.value
-      ? await api<{ counted_weeks?: number }>(`/platforms/${editing.value.id}`, { method: 'PATCH', body })
-      : await api<{ counted_weeks?: number }>('/platforms', { method: 'POST', body })
+      ? await api<{ counted_weeks?: number; reworked_weeks?: number }>(`/platforms/${editing.value.id}`, { method: 'PATCH', body })
+      : await api<{ counted_weeks?: number; reworked_weeks?: number }>('/platforms', { method: 'POST', body })
     saved.value = true
     const n = chosenGroups.value.length
     const weeks = result?.counted_weeks || 0
     const counted = weeks ? ` ${weeks} ${weeks === 1 ? 'week' : 'weeks'} saved before now count in its groups.` : ''
-    toast.success(`${form.code} is saved${sendGroups && n ? `, in ${n} ${n === 1 ? 'group' : 'groups'}` : ''}.${counted}`, { title: editing.value ? 'Agent updated' : 'Agent added' })
+    const again = result?.reworked_weeks || 0
+    const reworked = again ? ` ${again} saved ${again === 1 ? 'week was' : 'weeks were'} worked out again at its new rates.` : ''
+    toast.success(`${form.code} is saved${sendGroups && n ? `, in ${n} ${n === 1 ? 'group' : 'groups'}` : ''}.${counted}${reworked}`, { title: editing.value ? 'Agent updated' : 'Agent added' })
     await navigateTo('/admin/platforms')
   } catch (e: any) {
     if (!formCheck.fromApi(e)) formError.value = e?.data?.error || 'Could not save this agent.'

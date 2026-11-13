@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/cambodia-finance/income-expense/internal/access"
 	"github.com/cambodia-finance/income-expense/internal/models"
 	"github.com/cambodia-finance/income-expense/internal/textsearch"
 	"github.com/google/uuid"
@@ -164,7 +166,18 @@ func (s *BranchService) Update(ctx context.Context, id uuid.UUID, in UpdateBranc
 		}
 	}
 	if len(updates) > 0 {
-		if err := s.db.WithContext(ctx).Model(&branch).Updates(updates).Error; err != nil {
+		err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			if err := tx.Model(&branch).Updates(updates).Error; err != nil {
+				return err
+			}
+			// Made inactive: whoever has no active branch left is signed out (and can't sign in
+			// again: auth.ErrBranchInactive).
+			if in.IsActive != nil && !*in.IsActive {
+				return signOutBranchless(tx, id)
+			}
+			return nil
+		})
+		if err != nil {
 			return nil, err
 		}
 	}
@@ -174,7 +187,35 @@ func (s *BranchService) Update(ctx context.Context, id uuid.UUID, in UpdateBranc
 	return &branch, nil
 }
 
-// Delete archives a branch so its historical financial records remain linked.
+// signOutBranchless revokes the sessions of the branch's people whose every branch is now inactive
+// (not the owner or admins: access.BranchesInactive).
+func signOutBranchless(tx *gorm.DB, branchID uuid.UUID) error {
+	var userIDs []uuid.UUID
+	if err := tx.Model(&models.UserBranch{}).Where("branch_id = ?", branchID).Pluck("user_id", &userIDs).Error; err != nil {
+		return err
+	}
+	if len(userIDs) == 0 {
+		return nil
+	}
+	var users []models.User
+	if err := tx.Preload("Roles.Permissions").Preload("Branches").Where("id IN ?", userIDs).Find(&users).Error; err != nil {
+		return err
+	}
+	var out []uuid.UUID
+	for i := range users {
+		if access.BranchesInactive(&users[i]) {
+			out = append(out, users[i].ID)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return tx.Model(&models.Session{}).Where("user_id IN ? AND is_revoked = ?", out, false).
+		Updates(map[string]interface{}{"is_revoked": true, "revoked_at": time.Now()}).Error
+}
+
+// Delete archives a branch (makes it inactive) so its historical financial records remain linked
+// and stay in the reports; its people with no other active branch are signed out and can't sign in.
 func (s *BranchService) Delete(ctx context.Context, id uuid.UUID) (*models.Branch, error) {
 	isActive := false
 	return s.Update(ctx, id, UpdateBranchInput{IsActive: &isActive})

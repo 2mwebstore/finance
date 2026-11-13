@@ -4,18 +4,18 @@
     <button
       v-for="k in given" :key="k.value" type="button"
       class="reaction-pill inline-flex h-6 items-center gap-1 rounded-full pl-1 pr-1.5 text-xs font-semibold tabular-nums transition-colors disabled:opacity-60 sm:h-7 sm:pl-1.5 sm:pr-2"
-      :class="[mine === k.value ? 'bg-primary text-white' : 'bg-[#e9effd] text-primary hover:bg-[#dce6fc]', popped === k.value ? 'reaction-pop' : '']"
-      :aria-pressed="mine === k.value" :aria-label="`${k.label}, ${who(k.value).length}: ${who(k.value).map(r => r.user_name).join(', ')}`" :aria-disabled="!canReact || undefined" :disabled="busy"
+      :class="[isMine(k.value) ? 'bg-primary text-white' : 'bg-[#e9effd] text-primary hover:bg-[#dce6fc]', popped === k.value ? 'reaction-pop' : '']"
+      :aria-pressed="isMine(k.value)" :aria-label="`${k.label}, ${who(k.value).length}: ${who(k.value).map(r => r.user_name).join(', ')}`" :aria-disabled="!canReact || undefined" :disabled="busy"
       @click="canReact ? react(k.value, $event) : show($event, k.value)" @mouseenter="show($event, k.value)" @mouseleave="tip = null" @focus="show($event, k.value)" @blur="tip = null"
     >
       <span class="text-sm leading-none" aria-hidden="true">{{ k.icon }}</span>
       <!-- Up to three people as their initials, more as a number -->
       <span v-if="who(k.value).length <= 3" class="flex -space-x-1.5" aria-hidden="true">
-        <span v-for="r in who(k.value)" :key="r.user_id" class="grid h-4 w-4 place-items-center rounded-full text-[7px] font-bold text-white ring-2 sm:h-5 sm:w-5 sm:text-[8px]" :class="[colorOf(r.user_id), mine === k.value ? 'ring-primary' : 'ring-[#e9effd]']">{{ initials(r.user_name) }}</span>
+        <span v-for="r in who(k.value)" :key="r.user_id" class="grid h-4 w-4 place-items-center rounded-full text-[7px] font-bold text-white ring-2 sm:h-5 sm:w-5 sm:text-[8px]" :class="[colorOf(r.user_id), isMine(k.value) ? 'ring-primary' : 'ring-[#e9effd]']">{{ initials(r.user_name) }}</span>
       </span>
       <span v-else>{{ who(k.value).length }}</span>
     </button>
-    <!-- Add a reaction: a bar with ✅ and ❌ -->
+    <!-- Add a reaction: a bar with ✅, ❌ and 📤 (report sent) -->
     <button v-if="canReact" ref="adder" type="button" class="grid h-6 w-6 place-items-center sm:h-7 sm:w-7 rounded-full text-slate-400 transition-colors hover:bg-[#e9effd] hover:text-primary disabled:opacity-60" :class="picking ? 'bg-[#e9effd] text-primary' : ''" :aria-expanded="picking" aria-label="Add a reaction" title="React" :disabled="busy" @click="togglePicker">
       <SmilePlus :size="16" />
     </button>
@@ -24,8 +24,8 @@
       <!-- (fixed, so tables that scroll sideways don't cut these off) -->
       <div v-if="picking" ref="bar" class="reaction-bar fixed z-[80] flex -translate-x-1/2 items-center gap-0.5 rounded-full border border-border bg-white p-1 shadow-xl" :class="picking.below ? '' : '-translate-y-full'" :style="{ left: `${picking.x}px`, top: `${picking.y}px` }" role="menu" aria-label="React">
         <button
-          v-for="k in KINDS" :key="k.value" type="button" role="menuitemradio" :aria-checked="mine === k.value" :aria-label="k.label"
-          class="grid h-9 w-9 place-items-center rounded-full text-xl transition-transform hover:scale-125" :class="mine === k.value ? 'bg-[#e9effd]' : ''"
+          v-for="k in KINDS" :key="k.value" type="button" role="menuitemradio" :aria-checked="isMine(k.value)" :aria-label="k.label"
+          class="grid h-9 w-9 place-items-center rounded-full text-xl transition-transform hover:scale-125" :class="isMine(k.value) ? 'bg-[#e9effd]' : ''"
           @click="react(k.value); picking = null"
         >{{ k.icon }}</button>
       </div>
@@ -46,9 +46,10 @@ import type { EntryReaction } from '~/types/api'
 import { useToast } from '~/composables/useToast'
 
 /**
- * ✅ and ❌ on a data entry, like Telegram's reactions: a pill for each one given (yours filled)
- * with who gave it, and a button that opens a bar to add one. A person has one: tapping it again
- * takes it back, the other one changes it (needs React to Data Entry). Hovering a pill shows who.
+ * ✅, ❌ and 📤 (report sent) on a data entry (or a group or agent in it), like Telegram's
+ * reactions: a pill for each one given (yours filled) with who gave it, and a button that opens a bar
+ * to add one. A person has one of ✅ / ❌ (the other changes it) and 📤 beside it; tapping one again
+ * takes it back (needs React to Data Entry). Hovering a pill shows who.
  */
 // url: where a reaction is sent (an entry's, or an agent's result in it).
 const props = defineProps<{ url: string; reactions: EntryReaction[] }>()
@@ -57,6 +58,7 @@ type Kind = EntryReaction['reaction']
 const KINDS: { value: Kind; icon: string; label: string }[] = [
   { value: 'yes', icon: '✅', label: 'Yes' },
   { value: 'no', icon: '❌', label: 'No' },
+  { value: 'sent', icon: '📤', label: 'Report sent' },
 ]
 
 const { api } = useApi()
@@ -66,7 +68,9 @@ const canReact = computed(() => can('winlose.react'))
 const toast = useToast()
 const list = ref<EntryReaction[]>([...props.reactions])
 watch(() => props.reactions, (r) => { list.value = [...r] })
-const mine = computed(() => list.value.find(r => r.user_id === user.value?.id)?.reaction || '')
+// Yours: ✅ or ❌, and 📤 beside it.
+const mineList = computed(() => list.value.filter(r => r.user_id === user.value?.id).map(r => r.reaction))
+const isMine = (kind: Kind) => mineList.value.includes(kind)
 const who = (kind: Kind) => list.value.filter(r => r.reaction === kind)
 const given = computed(() => KINDS.filter(k => who(k.value).length))
 
@@ -82,7 +86,7 @@ async function react(kind: Kind, e?: Event) {
   busy.value = true
   try {
     list.value = (await api<{ reactions: EntryReaction[] }>(props.url, { method: 'POST', body: { reaction: kind } })).reactions
-    if (mine.value === kind) {
+    if (isMine(kind)) {
       popped.value = kind
       setTimeout(() => { if (popped.value === kind) popped.value = '' }, 450)
     }

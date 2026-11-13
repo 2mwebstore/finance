@@ -133,9 +133,9 @@ func (cc *CategoryController) Update(c *gin.Context) {
 func (cc *CategoryController) branchNames() map[uuid.UUID]string {
 	var branches []models.Branch
 	names := map[uuid.UUID]string{}
-	if err := cc.db.Select("id", "code", "name").Find(&branches).Error; err == nil {
+	if err := cc.db.Select("id", "name").Find(&branches).Error; err == nil {
 		for _, b := range branches {
-			names[b.ID] = b.Code + " — " + b.Name
+			names[b.ID] = b.Name
 		}
 	}
 	return names

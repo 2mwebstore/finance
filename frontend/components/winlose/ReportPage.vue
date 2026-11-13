@@ -11,15 +11,23 @@
       <button type="button" class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-white px-3 py-2 text-sm font-medium text-navy disabled:opacity-50" :disabled="!report?.lines.length" @click="exportCsv"><Download :size="16" /> Export CSV</button>
     </header>
 
-    <!-- In a detail only the dates can change, in one entry (or week) of it nothing -->
-    <div v-if="!weekStart" class="grid grid-cols-1 gap-2" :class="inDetail ? '' : showBranch ? 'md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)]' : 'md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]'">
-      <WinloseDateFilter v-model="range" />
+    <!-- Report: the dates (in a detail only they can change, in one entry or week of it nothing).
+         Group summary: a data entry first (nothing shows until one is chosen), then the group. -->
+    <div v-if="summary ? !inDetail : !weekStart" class="grid grid-cols-1 gap-2" :class="filterColumns">
+      <SearchSelect v-if="summary" :model-value="summaryEntry" :options="entryOptions" placeholder="Choose a data entry" search-placeholder="Search data entries…" :empty-text="entriesLoading ? 'Loading…' : 'No data entries'" aria-label="Data entry" @update:model-value="pickEntry" />
+      <WinloseDateFilter v-else v-model="range" />
       <!-- Only for people who work in more than one branch (chosen once for all the RP pages) -->
       <SearchSelect v-if="!inDetail && showBranch" v-model="branchModel" :options="branchOptions" :searchable="false" aria-label="Branch" />
-      <SearchSelect v-if="!inDetail" :model-value="groupId" :options="groupOptions" aria-label="Group" @update:model-value="(id: string) => id && openGroup(id)" />
+      <SearchSelect v-if="showGroupFilter" :model-value="groupId" :options="groupOptions" aria-label="Group" @update:model-value="(id: string) => id && openGroup(id)" />
     </div>
 
-    <div v-if="loading && !report" class="text-sm text-muted">Loading…</div>
+    <!-- Group summary before a data entry is chosen -->
+    <div v-if="summary && !summaryEntry" class="rounded-xl border border-dashed border-border bg-white px-4 py-10 text-center">
+      <FileText :size="22" class="mx-auto text-muted" />
+      <p class="mt-2 text-sm font-semibold text-navy">{{ entriesLoading ? 'Loading data entries…' : entries.length ? 'Choose a data entry' : 'No data entries yet' }}</p>
+      <p class="mt-1 text-xs text-muted">{{ entries.length || entriesLoading ? 'Its groups and agents show here, with ✅ / ❌ / 📤 and Image.' : 'Entries made in Data Entry show up here.' }}</p>
+    </div>
+    <div v-else-if="loading && !report" class="text-sm text-muted">Loading…</div>
     <AppAlert v-else-if="error" :title="summary ? 'Couldn’t load the summary' : 'Couldn’t load the report'" :message="error" />
     <template v-else-if="report">
       <WinloseTotals v-if="report.totals.length" :totals="report.totals" title="Totals" />
@@ -32,10 +40,13 @@
         <p v-if="!report.groups.length" class="rounded-xl border border-border bg-white px-4 py-8 text-center text-sm text-muted">No results entered for these weeks.</p>
       </template>
       <template v-else>
-        <WinloseGroupTotals v-if="!groupId" :groups="report.groups" selectable @select="openGroup" />
-        <!-- One group: its agents, each at its rate in the group -->
+        <!-- Group summary (one data entry): each group with its ✅ / ❌ in the entry -->
+        <WinloseGroupTotals v-if="!groupId" :groups="report.groups" selectable :entry-id="summary ? entryId : ''" @select="openGroup" />
+        <!-- One group: its agents, each at its rate in the group (on Group summary with the group's ✅ / ❌) -->
         <div v-if="groupId" class="space-y-1">
-          <h2 class="flex items-center gap-2 text-sm font-semibold text-navy"><Network :size="15" /> {{ groupTitle }}</h2>
+          <h2 class="flex flex-wrap items-center gap-2 text-sm font-semibold text-navy"><Network :size="15" /> {{ groupTitle }}
+            <WinloseEntryReactions v-if="summary && entryId && groupRow?.group_id" class="font-normal" :url="`/winlose/entries/${entryId}/groups/${groupRow.group_id}/reactions`" :reactions="groupRow.reactions || []" />
+          </h2>
         </div>
         <!-- One entry (or week) of a group: its agents in each data entry (a title opens the entry);
              on Group summary with ✅ / ❌ and an Image button -->
@@ -75,30 +86,23 @@
         <WinloseEntryTotals v-if="groupId && !weekStart" title="By week" :entries="report.entries || []" selectable :reactions="summary" @select="openEntry" />
       </template>
     </template>
-
-    <!-- Report: the settlement, only for a whole Monday-to-Sunday week -->
-    <template v-if="!summary">
-      <WinloseSettlements v-if="isWholeWeek" :week-start="range.from" :branch-id="branch" @changed="load" />
-      <p v-else class="text-[11px] text-muted">Choose a whole week (Monday to Sunday) to see or finalize its settlement.</p>
-    </template>
   </section>
 </template>
 
 <script setup lang="ts">
 import { ChevronLeft, Download, FileText, Network } from 'lucide-vue-next'
-import type { WinLoseReportEntry } from '~/types/api'
+import type { WinLoseEntry, WinLoseReportEntry } from '~/types/api'
 import { useWinLoseReport } from '~/composables/useWinLoseReport'
 import { currentMonthRange } from '~/utils/dateRanges'
 import { formatDocDate } from '~/utils/inventory'
 import { currencyTables, downloadCsv, mondayOf, plusDays, weekLabel } from '~/utils/winlose'
 
 /**
- * The win/lose Report and the Group summary: totals by group and by agent over the dates, where a
- * group opens its agents, an agent its groups and a week of a detail (By week) that week of it.
- * Report (default) has the week's settlement; Group summary (summary) has each entry's ✅ / ❌, each
- * agent's in an entry (its result's, as in Data entry) and the Image button (a picture of an entry
- * or of a group over the dates). Every switched-on group and agent is listed (0 with no results),
- * A to Z: By group in one table, a row per group with its USD and KHR amounts in it
+ * The win/lose Report and the Group summary: totals by group and by agent, where a group opens its
+ * agents, an agent its groups and a week of a detail (By week) that week of it. Report (default)
+ * is over the dates and lists only the groups and agents with results in them. Group summary (summary) is one data entry, chosen in its Data entry filter (nothing
+ * shows until one is): every group and agent of the entry's branch (at 0 when it has no results
+ * there), the entry's ✅ / ❌, each group's and agent's (an agent's as in Data entry) and the Image button (a picture of the entry, or of a group in it). A to Z: By group in one table, a row per group with its USD and KHR amounts in it
  * ("$1,000.00 / -៛500,000"); the rest in a table per currency (USD first, then KHR).
  */
 const props = withDefaults(defineProps<{ summary?: boolean }>(), { summary: false })
@@ -107,14 +111,58 @@ const route = useRoute()
 const thisMonth = currentMonthRange()
 const range = ref({ from: String(route.query.from || thisMonth.from), to: String(route.query.to || thisMonth.to) }) // this month
 // A detail has its data entries too (By week); one entry of it, only that entry's results.
-const { report, loading, error, load, groups, groupId, agentId, groupOptions, showBranch, branchModel, branchOptions, branch } = useWinLoseReport(() => range.value, { byEntry: () => inDetail.value, entryId: () => entryId.value })
+// Group summary: the data entry chosen (its id and week are in the address as entry and week).
+const summaryEntry = computed(() => props.summary ? String(route.query.entry || '') : '')
+const { report, loading, error, load, groups, groupId, agentId, groupOptions, showBranch, branchModel, branchOptions, branch } = useWinLoseReport(() => range.value, {
+  byEntry: () => inDetail.value || !!summaryEntry.value,
+  entryId: () => entryId.value,
+  everyone: () => props.summary,
+  enabled: () => !props.summary || !!summaryEntry.value,
+})
+const { api } = useApi()
+
+// Group summary's Data entry filter: the entries of the branch chosen (newest first). Choosing one
+// shows it; one that isn't in the list after the branch changes is let go.
+const entries = ref<WinLoseEntry[]>([])
+const entriesLoading = ref(false)
+const entryOptions = computed(() => entries.value.map(e => ({
+  value: e.id,
+  label: `${e.title} · ${e.branch_name || e.branch_code}`, // only the title and the branch
+})))
+async function loadEntries() {
+  if (!props.summary) return
+  entriesLoading.value = true
+  try {
+    entries.value = (await api<{ items: WinLoseEntry[] }>('/winlose/entries', { query: { branch_id: branch.value || undefined } })).items || []
+  } catch {
+    entries.value = []
+  } finally {
+    entriesLoading.value = false
+  }
+  if (summaryEntry.value && !entries.value.some(e => e.id === summaryEntry.value)) pickEntry('')
+}
+onMounted(loadEntries)
+watch(branch, loadEntries)
+function pickEntry(id: string) {
+  const e = entries.value.find(item => item.id === id)
+  const { entry: _e, week: _w, ...rest } = withoutDetail()
+  router.replace({ query: e ? { ...rest, entry: e.id, week: e.week_start } : rest })
+}
 
 // A group's title (in By group) opens its agents, an agent's code its groups, and a week in a
 // detail's By week that week of it. Each goes in the address, so the phone's back button (or Back)
 // closes it again.
 const router = useRouter()
 const inDetail = computed(() => !!groupId.value || !!agentId.value)
+// Group summary has the group filter once a data entry is chosen.
+const showGroupFilter = computed(() => !inDetail.value && (!props.summary || !!summaryEntry.value))
+const filterColumns = computed(() => {
+  const count = 1 + (!inDetail.value && showBranch.value ? 1 : 0) + (showGroupFilter.value ? 1 : 0)
+  return count === 3 ? 'md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)]' : count === 2 ? 'md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]' : ''
+})
 const groupTitle = computed(() => groups.value.find(g => g.id === groupId.value)?.title || 'Group')
+// The open group's row in the report (its ✅ / ❌ in Group summary's entry).
+const groupRow = computed(() => report.value?.groups.find(g => g.group_id === groupId.value))
 const agentCode = ref('')
 watch(report, (r) => {
   const line = r?.lines.find(l => l.platform_id === agentId.value)
@@ -139,9 +187,11 @@ function openEntry(e: WinLoseReportEntry) {
   router.push({ query: { ...route.query, week: e.week_start, entry: e.id } })
   window.scrollTo({ top: 0, behavior: 'smooth' })
 }
-// Back: to the step before when it was on this page, else out of the entry, else out of the detail.
+// Back: to the step before when it was on this page, else out of the entry, else out of the detail
+// (Group summary keeps its data entry).
 function goBack() {
   if (String(window.history.state?.back || '').startsWith(route.path)) return router.back()
+  if (props.summary) return router.replace({ query: withoutDetail() })
   const { week, entry: _e, ...withoutEntry } = route.query
   router.replace({ query: week ? withoutEntry : withoutDetail() })
 }
@@ -150,11 +200,13 @@ watch(() => [route.query.group, route.query.agent], ([group, agent]) => {
   agentId.value = String(agent || '')
 })
 
-// One entry (or week) of a detail: the dates are its week, and the dates before come back when it
-// closes.
+// One entry (or week) of a detail, or Group summary's data entry: the dates are its week, and the
+// dates before come back when it closes.
 const weekStart = computed(() => {
   const week = String(route.query.week || '')
-  return inDetail.value && /^\d{4}-\d{2}-\d{2}$/.test(week) ? mondayOf(week) : ''
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(week)) return ''
+  if (props.summary) return summaryEntry.value ? mondayOf(week) : ''
+  return inDetail.value ? mondayOf(week) : ''
 })
 const entryId = computed(() => weekStart.value ? String(route.query.entry || '') : '')
 let rangeBefore: { from: string; to: string } | null = null
@@ -180,11 +232,9 @@ const groupCard = computed(() => {
   const inEntry = new Map((only.lines || []).map(l => [`${l.platform_id}|${l.currency}`, l]))
   return { ...r, lines: r.lines.map((l) => {
     const e = inEntry.get(`${l.platform_id}|${l.currency}`)
-    return e?.result_id ? { ...l, result_id: e.result_id, reactions: e.reactions } : l
+    return e?.entry_id ? { ...l, entry_id: e.entry_id, result_id: e.result_id, reactions: e.reactions } : l
   }) }
 })
-
-const isWholeWeek = computed(() => !!range.value.from && mondayOf(range.value.from) === range.value.from && plusDays(range.value.from, 6) === range.value.to)
 
 // The same columns on both, in the order shown (USD agents, then KHR); Group summary is named for it.
 function exportCsv() {

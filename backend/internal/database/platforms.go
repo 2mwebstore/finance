@@ -8,7 +8,7 @@ import (
 )
 
 // Platform tables (HQ = branch): platforms, partners, branch assignments and their partners,
-// weekly win/lose results with each partner's share, and weekly settlements. Same SQL as migrations/000013_platforms.up.sql (a test keeps them in step).
+// weekly win/lose results with each partner's share. Same SQL as migrations/000013_platforms.up.sql (a test keeps them in step).
 // Adds what is missing: tables, columns, keys, then foreign keys. The only drops are the unique
 // keys replaced when an agent could be in several groups and a week have several entries
 // (oldPlatformKeys).
@@ -186,6 +186,7 @@ var platformTables = []string{
 	entry_id CHAR(36) NOT NULL,
 	user_id CHAR(36) NOT NULL,
 	reaction VARCHAR(8) NOT NULL,
+	sent_at DATETIME(3) NULL,
 	created_at DATETIME(3) NULL,
 	updated_at DATETIME(3) NULL,
 	PRIMARY KEY (id),
@@ -203,35 +204,33 @@ var platformTables = []string{
 	UNIQUE KEY uq_weekly_result_reaction (result_id, user_id),
 	KEY idx_weekly_result_reactions_user (user_id)
 )`,
-	`CREATE TABLE IF NOT EXISTS weekly_settlements (
+	`CREATE TABLE IF NOT EXISTS weekly_group_reactions (
 	id CHAR(36) NOT NULL,
-	branch_id CHAR(36) NOT NULL,
-	week_start DATE NOT NULL,
-	week_end DATE NOT NULL,
-	status VARCHAR(16) NOT NULL,
-	finalized_by_id CHAR(36) NOT NULL,
-	finalized_at DATETIME(3) NOT NULL,
-	reopened_by_id CHAR(36) NULL,
-	reopened_at DATETIME(3) NULL,
-	reopen_reason VARCHAR(512) NOT NULL DEFAULT '',
+	entry_id CHAR(36) NOT NULL,
+	group_id CHAR(36) NOT NULL,
+	user_id CHAR(36) NOT NULL,
+	reaction VARCHAR(8) NOT NULL,
+	sent_at DATETIME(3) NULL,
 	created_at DATETIME(3) NULL,
 	updated_at DATETIME(3) NULL,
-	deleted_at DATETIME(3) NULL,
 	PRIMARY KEY (id),
-	UNIQUE KEY uq_weekly_settlement (branch_id, week_start),
-	KEY idx_weekly_settlements_deleted_at (deleted_at)
+	UNIQUE KEY uq_weekly_group_reaction (entry_id, group_id, user_id),
+	KEY idx_weekly_group_reactions_group (group_id),
+	KEY idx_weekly_group_reactions_user (user_id)
 )`,
-	`CREATE TABLE IF NOT EXISTS weekly_settlement_totals (
+	`CREATE TABLE IF NOT EXISTS weekly_agent_reactions (
 	id CHAR(36) NOT NULL,
-	settlement_id CHAR(36) NOT NULL,
-	currency VARCHAR(3) NOT NULL,
-	win_lose DECIMAL(19,4) NOT NULL,
-	commission DECIMAL(19,4) NOT NULL,
-	adjusted_amount DECIMAL(19,4) NOT NULL,
-	jame_ps DECIMAL(19,4) NOT NULL,
-	entries INT NOT NULL DEFAULT 0,
+	entry_id CHAR(36) NOT NULL,
+	platform_id CHAR(36) NOT NULL,
+	user_id CHAR(36) NOT NULL,
+	reaction VARCHAR(8) NOT NULL,
+	sent_at DATETIME(3) NULL,
+	created_at DATETIME(3) NULL,
+	updated_at DATETIME(3) NULL,
 	PRIMARY KEY (id),
-	UNIQUE KEY uq_weekly_settlement_total (settlement_id, currency)
+	UNIQUE KEY uq_weekly_agent_reaction (entry_id, platform_id, user_id),
+	KEY idx_weekly_agent_reactions_platform (platform_id),
+	KEY idx_weekly_agent_reactions_user (user_id)
 )`,
 }
 
@@ -242,6 +241,10 @@ var platformColumns = []struct{ table, column, ddl string }{
 	{"hq_platform_assignments", "calc_type", "ALTER TABLE hq_platform_assignments ADD COLUMN calc_type VARCHAR(2) NOT NULL DEFAULT 'PO' AFTER commission_rate"},
 	{"weekly_group_results", "calc_type", "ALTER TABLE weekly_group_results ADD COLUMN calc_type VARCHAR(2) NOT NULL DEFAULT 'PO' AFTER commission_rate"},
 	{"weekly_platform_results", "entry_id", "ALTER TABLE weekly_platform_results ADD COLUMN entry_id CHAR(36) NULL AFTER id"},
+	// 📤 (the report was sent), given beside ✅ / ❌.
+	{"weekly_entry_reactions", "sent_at", "ALTER TABLE weekly_entry_reactions ADD COLUMN sent_at DATETIME(3) NULL AFTER reaction"},
+	{"weekly_group_reactions", "sent_at", "ALTER TABLE weekly_group_reactions ADD COLUMN sent_at DATETIME(3) NULL AFTER reaction"},
+	{"weekly_agent_reactions", "sent_at", "ALTER TABLE weekly_agent_reactions ADD COLUMN sent_at DATETIME(3) NULL AFTER reaction"},
 }
 
 // platformNullable are columns that may be empty since they first shipped: changed when NOT NULL.
@@ -259,6 +262,14 @@ const fillResultEntries = `UPDATE weekly_platform_results r JOIN weekly_entries 
 const fillGroupResults = `INSERT IGNORE INTO weekly_group_results (id, result_id, group_id, assignment_id, commission_rate, jame_ps, created_at, updated_at)
 	SELECT UUID(), r.id, a.group_id, a.id, r.commission_rate, r.jame_ps, NOW(3), NOW(3)
 	FROM weekly_platform_results r JOIN hq_platform_assignments a ON a.id = r.assignment_id`
+
+// An agent's ✅ / ❌ in an entry were on its result: they go on the agent in the entry (so one with no
+// result can have them too). Run once, when the table is created (a reaction taken back after that
+// must not come back).
+const fillAgentReactions = `INSERT IGNORE INTO weekly_agent_reactions (id, entry_id, platform_id, user_id, reaction, created_at, updated_at)
+	SELECT x.id, r.entry_id, r.platform_id, x.user_id, x.reaction, x.created_at, x.updated_at
+	FROM weekly_result_reactions x JOIN weekly_platform_results r ON r.id = x.result_id
+	WHERE r.entry_id IS NOT NULL AND r.deleted_at IS NULL`
 
 // Agents made before they belonged to a branch: one used in exactly one branch's groups goes to that
 // branch (so its data is kept apart); one used in several, or in none, stays shared (no branch) until
@@ -328,9 +339,12 @@ var platformForeignKeys = []foreignKey{
 	{"weekly_entry_reactions", "fk_weekly_entry_reactions_user", "user_id", "users(id)"},
 	{"weekly_result_reactions", "fk_weekly_result_reactions_result", "result_id", "weekly_platform_results(id) ON DELETE CASCADE"},
 	{"weekly_result_reactions", "fk_weekly_result_reactions_user", "user_id", "users(id)"},
-	{"weekly_settlements", "fk_weekly_settlements_branch", "branch_id", "branches(id)"},
-	{"weekly_settlements", "fk_weekly_settlements_finalized_by", "finalized_by_id", "users(id)"},
-	{"weekly_settlement_totals", "fk_weekly_settlement_totals_settlement", "settlement_id", "weekly_settlements(id) ON DELETE CASCADE"},
+	{"weekly_group_reactions", "fk_weekly_group_reactions_entry", "entry_id", "weekly_entries(id) ON DELETE CASCADE"},
+	{"weekly_group_reactions", "fk_weekly_group_reactions_group", "group_id", "assignment_groups(id) ON DELETE CASCADE"},
+	{"weekly_group_reactions", "fk_weekly_group_reactions_user", "user_id", "users(id)"},
+	{"weekly_agent_reactions", "fk_weekly_agent_reactions_entry", "entry_id", "weekly_entries(id) ON DELETE CASCADE"},
+	{"weekly_agent_reactions", "fk_weekly_agent_reactions_platform", "platform_id", "platforms(id) ON DELETE CASCADE"},
+	{"weekly_agent_reactions", "fk_weekly_agent_reactions_user", "user_id", "users(id)"},
 }
 
 func (fk foreignKey) sql() string {
@@ -357,6 +371,7 @@ func EnsurePlatformTables(db *gorm.DB) error {
 	groupsCreated := !db.Migrator().HasTable("assignment_groups")
 	resultsBefore := db.Migrator().HasTable("weekly_platform_results")
 	groupResultsCreated := !db.Migrator().HasTable("weekly_group_results")
+	agentReactionsCreated := !db.Migrator().HasTable("weekly_agent_reactions")
 	options := tableOptions(branchCollation(db))
 	for _, stmt := range platformTables {
 		if err := db.Exec(stmt + options).Error; err != nil {
@@ -418,6 +433,11 @@ func EnsurePlatformTables(db *gorm.DB) error {
 	}
 	if groupResultsCreated && resultsBefore {
 		if err := db.Exec(fillGroupResults).Error; err != nil {
+			return err
+		}
+	}
+	if agentReactionsCreated {
+		if err := db.Exec(fillAgentReactions).Error; err != nil {
 			return err
 		}
 	}

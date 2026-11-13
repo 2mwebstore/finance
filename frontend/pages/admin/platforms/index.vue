@@ -42,7 +42,7 @@
               <span class="block text-[11px] text-muted"><span class="sm:hidden">{{ platform.default_currency }}</span><template v-if="platform.name && platform.name !== platform.code"><span class="sm:hidden"> · </span>{{ platform.name }}</template></span>
             </td>
             <td class="hidden px-2 py-2.5 sm:table-cell sm:px-3">{{ platform.default_currency }}</td>
-            <td v-if="showBranch" class="hidden px-2 py-2.5 sm:table-cell sm:px-3"><span v-if="platform.branch_code">{{ platform.branch_code }}</span><span v-else class="text-muted" title="Shared: every branch sees it">Shared</span></td>
+            <td v-if="showBranch" class="hidden px-2 py-2.5 sm:table-cell sm:px-3"><span v-if="platform.branch_code">{{ platform.branch_name || platform.branch_code }}</span><span v-else class="text-muted" title="Shared: every branch sees it">Shared</span></td>
             <td class="px-2 py-2.5 text-right tabular-nums sm:px-3">{{ platform.active_hqs }}</td>
             <td v-if="canEdit || canDelete" class="px-2 py-2 sm:px-3">
               <div class="flex justify-end gap-1 sm:gap-1.5">

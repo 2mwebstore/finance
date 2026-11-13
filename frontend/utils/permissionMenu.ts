@@ -82,8 +82,8 @@ export const PERMISSION_MENU: PermissionMenuSection[] = [
     caption: 'RP',
     pages: [
       { key: 'winlose-entry', label: 'Data Entry', icon: NotebookPen, codes: [P.WinLoseView, P.WinLoseCreate, P.WinLoseEdit, P.WinLoseDelete, P.WinLoseReact] },
-      { key: 'winlose-weekly', label: 'Report', icon: CalendarRange, codes: [P.WinLoseReportsView, P.WinLoseReportsConsolidated, P.WinLoseReportsRates, P.WinLoseSettlementsFinalize] },
       { key: 'winlose-branch-summary', label: 'Group Summary', icon: ChartColumn, codes: [P.WinLoseReportsView, P.WinLoseReportsConsolidated, P.WinLoseReportsRates] },
+      { key: 'winlose-weekly', label: 'Report', icon: CalendarRange, codes: [P.WinLoseReportsView, P.WinLoseReportsConsolidated, P.WinLoseReportsRates] },
       { key: 'platforms', label: 'Agents', icon: Layers, codes: [P.PlatformsView, P.PlatformsCreate, P.PlatformsEdit, P.PlatformsDelete] },
       { key: 'platform-assignments', label: 'Group Agent Assignments', icon: Network, codes: [P.PlatformAssignmentsView, P.PlatformAssignmentsCreate, P.PlatformAssignmentsEdit, P.PlatformAssignmentsDelete] },
     ],

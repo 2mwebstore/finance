@@ -40,3 +40,30 @@ func TestBranchScope(t *testing.T) {
 		})
 	}
 }
+
+// Only someone whose every branch is inactive is kept from signing in; never the owner or an admin.
+// The inactive branch stays in their data scope (its data stays in the reports).
+func TestBranchesInactive(t *testing.T) {
+	open := models.Branch{Base: models.Base{ID: uuid.MustParse("44444444-4444-4444-4444-444444444444")}, Code: "BR-001", IsActive: true}
+	off := models.Branch{Base: models.Base{ID: uuid.MustParse("33333333-3333-3333-3333-333333333333")}, Code: "KP-01"}
+	admin := []models.Role{{Permissions: []models.Permission{{Code: "branches.manage"}}}}
+	cases := []struct {
+		name string
+		user models.User
+		want bool
+	}{
+		{"every branch inactive", models.User{Branches: []models.Branch{off}}, true},
+		{"one branch still active", models.User{Branches: []models.Branch{off, open}}, false},
+		{"no branch at all", models.User{}, false},
+		{"an admin in an inactive branch", models.User{Branches: []models.Branch{off}, Roles: admin}, false},
+		{"super admin in an inactive branch", models.User{Branches: []models.Branch{off}, IsSuperAdmin: true}, false},
+	}
+	for _, c := range cases {
+		if got := BranchesInactive(&c.user); got != c.want {
+			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
+		}
+	}
+	if ids, _ := BranchScope(&models.User{Branches: []models.Branch{off, open}}); len(ids) != 2 {
+		t.Errorf("an inactive branch should stay in the data scope, got %v", ids)
+	}
+}

@@ -59,7 +59,7 @@ func newWLFixture(t *testing.T) *wlFixture {
 		t.Fatal(err)
 	}
 	f := &wlFixture{db: db, svc: NewPlatformService(db, "Asia/Phnom_Penh"), ctx: context.Background(), entries: map[string]string{}}
-	for _, table := range []string{"weekly_settlement_totals", "weekly_settlements", "weekly_group_results", "weekly_partner_results", "weekly_result_reactions", "weekly_platform_results", "weekly_entry_reactions", "weekly_entries", "assignment_partners", "hq_platform_assignments", "assignment_groups"} {
+	for _, table := range []string{"weekly_agent_reactions", "weekly_group_reactions", "weekly_group_results", "weekly_partner_results", "weekly_result_reactions", "weekly_platform_results", "weekly_entry_reactions", "weekly_entries", "assignment_partners", "hq_platform_assignments", "assignment_groups"} {
 		db.Exec("DELETE FROM " + table)
 	}
 	db.Exec("DELETE FROM platforms WHERE code LIKE 'TWL%'")
@@ -287,7 +287,7 @@ func TestAgentReactions(t *testing.T) {
 		t.Fatal(err)
 	}
 	var left int64
-	f.db.Model(&models.WeeklyResultReaction{}).Where("result_id = ?", *r1.ResultID).Count(&left)
+	f.db.Model(&models.WeeklyAgentReaction{}).Where("entry_id = ?", sheet.Entry.ID).Count(&left)
 	if left != 0 {
 		t.Errorf("%d agent reactions left after deleting the entry", left)
 	}
@@ -347,6 +347,407 @@ func TestAgentReactionsInAGroup(t *testing.T) {
 		t.Fatal(err)
 	}
 	checkReportReactions(t, f, &g.ID, sheet.Entry.ID, *r1.ResultID, "TWL Tester yes")
+}
+
+// ✅ / ❌ on a group in an entry (Group summary): one each, given, changed and taken back like the
+// others; the report of that one entry has them on the group (over dates it has none); a group of
+// the entry's branch with no results in it can have them too; a switched-off one, another branch's
+// group or entry, or another reaction can't be given; deleting the entry removes them.
+func TestGroupReactions(t *testing.T) {
+	f := newWLFixture(t)
+	f.db.Model(&models.User{}).Where("id = ?", f.actor).Update("default_branch_id", f.hq[0].ID)
+	defer f.db.Model(&models.User{}).Where("id = ?", f.actor).Update("default_branch_id", nil)
+	g, err := f.svc.CreateGroup(f.ctx, GroupInput{Title: "Reacted group", Agents: []GroupAgentInput{{PlatformID: f.p1.ID.String(), CommissionRate: "10"}}, StartsOn: dayString(f.week)}, all, f.actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	empty, err := f.svc.CreateGroup(f.ctx, GroupInput{Title: "No results", Agents: []GroupAgentInput{{PlatformID: f.p2.ID.String(), CommissionRate: "10"}}, StartsOn: dayString(f.week)}, all, f.actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sheet, _, err := f.save(f.week, 0, canAll, "", row(f.p1, "1000", "200"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := sheet.Entry.ID
+	other := models.User{Username: "twl_group_reactor", Email: "twl_group_reactor@example.test", PasswordHash: "x", FullName: "Group Reactor", IsActive: true}
+	f.db.Unscoped().Where("username = ?", other.Username).Delete(&models.User{})
+	if err := f.db.Create(&other).Error; err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		f.db.Exec("DELETE FROM weekly_group_reactions WHERE user_id = ?", other.ID)
+		f.db.Unscoped().Delete(&other)
+	})
+
+	react := func(who uuid.UUID, reaction string) (string, []EntryReaction) {
+		t.Helper()
+		_, group, now, list, err := f.svc.ReactToGroup(f.ctx, entry, g.ID, reaction, all, who)
+		if err != nil || group.ID != g.ID {
+			t.Fatalf("react %s: %v", reaction, err)
+		}
+		return now, list
+	}
+	if now, list := react(f.actor, "yes"); now != "yes" || len(list) != 1 {
+		t.Errorf("given: %q %+v", now, list)
+	}
+	if now, list := react(other.ID, "no"); now != "no" || len(list) != 2 {
+		t.Errorf("someone else's: %q %+v", now, list)
+	}
+	if now, list := react(f.actor, "no"); now != "no" || len(list) != 2 {
+		t.Errorf("changed: %q %+v", now, list)
+	}
+	if now, list := react(f.actor, "no"); now != "" || len(list) != 1 || list[0].UserName != "Group Reactor" {
+		t.Errorf("taken back: %q %+v", now, list)
+	}
+
+	// The entry's report has them on the group; over the dates, none.
+	span := ReportFilter{DateFrom: dayString(f.week), DateTo: dayString(f.week.AddDate(0, 0, 6))}
+	one := span
+	one.EntryID = &entry
+	reactionsOn := func(r *WinLoseReport) []EntryReaction {
+		for _, row := range r.Groups {
+			if row.GroupID != nil && *row.GroupID == g.ID {
+				return row.Reactions
+			}
+		}
+		t.Fatalf("the group is in the report: %+v", r.Groups)
+		return nil
+	}
+	if rep, err := f.svc.Report(f.ctx, one, all, true, f.actor); err != nil || len(reactionsOn(rep)) != 1 || reactionsOn(rep)[0].Reaction != "no" {
+		t.Errorf("the entry's report: %v", err)
+	}
+	if rep, err := f.svc.Report(f.ctx, span, all, true, f.actor); err != nil || reactionsOn(rep) != nil {
+		t.Errorf("over dates no group reactions: %v", err)
+	}
+
+	// A group of the branch with no results in the entry can have them (it is listed at 0).
+	if _, _, now, list, err := f.svc.ReactToGroup(f.ctx, entry, empty.ID, "yes", all, f.actor); err != nil || now != "yes" || len(list) != 1 {
+		t.Errorf("a group with no results in the entry: %q %+v %v", now, list, err)
+	}
+	// Not on a switched-off group with none, another branch's group or entry, or another reaction.
+	f.db.Model(&models.AssignmentGroup{}).Where("id = ?", empty.ID).Update("is_active", false)
+	if _, _, _, _, err := f.svc.ReactToGroup(f.ctx, entry, empty.ID, "no", all, f.actor); !errors.Is(err, ErrGroupNotFound) {
+		t.Errorf("a switched-off group with no results in the entry: %v", err)
+	}
+	elsewhere, err := f.svc.CreateGroup(f.ctx, GroupInput{Title: "Elsewhere", Agents: []GroupAgentInput{{PlatformID: f.p2.ID.String(), CommissionRate: "10"}}, StartsOn: dayString(f.week), BranchID: f.hq[1].ID.String()}, all, f.actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, _, err := f.svc.ReactToGroup(f.ctx, entry, elsewhere.ID, "yes", all, f.actor); !errors.Is(err, ErrGroupNotFound) {
+		t.Errorf("another branch's group: %v", err)
+	}
+	if _, _, _, _, err := f.svc.ReactToGroup(f.ctx, entry, g.ID, "yes", f.scope(1), f.actor); err == nil {
+		t.Error("an entry of a branch the person doesn't work in: want an error")
+	}
+	if _, _, _, _, err := f.svc.ReactToGroup(f.ctx, entry, g.ID, "maybe", all, f.actor); err == nil {
+		t.Error("another reaction: want an error")
+	}
+
+	// Deleting the entry removes them.
+	if _, _, err := f.svc.DeleteEntry(f.ctx, entry, "a test", all); err != nil {
+		t.Fatal(err)
+	}
+	var left int64
+	f.db.Model(&models.WeeklyGroupReaction{}).Where("entry_id = ?", entry).Count(&left)
+	if left != 0 {
+		t.Errorf("the entry's group reactions are gone: %d", left)
+	}
+}
+
+// Group summary's one data entry (EntryID with Everyone): every switched-on group and agent of the
+// entry's branch is listed, at 0 when it has no results there, in the groups and in the entry's
+// lines; an agent at 0 can have ✅ / ❌ too (and one with a result keeps them by its result); a group
+// at 0 opens to its agents at 0 in the entry. Another branch's agent can't be reacted to.
+
+// 📤 (sent: the report was sent) is given on its own, beside a person's ✅ or ❌, on an entry, a group
+// in it and an agent in it: tapped again it is taken back, and ✅ / ❌ come and go without it. Kept
+// on the person's one row (sent_at).
+func TestSentReaction(t *testing.T) {
+	f := newWLFixture(t)
+	f.db.Model(&models.User{}).Where("id = ?", f.actor).Update("default_branch_id", f.hq[0].ID)
+	defer f.db.Model(&models.User{}).Where("id = ?", f.actor).Update("default_branch_id", nil)
+	g, err := f.svc.CreateGroup(f.ctx, GroupInput{Title: "Sent group", Agents: []GroupAgentInput{{PlatformID: f.p1.ID.String(), CommissionRate: "10"}}, StartsOn: dayString(f.week)}, all, f.actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sheet, _, err := f.save(f.week, 0, canAll, "", row(f.p1, "1000", "200"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := sheet.Entry.ID
+	kinds := func(list []EntryReaction) string {
+		var out []string
+		for _, r := range list {
+			out = append(out, r.Reaction)
+		}
+		sort.Strings(out)
+		return strings.Join(out, " ")
+	}
+	targets := []struct {
+		name  string
+		react func(string) (string, []EntryReaction, error)
+	}{
+		{"entry", func(r string) (string, []EntryReaction, error) {
+			_, now, list, err := f.svc.ReactToEntry(f.ctx, entry, r, all, f.actor)
+			return now, list, err
+		}},
+		{"group", func(r string) (string, []EntryReaction, error) {
+			_, _, now, list, err := f.svc.ReactToGroup(f.ctx, entry, g.ID, r, all, f.actor)
+			return now, list, err
+		}},
+		{"agent", func(r string) (string, []EntryReaction, error) {
+			_, _, now, list, err := f.svc.ReactToAgent(f.ctx, entry, f.p1.ID, r, all, f.actor)
+			return now, list, err
+		}},
+	}
+	for _, target := range targets {
+		step := func(reaction, wantNow, wantKinds string) {
+			t.Helper()
+			now, list, err := target.react(reaction)
+			if err != nil || now != wantNow || kinds(list) != wantKinds {
+				t.Errorf("%s, %s: now %q with [%s], want %q with [%s] (%v)", target.name, reaction, now, kinds(list), wantNow, wantKinds, err)
+			}
+		}
+		step("yes", "yes", "yes")
+		step("sent", "sent", "sent yes") // beside it
+		step("no", "no", "no sent")      // ✅ to ❌: 📤 stays
+		step("no", "", "sent")           // ❌ taken back: 📤 stays
+		step("yes", "yes", "sent yes")   // and ✅ again
+		step("sent", "", "yes")          // 📤 taken back: ✅ stays
+		step("yes", "", "")              // nothing left
+		step("sent", "sent", "sent")     // 📤 alone
+		step("sent", "", "")             // taken back
+		step("sent", "sent", "sent")     // left for the reports below
+	}
+	// One row each: the 📤 alone has no ✅ / ❌.
+	var rows []models.WeeklyEntryReaction
+	f.db.Where("entry_id = ?", entry).Find(&rows)
+	if len(rows) != 1 || rows[0].Reaction != "" || rows[0].SentAt == nil {
+		t.Errorf("one row with only sent_at: %+v", rows)
+	}
+
+	// Group summary (the entry's report, by entry) has the group's and the agent's; Data entry's list
+	// the entry's.
+	one := ReportFilter{DateFrom: dayString(f.week), DateTo: dayString(f.week.AddDate(0, 0, 6)), EntryID: &entry, ByEntry: true}
+	rep, err := f.svc.Report(f.ctx, one, all, true, f.actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var onGroup, onAgent []EntryReaction
+	for _, row := range rep.Groups {
+		if row.GroupID != nil && *row.GroupID == g.ID {
+			onGroup = row.Reactions
+		}
+	}
+	for _, e := range rep.Entries {
+		for _, l := range e.Lines {
+			if l.PlatformID == f.p1.ID {
+				onAgent = l.Reactions
+			}
+		}
+	}
+	if kinds(onGroup) != "sent" || kinds(onAgent) != "sent" || onGroup[0].UserID != f.actor {
+		t.Errorf("Group summary: group [%s], agent [%s]", kinds(onGroup), kinds(onAgent))
+	}
+	if list, err := f.svc.ListEntries(f.ctx, EntryFilter{}, all); err != nil || len(list) != 1 || kinds(list[0].Reactions) != "sent" {
+		t.Errorf("Data entry's list: %v %+v", err, list)
+	}
+}
+func TestEveryoneInAnEntry(t *testing.T) {
+	f := newWLFixture(t)
+	f.db.Model(&models.User{}).Where("id = ?", f.actor).Update("default_branch_id", f.hq[0].ID)
+	defer f.db.Model(&models.User{}).Where("id = ?", f.actor).Update("default_branch_id", nil)
+	g, err := f.svc.CreateGroup(f.ctx, GroupInput{Title: "With results", Agents: []GroupAgentInput{{PlatformID: f.p1.ID.String(), CommissionRate: "10"}}, StartsOn: dayString(f.week)}, all, f.actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	empty, err := f.svc.CreateGroup(f.ctx, GroupInput{Title: "At zero", Agents: []GroupAgentInput{{PlatformID: f.p2.ID.String(), CommissionRate: "10"}}, StartsOn: dayString(f.week)}, all, f.actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	theirs, err := f.svc.SavePlatform(f.ctx, nil, PlatformInput{Code: "TWL_THEIRS", Name: "x", DefaultRate: "10", DefaultCurrency: "USD", BranchID: f.hq[1].ID.String()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sheet, _, err := f.save(f.week, 0, canAll, "", row(f.p1, "1000", "200"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := sheet.Entry.ID
+	r1 := sheetRow(t, sheet, f.p1)
+
+	// ✅ on p2 (no result) and on p1 (by its result: the same place).
+	if _, agent, now, list, err := f.svc.ReactToAgent(f.ctx, entry, f.p2.ID, "yes", all, f.actor); err != nil || agent.ID != f.p2.ID || now != "yes" || len(list) != 1 {
+		t.Fatalf("✅ on an agent at 0: %q %+v %v", now, list, err)
+	}
+	if _, _, _, err := f.svc.ReactToResult(f.ctx, *r1.ResultID, "no", all, f.actor); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, now, list, err := f.svc.ReactToAgent(f.ctx, entry, f.p1.ID, "no", all, f.actor); err != nil || now != "" || len(list) != 0 {
+		t.Errorf("by the agent takes back what was given by its result: %q %+v %v", now, list, err)
+	}
+	if _, _, _, err := f.svc.ReactToResult(f.ctx, *r1.ResultID, "no", all, f.actor); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, _, err := f.svc.ReactToAgent(f.ctx, entry, theirs.ID, "yes", all, f.actor); !errors.Is(err, ErrPlatformNotFound) {
+		t.Errorf("another branch's agent: %v", err)
+	}
+	if _, _, _, _, err := f.svc.ReactToAgent(f.ctx, entry, f.p2.ID, "yes", f.scope(1), f.actor); err == nil {
+		t.Error("an entry of a branch the person doesn't work in: want an error")
+	}
+	// Data entry: p1's row has its ❌ (p2 has no row saved).
+	if got := sheetRow(t, f.sheet(t, f.week, 0), f.p1).Reactions; len(got) != 1 || got[0].Reaction != "no" {
+		t.Errorf("Data entry's row: %+v", got)
+	}
+
+	week := ReportFilter{DateFrom: dayString(f.week), DateTo: dayString(f.week.AddDate(0, 0, 6)), ByEntry: true, EntryID: &entry, Everyone: true}
+	rep, err := f.svc.Report(f.ctx, week, all, true, f.actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	groups := map[string]bool{}
+	for _, row := range rep.Groups {
+		groups[row.Title] = true
+	}
+	if !groups["With results"] || !groups["At zero"] {
+		t.Errorf("both groups are listed: %+v", rep.Groups)
+	}
+	if len(rep.Entries) != 1 {
+		t.Fatalf("one entry: %+v", rep.Entries)
+	}
+	lines := map[uuid.UUID]ReportLine{}
+	for _, l := range rep.Entries[0].Lines {
+		lines[l.PlatformID] = l
+	}
+	if l, ok := lines[f.p2.ID]; !ok || !l.JamePS.IsZero() || l.ResultID != nil || len(l.Reactions) != 1 || l.Reactions[0].Reaction != "yes" ||
+		!l.RateMin.Equal(decimal.NewFromInt(10)) || l.Formula != "v1" {
+		t.Errorf("p2 at 0 in the entry with its ✅ and its current rate in its group: %+v", l)
+	}
+	if l, ok := lines[f.p1.ID]; !ok || l.ResultID == nil || len(l.Reactions) != 1 || l.Reactions[0].Reaction != "no" {
+		t.Errorf("p1 with its result and ❌: %+v", l)
+	}
+	if _, ok := lines[theirs.ID]; ok {
+		t.Error("another branch's agent isn't listed")
+	}
+	if len(rep.Totals) != 1 || r1.JamePS == nil || !rep.Totals[0].JamePS.Equal(*r1.JamePS) {
+		t.Errorf("the totals are what was entered: %+v", rep.Totals)
+	}
+
+	// The group at 0: its agent at 0 in the entry, with its ✅.
+	week.GroupID = &empty.ID
+	rep, err = f.svc.Report(f.ctx, week, all, true, f.actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Entries) != 1 || rep.Entries[0].ID == nil || *rep.Entries[0].ID != entry || len(rep.Entries[0].Lines) != 1 ||
+		rep.Entries[0].Lines[0].PlatformID != f.p2.ID || len(rep.Entries[0].Lines[0].Reactions) != 1 {
+		t.Errorf("the group at 0 in the entry: %+v", rep.Entries)
+	}
+	if _, _, _, _, err := f.svc.ReactToGroup(f.ctx, entry, empty.ID, "yes", all, f.actor); err != nil {
+		t.Fatal(err)
+	}
+	if rep, err = f.svc.Report(f.ctx, week, all, true, f.actor); err != nil || len(rep.Groups) != 1 || rep.Groups[0].GroupID == nil ||
+		*rep.Groups[0].GroupID != empty.ID || !rep.Groups[0].Totals[0].JamePS.IsZero() || len(rep.Groups[0].Reactions) != 1 {
+		t.Errorf("the group at 0 is its own row, with its ✅: %+v %v", rep.Groups, err)
+	}
+
+	// Without Everyone, only what has results.
+	week.GroupID, week.Everyone = nil, false
+	if rep, err = f.svc.Report(f.ctx, week, all, true, f.actor); err != nil || len(rep.Entries) != 1 || len(rep.Entries[0].Lines) != 1 || len(rep.Groups) != 1 || rep.Groups[0].GroupID == nil || *rep.Groups[0].GroupID != g.ID {
+		t.Errorf("only results without Everyone: %+v %v", rep, err)
+	}
+
+	// Deleting the entry removes the agents' reactions.
+	if _, _, err := f.svc.DeleteEntry(f.ctx, entry, "a test", all); err != nil {
+		t.Fatal(err)
+	}
+	var left int64
+	f.db.Model(&models.WeeklyAgentReaction{}).Where("entry_id = ?", entry).Count(&left)
+	if left != 0 {
+		t.Errorf("the entry's agent reactions are gone: %d", left)
+	}
+}
+
+// Rates follow the current one: changing an agent's rate or type in a group (its page or the
+// agent's) works its saved weeks out again at it, and the reports show it; at start-up the same is
+// done for changes from before.
+func TestCurrentRates(t *testing.T) {
+	f := newWLFixture(t)
+	f.db.Model(&models.User{}).Where("id = ?", f.actor).Update("default_branch_id", f.hq[0].ID)
+	defer f.db.Model(&models.User{}).Where("id = ?", f.actor).Update("default_branch_id", nil)
+	n := func(v int64) decimal.Decimal { return decimal.NewFromInt(v) }
+	g, err := f.svc.CreateGroup(f.ctx, GroupInput{Title: "Rated", Agents: []GroupAgentInput{{PlatformID: f.p1.ID.String(), CommissionRate: "10"}}, StartsOn: dayString(f.week)}, all, f.actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Two weeks, each 1,000 / 200 at 10%.
+	older, open := f.week, f.week.AddDate(0, 0, 7)
+	resultOf := map[time.Time]uuid.UUID{}
+	for _, week := range []time.Time{older, open} {
+		sheet, _, err := f.save(week, 0, canAll, "", row(f.p1, "1000", "200"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resultOf[week] = *sheetRow(t, sheet, f.p1).ResultID
+	}
+	// at: the week's result and its part in the group are at this rate and type, with their Total.
+	at := func(what string, week time.Time, rate int64, kind winlose.Kind) {
+		t.Helper()
+		want, err := workOut("v1", kind, n(1000), n(200), n(rate), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var r models.WeeklyPlatformResult
+		var part models.WeeklyGroupResult
+		f.db.First(&r, "id = ?", resultOf[week])
+		f.db.First(&part, "result_id = ?", resultOf[week])
+		if !r.CommissionRate.Equal(n(rate)) || !r.JamePS.Equal(want.JamePS) || !part.CommissionRate.Equal(n(rate)) || part.CalcType != string(kind) || !part.JamePS.Equal(want.JamePS) {
+			t.Errorf("%s: want %d%% %s (Total %s), got result %s%% %s, part %s%% %s %s", what, rate, kind, want.JamePS, r.CommissionRate, r.JamePS, part.CommissionRate, part.CalcType, part.JamePS)
+		}
+	}
+
+	// The group's page: 20%.
+	_, after, err := f.svc.UpdateGroup(f.ctx, g.ID, GroupUpdateInput{Title: "Rated", Agents: []GroupAgentInput{{PlatformID: f.p1.ID.String(), CommissionRate: "20"}}}, all, f.actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.ReworkedWeeks != 2 {
+		t.Errorf("both weeks worked out again, got %d", after.ReworkedWeeks)
+	}
+	at("last week at the new rate", open, 20, winlose.PO)
+	at("the week before at the new rate", older, 20, winlose.PO)
+	lastWeek := ReportFilter{DateFrom: dayString(open), DateTo: dayString(open.AddDate(0, 0, 6))}
+	for name, fl := range map[string]ReportFilter{"the report": lastWeek, "the group's report": {DateFrom: lastWeek.DateFrom, DateTo: lastWeek.DateTo, GroupID: &g.ID}} {
+		rep, err := f.svc.Report(f.ctx, fl, all, true, f.actor)
+		if err != nil || len(rep.Lines) != 1 || !rep.Lines[0].RateMin.Equal(n(20)) || !rep.Lines[0].RateMax.Equal(n(20)) {
+			t.Errorf("%s shows the current rate: %+v %v", name, rep, err)
+		}
+	}
+
+	// The agent's page: 30% GI.
+	_, changes, err := f.svc.SavePlatformWithGroups(f.ctx, &f.p1.ID, PlatformInput{Code: f.p1.Code, Name: f.p1.Name, DefaultRate: f.p1.DefaultRate.String(), DefaultCurrency: f.p1.DefaultCurrency,
+		Groups: &[]PlatformGroupInput{{GroupID: g.ID.String(), CommissionRate: "30", CalcType: "GI"}}}, all, f.actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changes.Reworked != 2 {
+		t.Errorf("the agent's page: both weeks worked out again, got %d", changes.Reworked)
+	}
+	at("the agent's page", open, 30, winlose.GI)
+	at("the agent's page, the week before", older, 30, winlose.GI)
+
+	// At start-up: a rate changed before this (straight in the database here) applies to the saved
+	// weeks.
+	f.db.Model(&models.HQPlatformAssignment{}).Where("group_id = ? AND platform_id = ?", g.ID, f.p1.ID).Updates(map[string]interface{}{"commission_rate": n(40), "calc_type": "PO"})
+	if count, err := f.svc.ApplyCurrentRates(f.ctx); err != nil || count != 2 {
+		t.Errorf("start-up: both weeks, got %d %v", count, err)
+	}
+	at("start-up", open, 40, winlose.PO)
+	at("start-up, the week before", older, 40, winlose.PO)
+	if count, err := f.svc.ApplyCurrentRates(f.ctx); err != nil || count != 0 {
+		t.Errorf("nothing left to change, got %d %v", count, err)
+	}
 }
 
 func TestDeletingAnAgent(t *testing.T) {
@@ -590,9 +991,12 @@ func TestWeeklyEntryCalculationAndRateHistory(t *testing.T) {
 		t.Errorf("the unique key must stop a second row for the agent on the entry, got %v", err)
 	}
 
-	// A new rate applies to new weeks only; the saved week keeps 35%.
+	// A new rate applies to new weeks and to the saved ones: the saved week is at 50% now, (1,000 + 200) × 50% = 600.
 	if _, _, err := f.svc.UpdateAssignment(f.ctx, a.ID, AssignmentUpdateInput{CommissionRate: "50", Currency: "USD"}, all); err != nil {
 		t.Fatal(err)
+	}
+	if r := sheetRow(t, f.sheet(t, f.week, 0), f.p1); !r.JamePS.Equal(decimal.NewFromInt(600)) || !r.CommissionRate.Equal(decimal.NewFromInt(50)) {
+		t.Errorf("the saved week takes 50%%: total %s rate %s", r.JamePS, r.CommissionRate)
 	}
 	next, _, err := f.save(f.week.AddDate(0, 0, 7), 0, canAll, "", row(f.p1, "1000", "200"))
 	if err != nil {
@@ -602,7 +1006,7 @@ func TestWeeklyEntryCalculationAndRateHistory(t *testing.T) {
 		t.Errorf("the next week uses 50%%: total %s rate %s", r.JamePS, r.CommissionRate)
 	}
 
-	// A correction needs the permission and a reason, and is worked out at the week's own rate.
+	// A correction needs the permission and a reason, and is worked out at the week's rate (50% now).
 	onlyCreate := func(code string) bool { return code == permissions.WinLoseCreate }
 	if _, _, err := f.save(f.week, 0, onlyCreate, "typo", row(f.p1, "2000", "0")); err == nil {
 		t.Error("changing a saved week without winlose.edit must be refused")
@@ -614,10 +1018,10 @@ func TestWeeklyEntryCalculationAndRateHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r := sheetRow(t, fixed, f.p1); !r.JamePS.Equal(decimal.NewFromInt(700)) || !r.CommissionRate.Equal(decimal.NewFromInt(35)) {
-		t.Errorf("corrected at the saved 35%%: total %s rate %s, want 700 at 35", r.JamePS, r.CommissionRate)
+	if r := sheetRow(t, fixed, f.p1); !r.JamePS.Equal(decimal.NewFromInt(1000)) || !r.CommissionRate.Equal(decimal.NewFromInt(50)) {
+		t.Errorf("corrected at 50%%: total %s rate %s, want 1000 at 50", r.JamePS, r.CommissionRate)
 	}
-	if len(corrections) != 1 || corrections[0].Before["win_lose"] != "1000" || corrections[0].After["total"] != "700" {
+	if len(corrections) != 1 || corrections[0].Before["win_lose"] != "1000" || corrections[0].Before["total"] != "600" || corrections[0].After["total"] != "1000" {
 		t.Errorf("only the changed row is a correction, with before and after: %+v", corrections)
 	}
 
@@ -677,12 +1081,9 @@ func TestWinLoseHQAccess(t *testing.T) {
 	if err != nil || own.Consolidated || len(own.Lines) != 1 || !own.Lines[0].WinLose.Equal(decimal.NewFromInt(100)) {
 		t.Errorf("own group only: %v %+v", err, own)
 	}
-	// Assigning and finalizing without a group go to the person's own group too.
+	// Assigning without a group goes to the person's own group too.
 	if list, err := f.svc.Assign(f.ctx, AssignmentInput{PlatformIDs: []string{f.p2.ID.String()}}, all, f.actor); err != nil || len(list) != 1 || list[0].BranchID != f.hq[0].ID {
 		t.Errorf("assign to the own group: %v %+v", err, list)
-	}
-	if st, err := f.svc.FinalizeWeek(f.ctx, FinalizeInput{WeekStart: dayString(f.week)}, all, f.actor); err != nil || st.BranchID != f.hq[0].ID {
-		t.Errorf("finalize the own group's week: %v", err)
 	}
 	if r, err := f.svc.Report(f.ctx, ReportFilter{}, only2, false, f.actor); err != nil || r.Consolidated {
 		t.Errorf("a user with one HQ gets that HQ's report, got %v", err)
@@ -781,46 +1182,22 @@ func TestWinLoseReportsByCurrencyAndWeek(t *testing.T) {
 	}
 }
 
-func TestWeeklySettlementLocksTheWeek(t *testing.T) {
+// There are no settled weeks: a week entered weeks ago can still be corrected, and its entry
+// deleted.
+func TestOldWeeksStayOpen(t *testing.T) {
 	f := newWLFixture(t)
 	f.assign(t, []models.Platform{f.p1, f.p2}, 0)
-	if _, _, err := f.save(f.week, 0, canAll, "", row(f.p1, "1000", "200"), row(f.p2, "100000", "0")); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.svc.FinalizeWeek(f.ctx, FinalizeInput{BranchID: f.hq[0].ID.String(), WeekStart: dayString(f.week.AddDate(0, 0, 1))}, all, f.actor); err == nil {
-		t.Error("a week starts on a Monday")
-	}
-	// (Next week: this week's Sunday may be today, and a week can be finalized from its Sunday.)
-	if _, err := f.svc.FinalizeWeek(f.ctx, FinalizeInput{BranchID: f.hq[0].ID.String(), WeekStart: dayString(weekStart(f.svc.today()).AddDate(0, 0, 7))}, all, f.actor); err == nil {
-		t.Error("a week can't be finalized before its Sunday")
-	}
-	st, err := f.svc.FinalizeWeek(f.ctx, FinalizeInput{BranchID: f.hq[0].ID.String(), WeekStart: dayString(f.week)}, all, f.actor)
+	old := f.week.AddDate(0, 0, -7)
+	sheet, _, err := f.save(old, 0, canAll, "", row(f.p1, "1000", "200"), row(f.p2, "100000", "0"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st.Status != models.SettlementFinalized || len(st.Totals) != 2 {
-		t.Fatalf("finalized with totals per currency, got %s and %d totals", st.Status, len(st.Totals))
+	fixed, _, err := f.save(old, 0, canAll, "late result from HQ", row(f.p1, "1100", "200"), row(f.p2, "100000", "0"))
+	if r := sheetRow(t, fixed, f.p1); err != nil || !r.JamePS.Equal(decimal.NewFromInt(455)) { // (1100 + 200) × 35%
+		t.Errorf("an old week can be corrected: %v %+v", err, r)
 	}
-	if _, _, err := f.save(f.week, 0, canAll, "late", row(f.p1, "1", "0")); err == nil || !strings.Contains(err.Error(), "finalized") {
-		t.Errorf("a finalized week can't be changed, got %v", err)
-	}
-	if _, err := f.svc.ReopenWeek(f.ctx, st.ID, "", all, f.actor); err == nil {
-		t.Error("reopening needs a reason")
-	}
-	if _, err := f.svc.ReopenWeek(f.ctx, st.ID, "late result from HQ", all, f.actor); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := f.save(f.week, 0, canAll, "late result from HQ", row(f.p1, "1100", "200")); err != nil {
-		t.Errorf("a reopened week can be changed, got %v", err)
-	}
-	again, err := f.svc.FinalizeWeek(f.ctx, FinalizeInput{BranchID: f.hq[0].ID.String(), WeekStart: dayString(f.week)}, all, f.actor)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, total := range again.Totals {
-		if total.Currency == "USD" && !total.JamePS.Equal(decimal.NewFromInt(455)) { // (1100 + 200) × 35%
-			t.Errorf("finalizing again works the totals out afresh: USD %s, want 455", total.JamePS)
-		}
+	if _, _, err := f.svc.DeleteEntry(f.ctx, sheet.Entry.ID, "entered twice", all); err != nil {
+		t.Errorf("an old week's entry can be deleted: %v", err)
 	}
 }
 
@@ -1063,13 +1440,6 @@ func TestWeeklyEntries(t *testing.T) {
 	if found, _ := f.svc.ListEntries(f.ctx, EntryFilter{Search: "Week 1"}, all); len(found) != 2 {
 		t.Errorf("both entries of the week are listed, got %d", len(found))
 	}
-	// A finalized week's entry can't be deleted.
-	if _, err := f.svc.FinalizeWeek(f.ctx, FinalizeInput{BranchID: f.hq[1].ID.String(), WeekStart: dayString(f.week)}, all, f.actor); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := f.svc.DeleteEntry(f.ctx, list[1].ID, "wrong", all); err == nil {
-		t.Error("a finalized week's entry can't be deleted")
-	}
 }
 
 func TestAssignmentGroups(t *testing.T) {
@@ -1255,13 +1625,17 @@ func TestAgentInSeveralGroups(t *testing.T) {
 	if r := sheetRow(t, sheet, f.p2); !r.Saved || len(r.Groups) != 0 || !r.JamePS.IsZero() {
 		t.Errorf("an agent in no group: %+v", r)
 	}
-	// A correction works out each group again at the rate saved.
+	// A's rate goes to 50%: the saved week takes it (500 in A, 700 in all), and a correction works
+	// each group out again at its rate.
 	if _, _, err := f.svc.UpdateGroup(f.ctx, a.ID, GroupUpdateInput{Title: "A", Agents: []GroupAgentInput{{PlatformID: f.p1.ID.String(), CommissionRate: "50"}}}, all, f.actor); err != nil {
 		t.Fatal(err)
 	}
+	if r := sheetRow(t, f.sheet(t, f.week, 0), f.p1); !r.Groups[0].JamePS.Equal(n(500)) || !r.Groups[1].JamePS.Equal(n(200)) || !r.JamePS.Equal(n(700)) || !r.CommissionRate.Equal(n(70)) {
+		t.Errorf("the saved week at 50%% and 20%%: %+v", r)
+	}
 	sheet, _, err = f.save(f.week, 0, canAll, "fix", row(f.p1, "500", "0"), row(f.p2, "500", "0"))
-	if r := sheetRow(t, sheet, f.p1); err != nil || !r.Groups[0].JamePS.Equal(n(50)) || !r.Groups[1].JamePS.Equal(n(100)) || !r.JamePS.Equal(n(150)) {
-		t.Errorf("corrected at 10%% and 20%%: %v %+v", err, r)
+	if r := sheetRow(t, sheet, f.p1); err != nil || !r.Groups[0].JamePS.Equal(n(250)) || !r.Groups[1].JamePS.Equal(n(100)) || !r.JamePS.Equal(n(350)) {
+		t.Errorf("corrected at 50%% and 20%%: %v %+v", err, r)
 	}
 
 	// A second entry for the same week adds up with the first in the reports.
@@ -1277,12 +1651,12 @@ func TestAgentInSeveralGroups(t *testing.T) {
 	for _, g := range rep.Groups {
 		totals[g.Title] = g.Totals[0].JamePS.String() + " " + g.Totals[0].WinLose.String()
 	}
-	// A: 50 (500 at 10%) + 50 (100 at 50%); B: 100 + 20; no group: p2's 500 with no Total.
-	if totals["A"] != "100 600" || totals["B"] != "120 600" || totals[""] != "0 500" {
+	// A: 250 (500 at 50%) + 50 (100 at 50%); B: 100 + 20; no group: p2's 500 with no Total.
+	if totals["A"] != "300 600" || totals["B"] != "120 600" || totals[""] != "0 500" {
 		t.Errorf("by group, the agent in both: %v", totals)
 	}
 	for _, l := range rep.Lines {
-		if l.PlatformID == f.p1.ID && (!l.WinLose.Equal(n(600)) || !l.JamePS.Equal(n(220)) || l.Entries != 2) {
+		if l.PlatformID == f.p1.ID && (!l.WinLose.Equal(n(600)) || !l.JamePS.Equal(n(420)) || l.Entries != 2 || !l.RateMin.Equal(n(70)) || !l.RateMax.Equal(n(70))) {
 			t.Errorf("by agent, both entries and both groups: %+v", l)
 		}
 	}
@@ -1290,14 +1664,14 @@ func TestAgentInSeveralGroups(t *testing.T) {
 	if one, err := f.svc.Report(f.ctx, week, all, true, f.actor); err != nil || len(one.Lines) != 1 || !one.Lines[0].JamePS.Equal(n(120)) {
 		t.Errorf("one group's report has its part of the Total: %v %+v", err, one)
 	}
-	// One agent: its part in each group, with its rate there (A's went from 10% to 50% in the week).
+	// One agent: its part in each group, with its current rate there (A's is 50% in both entries).
 	week.GroupID, week.PlatformID = nil, &f.p1.ID
 	mine, err := f.svc.Report(f.ctx, week, all, true, f.actor)
 	parts := map[string]string{}
 	for _, g := range mine.Groups {
 		parts[g.Title] = g.RateMin.String() + "-" + g.RateMax.String() + " " + g.Totals[0].JamePS.String() + " " + g.Formula
 	}
-	if err != nil || len(mine.Lines) != 1 || len(mine.Groups) != 2 || parts["A"] != "10-50 100 v1" || parts["B"] != "20-20 120 v1" {
+	if err != nil || len(mine.Lines) != 1 || len(mine.Groups) != 2 || parts["A"] != "50-50 300 v1" || parts["B"] != "20-20 120 v1" {
 		t.Errorf("one agent's groups: %v %v", err, parts)
 	}
 	if g, _ := f.svc.GroupByID(f.ctx, a.ID, all); g.Weeks != 2 {
@@ -1309,52 +1683,40 @@ func TestFormulaChange(t *testing.T) {
 	f := newWLFixture(t) // v1
 	n := func(v int64) decimal.Decimal { return decimal.NewFromInt(v) }
 	a := f.assign(t, []models.Platform{f.p1}, 0)[0] // 35%
-	// Two weeks saved with v1, (1000 + 200) × 35% = 420; the earlier one is finalized.
-	open, finalized := f.week, f.week.AddDate(0, 0, -7)
-	for _, w := range []time.Time{open, finalized} {
+	// Two weeks saved with v1, (1000 + 200) × 35% = 420.
+	open, earlier := f.week, f.week.AddDate(0, 0, -7)
+	for _, w := range []time.Time{open, earlier} {
 		if _, _, err := f.save(w, 0, canAll, "", row(f.p1, "1000", "200")); err != nil {
 			t.Fatal(err)
 		}
 	}
-	st, err := f.svc.FinalizeWeek(f.ctx, FinalizeInput{BranchID: f.hq[0].ID.String(), WeekStart: dayString(finalized)}, all, f.actor)
-	if err != nil {
-		t.Fatal(err)
-	}
 
-	// v2: the commission is taken away. Weeks not finalized follow it.
+	// v2: the commission is taken away. Every saved week follows it.
 	if err := f.db.Save(&models.AppSetting{Key: FormulaSettingKey, Value: "v2"}).Error; err != nil {
 		t.Fatal(err)
 	}
-	changed, err := f.svc.RecalculateOpenWeeks(f.ctx)
-	if err != nil || changed != 1 {
-		t.Fatalf("only the open week is worked out again: %v %d", err, changed)
+	changed, err := f.svc.RecalculateWeeks(f.ctx)
+	if err != nil || changed != 2 {
+		t.Fatalf("both weeks are worked out again: %v %d", err, changed)
 	}
-	if r := sheetRow(t, f.sheet(t, open, 0), f.p1); !r.JamePS.Equal(n(280)) || r.FormulaVersion != "v2" || !r.Groups[0].JamePS.Equal(n(280)) {
-		t.Errorf("(1000 − 200) × 35%% = 280: %s %s", r.JamePS, r.FormulaVersion)
+	for _, w := range []time.Time{open, earlier} {
+		if r := sheetRow(t, f.sheet(t, w, 0), f.p1); !r.JamePS.Equal(n(280)) || r.FormulaVersion != "v2" || !r.Groups[0].JamePS.Equal(n(280)) {
+			t.Errorf("(1000 − 200) × 35%% = 280: %s %s", r.JamePS, r.FormulaVersion)
+		}
 	}
-	if r := sheetRow(t, f.sheet(t, finalized, 0), f.p1); !r.JamePS.Equal(n(420)) || r.FormulaVersion != "v1" {
-		t.Errorf("the finalized week stays as settled: %s %s", r.JamePS, r.FormulaVersion)
-	}
-	if again, _ := f.svc.RecalculateOpenWeeks(f.ctx); again != 0 {
+	if again, _ := f.svc.RecalculateWeeks(f.ctx); again != 0 {
 		t.Errorf("nothing left to work out, got %d", again)
 	}
-	both := ReportFilter{DateFrom: dayString(finalized), DateTo: dayString(open.AddDate(0, 0, 6))}
-	if r, err := f.svc.Report(f.ctx, both, all, true, f.actor); err != nil || len(r.Lines) != 1 || r.Lines[0].Formula != "" {
-		t.Errorf("a line over weeks with two formulas names none: %v %+v", err, r)
+	both := ReportFilter{DateFrom: dayString(earlier), DateTo: dayString(open.AddDate(0, 0, 6))}
+	if r, err := f.svc.Report(f.ctx, both, all, true, f.actor); err != nil || len(r.Lines) != 1 || r.Lines[0].Formula != "v2" {
+		t.Errorf("the line names its formula: %v %+v", err, r)
 	}
-	// Reopened, the week follows the current formula too.
-	if _, err := f.svc.ReopenWeek(f.ctx, st.ID, "late result", all, f.actor); err != nil {
-		t.Fatal(err)
-	}
-	if r := sheetRow(t, f.sheet(t, finalized, 0), f.p1); !r.JamePS.Equal(n(280)) || r.FormulaVersion != "v2" {
-		t.Errorf("reopened: %s %s", r.JamePS, r.FormulaVersion)
-	}
-	if r, _ := f.svc.Report(f.ctx, both, all, true, f.actor); r.Lines[0].Formula != "v2" {
-		t.Errorf("the line names its formula, got %q", r.Lines[0].Formula)
-	}
-	// A new week: (1,000 − 100) × 10% = 90.
+	// 10% now (the saved weeks take it: (1,000 − 200) × 10% = 80). A new week: (1,000 − 100) × 10% = 90.
 	if _, _, err := f.svc.UpdateAssignment(f.ctx, a.ID, AssignmentUpdateInput{CommissionRate: "10", Currency: "USD"}, all); err != nil {
 		t.Fatal(err)
+	}
+	if r := sheetRow(t, f.sheet(t, open, 0), f.p1); !r.JamePS.Equal(n(80)) || r.FormulaVersion != "v2" {
+		t.Errorf("the saved week at 10%%: %s %s", r.JamePS, r.FormulaVersion)
 	}
 	next, _, err := f.save(open.AddDate(0, 0, 7), 0, canAll, "", row(f.p1, "1000", "100"))
 	if err != nil {
@@ -1367,11 +1729,11 @@ func TestFormulaChange(t *testing.T) {
 	// The business's rule, v4: the commission is added and the rate is the agent's share, the Total
 	// at what is left.
 	f.db.Where("`key` = ?", FormulaSettingKey).Delete(&models.AppSetting{})
-	if changed, err := f.svc.RecalculateOpenWeeks(f.ctx); err != nil || changed != 3 {
-		t.Fatalf("the three open weeks are worked out again: %v %d", err, changed)
+	if changed, err := f.svc.RecalculateWeeks(f.ctx); err != nil || changed != 3 {
+		t.Fatalf("the three saved weeks are worked out again: %v %d", err, changed)
 	}
-	if r := sheetRow(t, f.sheet(t, open, 0), f.p1); !r.JamePS.Equal(n(780)) || r.FormulaVersion != "v4" || !r.Groups[0].JamePS.Equal(n(780)) {
-		t.Errorf("(1000 + 200) × (100%% − 35%%) = 780: %s %s", r.JamePS, r.FormulaVersion)
+	if r := sheetRow(t, f.sheet(t, open, 0), f.p1); !r.JamePS.Equal(n(1080)) || r.FormulaVersion != "v4" || !r.Groups[0].JamePS.Equal(n(1080)) {
+		t.Errorf("(1000 + 200) × (100%% − 10%%) = 1080: %s %s", r.JamePS, r.FormulaVersion)
 	}
 	if r := sheetRow(t, f.sheet(t, open.AddDate(0, 0, 7), 0), f.p1); !r.JamePS.Equal(n(990)) || !r.CommissionRate.Equal(n(10)) {
 		t.Errorf("(1,000 + 100) × (100%% − 10%%) = 990, got %s", r.JamePS)
@@ -1386,6 +1748,9 @@ func TestFormulaChange(t *testing.T) {
 	}
 	if r := sheetRow(t, later, f.p1); !r.JamePS.Equal(n(440)) || r.FormulaVersion != "v4" {
 		t.Errorf("(1,000 + 100) × (100%% − 60%%) = 440, got %s %s", r.JamePS, r.FormulaVersion)
+	}
+	if r := sheetRow(t, f.sheet(t, open, 0), f.p1); !r.JamePS.Equal(n(480)) || !r.CommissionRate.Equal(n(60)) {
+		t.Errorf("the saved week takes 60%% too: (1,000 + 200) × 40%% = 480, got %s", r.JamePS)
 	}
 }
 
@@ -1508,15 +1873,15 @@ func TestAgentGroupsFromItsForm(t *testing.T) {
 }
 
 // A week saved before its agent was put in a group counts in the group once it is, from the
-// group's first day on (as saving it then would): older weeks and finalized weeks stay as they were.
+// group's first day on (as saving it then would): older weeks stay as they were.
 func TestWeeksSavedBeforeTheGroup(t *testing.T) {
 	f := newWLFixture(t)
 	f.db.Model(&models.User{}).Where("id = ?", f.actor).Update("default_branch_id", f.hq[0].ID)
 	defer f.db.Model(&models.User{}).Where("id = ?", f.actor).Update("default_branch_id", nil)
 	n := func(v int64) decimal.Decimal { return decimal.NewFromInt(v) }
-	older, settled, now := f.week, f.week.AddDate(0, 0, 7), weekStart(f.svc.today())
+	older, first, now := f.week, f.week.AddDate(0, 0, 7), weekStart(f.svc.today())
 	// p1 is in no group yet: its weeks are saved with no Total.
-	for _, w := range []time.Time{older, settled, now} {
+	for _, w := range []time.Time{older, first, now} {
 		if _, _, err := f.save(w, 0, canAll, "", row(f.p1, "1000", "0")); err != nil {
 			t.Fatal(err)
 		}
@@ -1524,29 +1889,25 @@ func TestWeeksSavedBeforeTheGroup(t *testing.T) {
 	if r := sheetRow(t, f.sheet(t, now, 0), f.p1); len(r.Groups) != 0 || !r.JamePS.IsZero() {
 		t.Fatalf("no group yet, no Total: %+v", r)
 	}
-	if _, err := f.svc.FinalizeWeek(f.ctx, FinalizeInput{BranchID: f.hq[0].ID.String(), WeekStart: dayString(settled)}, all, f.actor); err != nil {
-		t.Fatal(err)
-	}
-
-	// The group starts on the settled week's Monday: this week counts in it now, the settled week
-	// (finalized) and the older one (before its first day) don't.
-	g, err := f.svc.CreateGroup(f.ctx, GroupInput{Title: "Later", Agents: []GroupAgentInput{{PlatformID: f.p1.ID.String(), CommissionRate: "10"}}, StartsOn: dayString(settled)}, all, f.actor)
+	// The group starts on last week's Monday: last week and this week count in it now, the older
+	// one (before its first day) doesn't.
+	g, err := f.svc.CreateGroup(f.ctx, GroupInput{Title: "Later", Agents: []GroupAgentInput{{PlatformID: f.p1.ID.String(), CommissionRate: "10"}}, StartsOn: dayString(first)}, all, f.actor)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if g.CountedWeeks != 1 {
-		t.Errorf("one week counted, got %d", g.CountedWeeks)
+	if g.CountedWeeks != 2 {
+		t.Errorf("two weeks counted, got %d", g.CountedWeeks)
 	}
-	r := sheetRow(t, f.sheet(t, now, 0), f.p1)
-	if len(r.Groups) != 1 || r.Groups[0].GroupTitle != "Later" || r.Groups[0].JamePS == nil || !r.Groups[0].JamePS.Equal(n(100)) || !r.JamePS.Equal(n(100)) || !r.CommissionRate.Equal(n(10)) {
-		t.Fatalf("this week: 100 in Later: %+v", r)
-	}
-	for _, w := range []time.Time{older, settled} {
-		if r := sheetRow(t, f.sheet(t, w, 0), f.p1); len(r.Groups) != 0 || !r.JamePS.IsZero() {
-			t.Errorf("week of %s stays with no group: %+v", dayString(w), r)
+	for _, w := range []time.Time{first, now} {
+		r := sheetRow(t, f.sheet(t, w, 0), f.p1)
+		if len(r.Groups) != 1 || r.Groups[0].GroupTitle != "Later" || r.Groups[0].JamePS == nil || !r.Groups[0].JamePS.Equal(n(100)) || !r.JamePS.Equal(n(100)) || !r.CommissionRate.Equal(n(10)) {
+			t.Fatalf("week of %s: 100 in Later: %+v", dayString(w), r)
 		}
 	}
-	// The reports: the group has this week; the other two are still "no group".
+	if r := sheetRow(t, f.sheet(t, older, 0), f.p1); len(r.Groups) != 0 || !r.JamePS.IsZero() {
+		t.Errorf("the older week stays with no group: %+v", r)
+	}
+	// The reports: the group has the two weeks; the older one is still "no group".
 	span := ReportFilter{DateFrom: dayString(older), DateTo: dayString(f.svc.today())}
 	inGroup := span
 	inGroup.GroupID = &g.ID
@@ -1554,8 +1915,8 @@ func TestWeeksSavedBeforeTheGroup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rep.Totals) != 1 || rep.Totals[0].Entries != 1 || !rep.Totals[0].JamePS.Equal(n(100)) {
-		t.Errorf("the group's report has this week, 100: %+v", rep.Totals)
+	if len(rep.Totals) != 1 || rep.Totals[0].Entries != 2 || !rep.Totals[0].JamePS.Equal(n(200)) {
+		t.Errorf("the group's report has the two weeks, 200: %+v", rep.Totals)
 	}
 	rep, err = f.svc.Report(f.ctx, span, all, true, f.actor)
 	if err != nil {
@@ -1565,15 +1926,8 @@ func TestWeeksSavedBeforeTheGroup(t *testing.T) {
 	for _, row := range rep.Groups {
 		groups[row.Title] = row.Totals[0]
 	}
-	if groups["Later"].Entries != 1 || !groups["Later"].JamePS.Equal(n(100)) || groups[""].Entries != 2 || !groups[""].JamePS.IsZero() {
-		t.Errorf("by group: Later 1 week 100, no group 2 weeks: %+v", groups)
-	}
-	var st models.WeeklySettlement
-	f.db.Where("branch_id = ? AND week_start = ?", f.hq[0].ID, dayString(settled)).First(&st)
-	var settledTotal models.WeeklySettlementTotal
-	f.db.Where("settlement_id = ?", st.ID).First(&settledTotal)
-	if !settledTotal.JamePS.IsZero() {
-		t.Errorf("the finalized week's totals stay: %+v", settledTotal)
+	if groups["Later"].Entries != 2 || !groups["Later"].JamePS.Equal(n(200)) || groups[""].Entries != 1 || !groups[""].JamePS.IsZero() {
+		t.Errorf("by group: Later 2 weeks 200, no group 1 week: %+v", groups)
 	}
 
 	// Saving the group again counts nothing twice; an agent put in it later brings its week too.
@@ -1614,7 +1968,7 @@ func TestWeeksSavedBeforeTheGroup(t *testing.T) {
 }
 
 // Switched off: a group with its weeks, and an agent, are left out of the reports and Data entry
-// (nothing is deleted: switched on again, they are back). Settlements still count them.
+// (nothing is deleted: switched on again, they are back).
 func TestSwitchedOffAreHidden(t *testing.T) {
 	f := newWLFixture(t)
 	f.db.Model(&models.User{}).Where("id = ?", f.actor).Update("default_branch_id", f.hq[0].ID)
@@ -1730,15 +2084,6 @@ func TestSwitchedOffAreHidden(t *testing.T) {
 	}
 	if _, _, err := f.save(f.week, 0, canAll, "typo", row(f.p2, "1100", "0")); err == nil {
 		t.Error("p2 off: saving it is refused")
-	}
-
-	// Settlements add up every result of the week, p2 too.
-	st, err := f.svc.FinalizeWeek(f.ctx, FinalizeInput{BranchID: f.hq[0].ID.String(), WeekStart: dayString(f.week)}, all, f.actor)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(st.Totals) != 2 {
-		t.Errorf("the settlement has both agents' currencies: %+v", st.Totals)
 	}
 	_ = a
 }
@@ -1878,11 +2223,17 @@ func TestReportListsEveryone(t *testing.T) {
 		t.Errorf("p4 (only in a switched-off group) shows nothing: %+v %+v", rep.Lines, rep.Groups)
 	}
 
-	// One entry: only what it holds.
+	// One entry (Group summary): the same agents and groups, in the entry's lines too; without
+	// Everyone only what it holds.
 	one := span
 	one.EntryID, one.ByEntry = &sheet.Entry.ID, true
+	if rep, every := report(one), report(span); len(rep.Lines) != len(every.Lines) || len(rep.Groups) != len(every.Groups) ||
+		len(rep.Entries) != 1 || len(rep.Entries[0].Lines) != len(every.Lines) {
+		t.Errorf("an entry lists everyone of its branch: %+v", rep.Lines)
+	}
+	one.Everyone = false
 	if rep := report(one); len(rep.Lines) != 1 || len(rep.Entries) != 1 || len(rep.Entries[0].Lines) != 1 {
-		t.Errorf("an entry lists only its results: %+v", rep.Lines)
+		t.Errorf("without Everyone an entry lists only its results: %+v", rep.Lines)
 	}
 	// Only the branch's own agents and the shared ones.
 	theirs := models.Platform{}

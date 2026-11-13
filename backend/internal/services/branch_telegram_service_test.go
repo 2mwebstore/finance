@@ -35,7 +35,7 @@ func TestTransactionMessage(t *testing.T) {
 		PaymentMethod:   &models.PaymentMethod{Name: "Cash"},
 	}
 	created := transactionMessage(TelegramEventCreated, txn, "Dara", "Dara", "", "", loc)
-	for _, part := range []string{"New expense · waiting for approval", "Branch: PP-01 · Phnom Penh", "EXP-2026-000042", "Amount: 1,520.50 USD", "Category: Utilities · Cash", "Date: 24 Oct 2026", "By: Dara"} {
+	for _, part := range []string{"New expense · waiting for approval", "Branch: Phnom Penh", "EXP-2026-000042", "Amount: 1,520.50 USD", "Category: Utilities · Cash", "Date: 24 Oct 2026", "By: Dara"} {
 		if !strings.Contains(created, part) {
 			t.Errorf("created message lacks %q:\n%s", part, created)
 		}
