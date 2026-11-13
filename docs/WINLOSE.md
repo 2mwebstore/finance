@@ -27,7 +27,7 @@ This is enforced in the API, not just the UI. In the code and database an assign
 | `weekly_group_results` | A result's part in each group the agent was in that week: the group, the assignment, its rate, the agent's type (`calc_type`) and the Total at it. An agent in two groups counts in both. |
 | `weekly_partner_results` | Each partner's share of a saved week: their % and their Total (`jame_ps`), as they were when the week was entered. |
 | `weekly_entries` | Data Entry's entries: a title for one branch's week, who made it and when. A week can have several entries; each one's amounts are the `weekly_platform_results` with its `entry_id`. |
-| `weekly_entry_reactions` | People's ✅ (`yes`) or ❌ (`no`) on an entry: one per person and entry (`uq_weekly_entry_reaction`), removed with the entry. |
+| `weekly_entry_reactions` | People's ✅ (`yes`) or ❌ (`no`) on an entry, and their 📤 (report sent, `sent_at`) beside it: one row per person and entry (`uq_weekly_entry_reaction`; `reaction` is empty when they gave only 📤), removed with the entry. `weekly_group_reactions` and `weekly_agent_reactions` have `sent_at` too (added when missing, at startup and in migration 000013). |
 | `weekly_agent_reactions` | The same on each agent in an entry, with or without a result there: one per person, entry and agent (`uq_weekly_agent_reaction`); a correction keeps them, deleting the entry removes them. |
 | `weekly_group_reactions` | The same on each group in an entry (Group summary): one per person, entry and group (`uq_weekly_group_reaction`), removed with the entry. |
 | `weekly_result_reactions` | Where an agent's ✅ / ❌ were kept before (on its result, so an agent with no result couldn't have one). Copied once to `weekly_agent_reactions` when that table is created (startup and migration 000013); no longer read or written. |
@@ -187,11 +187,12 @@ rate its Total is at (an agent at 60%: **40%**) and its Total. Tapping an agent 
 each of its groups the same way. Both details also show **By week**: each data entry in the range
 (week-1, week-2, …) with its W/L, COMM and Total for the group or agent. Tapping one opens that
 entry of the detail: a group's agents in it, or the agent's groups in it, with the entry's title
-opening its page. Back returns to the dates before. Each entry has **✅ / ❌** reactions, shown like Telegram's: a pill for each one given (yours
+opening its page. Back returns to the dates before. Each entry has **✅ / ❌** reactions, and **📤** (report sent), shown like Telegram's: a pill for each one given (yours
 filled blue) with the people's initials (a number above three), and a 😊+ button that opens a bar
-to add one; hovering (or tapping) a pill shows who. A person has one per entry: the same again
-takes it back, the other changes it (`POST /winlose/entries/:id/reactions` with
-`{"reaction": "yes" | "no"}`, needs React to Data Entry; kept in `weekly_entry_reactions`, removed
+to add one; hovering (or tapping) a pill shows who. A person has one of ✅ / ❌ per entry (the
+other changes it) and 📤 beside it, on its own; the same again takes it back
+(`POST /winlose/entries/:id/reactions` with `{"reaction": "yes" | "no" | "sent"}`, needs React to
+Data Entry; the audit log has what was tapped (`tapped`) and the person's reaction of that kind now; kept in `weekly_entry_reactions`, removed
 with the entry; the audit log has `winlose.entry.react`). (`GET /winlose/reports` with
 `by_entry=true` adds `entries`, each with its own `lines`, totals and reactions; `entry_id` limits
 the report to one entry. The report's `weeks` still has each calendar week's totals.)
@@ -199,9 +200,9 @@ the report to one entry. The report's `weeks` still has each calendar week's tot
 The Report lists only the groups and agents with results in the dates (a group's detail only its
 agents with results, an agent's only its groups with results). The **Group summary** has no date
 filter: it shows nothing until a data entry is chosen in its **Data entry** filter (the branch's
-entries, newest first, by title and week), then every group and agent of the entry's branch, at 0
+entries, newest first, each shown as its title and branch), then every group and agent of the entry's branch, at 0
 when it has no results in the entry, in By group and in the entry's agents (`GET /winlose/reports`
-with its week, `entry_id`, `by_entry=true` and `everyone=true`), with the entry's ✅ / ❌, each
+with its week, `entry_id`, `by_entry=true` and `everyone=true`), with the entry's ✅ / ❌ / 📤, each
 group's and each agent's, at 0 too (beside its name, on the same line; a group's also by its title
 on its own page), and Image; a group opens its agents in the entry (an empty one: its agents at 0),
 an agent its groups in it. An agent at 0 with no group shows — as its rate. Over dates
@@ -231,7 +232,7 @@ Each RP page has its own view, add, update and delete (Data entry also react):
 |---|---|---|---|---|---|
 | Agents | `platforms.view` | `platforms.create` | `platforms.edit` (also turn off/on) | `platforms.delete` (never-used agents) | |
 | Group Agent Assignments | `platform-assignments.view` | `platform-assignments.create` | `platform-assignments.edit` (also turn off/on) | `platform-assignments.delete` (groups with no weeks) | |
-| Data Entry | `winlose.view` | `winlose.create` | `winlose.edit` (reason) | `winlose.delete` (reason) | `winlose.react` (✅ / ❌) |
+| Data Entry | `winlose.view` | `winlose.create` | `winlose.edit` (reason) | `winlose.delete` (reason) | `winlose.react` (✅ / ❌ / 📤) |
 | Report · Group Summary | `winlose-reports.view` | | | | `winlose-reports.consolidated` (all groups), `winlose-reports.rates` (show the rates; without it the API leaves them out of `GET /winlose/reports` and the Rate columns are hidden) |
 
 Owner/admin roles (those with Manage Branches) get all of them when the API first starts with them.
@@ -254,7 +255,7 @@ the Report), viewer (view only). Give other roles access on Roles & permissions.
 | `POST /platform-assignments/:id/end` `{ends_on?, reason?}` · `/:id/move` `{branch_id, on?, reason?}` (the app no longer moves) | `platform-assignments.edit` |
 | `GET /winlose/formula` | any win/lose permission |
 | `DELETE /winlose/entries/:id` `{reason}` — the entry and its week's amounts, for good (the audit log keeps them) | `winlose.delete` |
-| `POST /winlose/entries/:id/reactions` `{reaction: yes\|no}` — your ✅ / ❌ on an entry (the same again takes it back) · `POST /winlose/entries/:id/agents/:platform_id/reactions` — the same on an agent in an entry, with or without a result there (Group summary; the agent has a result in the entry or is a switched-on one of its branch or shared; audit `winlose.agent.react`) · `POST /winlose/results/:id/reactions` — the same, by the agent's result (`result_id` of a saved row of `GET /winlose/entry`, which also has its `reactions`) · `POST /winlose/entries/:id/groups/:group_id/reactions` — the same on a group in an entry (Group summary; the group has results in it or is a switched-on group of its branch; audit `winlose.group.react`). `GET /winlose/reports` with `entry_id` has each group's `reactions`, and with `by_entry` each entry line's (by agent) | `winlose.react` |
+| `POST /winlose/entries/:id/reactions` `{reaction: yes\|no\|sent}` — your ✅ / ❌ on an entry, or your 📤 (report sent) beside it (the same again takes it back) · `POST /winlose/entries/:id/agents/:platform_id/reactions` — the same on an agent in an entry, with or without a result there (Group summary; the agent has a result in the entry or is a switched-on one of its branch or shared; audit `winlose.agent.react`) · `POST /winlose/results/:id/reactions` — the same, by the agent's result (`result_id` of a saved row of `GET /winlose/entry`, which also has its `reactions`) · `POST /winlose/entries/:id/groups/:group_id/reactions` — the same on a group in an entry (Group summary; the group has results in it or is a switched-on group of its branch; audit `winlose.group.react`). `GET /winlose/reports` with `entry_id` has each group's `reactions`, and with `by_entry` each entry line's (by agent) | `winlose.react` |
 | `GET /winlose/entries?branch_id?&search&created_from&created_to&page&page_size` — the entries of your groups, newest first (title, week, created at and by); the created days are the business's days | view / create / edit / delete, or Report view (Group summary's Data entry filter) |
 | `GET /winlose/entry?week_start&branch_id?` (any day of the week; no `branch_id` = your own group) — includes the week's `entry` | view / create / edit |
 | `POST /winlose/entry/preview` · `PUT /winlose/entry` `{week_start, branch_id?, title, rows[], reason?}` | create / edit |
@@ -282,7 +283,7 @@ weeks already entered.
   the phone's keyboard: 1–9, 0, a point (not for KHR), **−** (a loss, and back), delete and
   **Done**; an amount already in the box is replaced by the first key),
   **Group Summary** (`/winlose/reports/branch-summary`; empty until a data entry is chosen in its
-  Data entry filter, then that entry: totals, by group, then its agents with ✅ / ❌ and Image),
+  Data entry filter (title and branch), then that entry: totals, by group, then its agents with ✅ / ❌ / 📤 and Image),
   **Report** (this month at first; by group, then by agent),
   **Agents** (`/admin/platforms`; **Add agent** (`/admin/platforms/new`) and **Update**
   (`/admin/platforms/:id`, which loads the agent with `GET /platforms/:id`) are pages), **Group Agent

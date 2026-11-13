@@ -67,7 +67,7 @@ Server-side authorization is enforced on every protected API. The UI uses the sa
 | `winlose.create` | Add Data Entry | Win/Lose | Make new entries and enter agents' W/L and COMM for your groups |
 | `winlose.edit` | Update Data Entry | Win/Lose | Change an entry's title and amounts already saved, with a reason (kept in the audit log) |
 | `winlose.delete` | Delete Data Entry | Win/Lose | Delete an entry and its amounts, with a reason (kept in the audit log) |
-| `winlose.react` | React to Data Entry | Win/Lose | Give an entry, or a group or agent in it (at 0 too), ✅ or ❌, on Data entry, the Report and Group summary |
+| `winlose.react` | React to Data Entry | Win/Lose | Give an entry, or a group or agent in it (at 0 too), ✅ or ❌ and 📤 (report sent), on Data entry, the Report and Group summary |
 | `winlose-reports.view` | View Report | Win/Lose Reports | The Report and the group summary for your groups, one group at a time |
 | `winlose-reports.consolidated` | View Consolidated Win/Lose | Win/Lose Reports | Combined totals across all your groups |
 | `winlose-reports.rates` | View Rates in Reports | Win/Lose Reports | Show each agent's rate on the Report and the Group Summary; without it the rates are hidden |
@@ -227,7 +227,7 @@ In the RP menu (once called PLATFORMS) a platform is called an **agent** and a b
 | `winlose.create` | Make new entries and enter agents' W/L and COMM for your groups |
 | `winlose.edit` | Change an entry's title and amounts already saved, with a reason (kept in the audit log) |
 | `winlose.delete` | Delete an entry and its amounts, with a reason (kept in the audit log) |
-| `winlose.react` | Give an entry, or a group or agent in it (at 0 too), ✅ or ❌, on Data entry, the Report and Group summary |
+| `winlose.react` | Give an entry, or a group or agent in it (at 0 too), ✅ or ❌ and 📤 (report sent), on Data entry, the Report and Group summary |
 | `winlose-reports.view` | The Report and the group summary for your groups, one group at a time |
 | `winlose-reports.consolidated` | Combined totals across all your groups |
 | `winlose-reports.rates` | Show each agent's rate on the Report and the Group Summary (hidden without it) |

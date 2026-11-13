@@ -94,14 +94,14 @@ type EntryState struct {
 // WeekSheet is an entry (or a new one) with every agent that can be entered: those that are on,
 // and any saved on it.
 type WeekSheet struct {
-	WeekStart  string           `json:"week_start"`
-	WeekEnd    string           `json:"week_end"`
-	BranchID   uuid.UUID        `json:"branch_id"`
-	BranchCode string           `json:"branch_code"`
-	BranchName string           `json:"branch_name"`
-	Entry      *EntryState      `json:"entry"`
-	Formula    winlose.Formula  `json:"formula"`
-	Rows       []WeekSheetRow   `json:"rows"`
+	WeekStart  string          `json:"week_start"`
+	WeekEnd    string          `json:"week_end"`
+	BranchID   uuid.UUID       `json:"branch_id"`
+	BranchCode string          `json:"branch_code"`
+	BranchName string          `json:"branch_name"`
+	Entry      *EntryState     `json:"entry"`
+	Formula    winlose.Formula `json:"formula"`
+	Rows       []WeekSheetRow  `json:"rows"`
 }
 
 // share is an assignment a result counts in: an agent in a group, at the group's rate for it.
