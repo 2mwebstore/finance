@@ -20,7 +20,8 @@
       </label>
 
       <div class="space-y-1 text-xs font-medium text-muted">Agents <span class="text-expense">*</span>
-        <SearchSelect v-model="agentIds" multiple :options="agentOptions" placeholder="Choose one or more agents" aria-label="Agents" :aria-invalid="tried && !agentIds.length" />
+        <!-- A pick closes the list; an agent picked can't be unpicked here (✕ below takes it out) -->
+        <SearchSelect v-model="agentIds" multiple close-on-select :options="agentOptions" placeholder="Choose one or more agents" aria-label="Agents" :aria-invalid="tried && !agentIds.length" />
       </div>
 
       <!-- Each agent picked, with its rate -->
@@ -143,10 +144,11 @@ const startsOn = ref(todayISO())
 let initial = ''
 const snapshot = () => JSON.stringify([title.value.trim(), agentIds.value, agentIds.value.map(id => rates[id] || ''), agentIds.value.map(id => kinds[id] || 'PO'), startsOn.value])
 
-// Active agents, plus the group's own (one turned off since stays listed).
+// Active agents, plus the group's own (one turned off since stays listed). One picked stays ticked
+// but can't be unpicked in the list: ✕ on its row takes it out.
 const agentOptions = computed(() => platforms.value
   .filter(p => p.is_active || group.value?.agents.some(a => a.platform_id === p.id))
-  .map(p => ({ value: p.id, label: p.is_active ? p.code : `${p.code} (off)` })))
+  .map(p => ({ value: p.id, label: p.is_active ? p.code : `${p.code} (off)`, disabled: agentIds.value.includes(p.id) })))
 // The agent picked last is on top, so a pick is seen at once (the list can be 100 long); the
 // group's own agents, as loaded, follow A to Z.
 const loadedIds = ref<string[]>([])

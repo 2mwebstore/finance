@@ -38,12 +38,33 @@ func (ic *InventoryController) scope(c *gin.Context) (*accessScope, services.Bra
 	return scope, services.BranchScope{All: scope.AllBranches, IDs: scope.BranchIDs}, true
 }
 
+// catalog is who is changing a shared-or-branch list (products, categories, customers, suppliers).
+func (ic *InventoryController) catalog(c *gin.Context) (services.CatalogScope, bool) {
+	scope, branches, ok := ic.scope(c)
+	if !ok {
+		return services.CatalogScope{}, false
+	}
+	return services.CatalogScope{Branches: branches, Full: scope.Full}, true
+}
+
+// ownerFilter reads a shared-or-branch list's filters: branch_id (shared items and that branch's
+// own) and owner ("shared", or a branch id for that branch's own only).
+func ownerFilter(c *gin.Context) (services.OwnerFilter, bool) {
+	branchID, ok := queryID(c, "branch_id")
+	if !ok {
+		return services.OwnerFilter{}, false
+	}
+	return services.OwnerFilter{For: branchID, Only: c.Query("owner")}, true
+}
+
 func writeInventoryError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, services.ErrInventoryNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 	case errors.Is(err, services.ErrBranchAccessDenied):
 		c.JSON(http.StatusForbidden, gin.H{"error": "you can only work in your own branches"})
+	case errors.Is(err, services.ErrSharedOnlyFull):
+		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 	default:
 		writeServiceError(c, err)
 	}
@@ -119,7 +140,15 @@ func (ic *InventoryController) docFilter(c *gin.Context) (services.DocFilter, bo
 // ===== Catalog =====
 
 func (ic *InventoryController) ListCategories(c *gin.Context) {
-	cats, err := ic.svc.ListCategories(c.Request.Context(), c.Query("include_inactive") == "true")
+	_, scope, ok := ic.scope(c)
+	if !ok {
+		return
+	}
+	f, ok := ownerFilter(c)
+	if !ok {
+		return
+	}
+	cats, err := ic.svc.ListCategories(c.Request.Context(), c.Query("include_inactive") == "true", scope, f)
 	if err != nil {
 		writeInventoryError(c, err)
 		return
@@ -140,13 +169,17 @@ func (ic *InventoryController) SaveCategory(c *gin.Context) {
 	if !bindJSON(c, &in) {
 		return
 	}
-	cat, err := ic.svc.SaveCategory(c.Request.Context(), id, in)
+	scope, ok := ic.catalog(c)
+	if !ok {
+		return
+	}
+	cat, err := ic.svc.SaveCategory(c.Request.Context(), id, in, scope)
 	if err != nil {
 		writeInventoryError(c, err)
 		return
 	}
 	if actor, ok := getActorID(c); ok {
-		ic.record(c, actor, "inventory.category.save", cat.ID.String(), nil, map[string]interface{}{"code": cat.Code, "name": cat.Name})
+		ic.record(c, actor, "inventory.category.save", cat.ID.String(), cat.BranchID, map[string]interface{}{"code": cat.Code, "name": cat.Name, "shared": cat.BranchID == nil})
 	}
 	status := http.StatusOK
 	if id == nil {
@@ -172,7 +205,7 @@ func (ic *InventoryController) ListProducts(c *gin.Context) {
 		writeInventoryError(c, services.ErrBranchAccessDenied)
 		return
 	}
-	f := services.ProductFilter{Search: c.Query("search"), CategoryID: categoryID, BranchID: branchID}
+	f := services.ProductFilter{Search: c.Query("search"), CategoryID: categoryID, BranchID: branchID, Owner: c.Query("owner")}
 	switch v := c.Query("type"); v {
 	case models.ProductStandard, models.ProductService:
 		f.Type = v
@@ -207,13 +240,17 @@ func (ic *InventoryController) SaveProduct(c *gin.Context) {
 	if !bindJSON(c, &in) {
 		return
 	}
-	p, err := ic.svc.SaveProduct(c.Request.Context(), id, in)
+	scope, ok := ic.catalog(c)
+	if !ok {
+		return
+	}
+	p, err := ic.svc.SaveProduct(c.Request.Context(), id, in, scope)
 	if err != nil {
 		writeInventoryError(c, err)
 		return
 	}
 	if actor, ok := getActorID(c); ok {
-		ic.record(c, actor, "inventory.product.save", p.ID.String(), nil, map[string]interface{}{"sku": p.SKU, "name": p.Name, "active": p.IsActive})
+		ic.record(c, actor, "inventory.product.save", p.ID.String(), p.BranchID, map[string]interface{}{"sku": p.SKU, "name": p.Name, "active": p.IsActive, "shared": p.BranchID == nil})
 	}
 	status := http.StatusOK
 	if id == nil {
@@ -227,6 +264,10 @@ func (ic *InventoryController) SaveProduct(c *gin.Context) {
 // UploadProductImage stores a picture for the product (JPG, PNG, WebP or GIF, up to 5 MB).
 func (ic *InventoryController) UploadProductImage(c *gin.Context) {
 	id, ok := paramID(c)
+	if !ok {
+		return
+	}
+	scope, ok := ic.catalog(c)
 	if !ok {
 		return
 	}
@@ -258,7 +299,7 @@ func (ic *InventoryController) UploadProductImage(c *gin.Context) {
 		c.JSON(http.StatusUnsupportedMediaType, gin.H{"error": "use a JPG, PNG, WebP or GIF picture"})
 		return
 	}
-	p, err := ic.svc.SetProductImage(c.Request.Context(), id, contentType, fh.Size, io.MultiReader(bytes.NewReader(head[:n]), f))
+	p, err := ic.svc.SetProductImage(c.Request.Context(), id, contentType, fh.Size, io.MultiReader(bytes.NewReader(head[:n]), f), scope)
 	if err != nil {
 		writeInventoryError(c, err)
 		return
@@ -274,7 +315,11 @@ func (ic *InventoryController) DeleteProductImage(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := ic.svc.ClearProductImage(c.Request.Context(), id); err != nil {
+	scope, ok := ic.catalog(c)
+	if !ok {
+		return
+	}
+	if err := ic.svc.ClearProductImage(c.Request.Context(), id, scope); err != nil {
 		writeInventoryError(c, err)
 		return
 	}
@@ -286,7 +331,11 @@ func (ic *InventoryController) ProductImage(c *gin.Context) {
 	if !ok {
 		return
 	}
-	rc, contentType, err := ic.svc.OpenProductImage(c.Request.Context(), id)
+	_, scope, ok := ic.scope(c)
+	if !ok {
+		return
+	}
+	rc, contentType, err := ic.svc.OpenProductImage(c.Request.Context(), id, scope)
 	if err != nil {
 		if errors.Is(err, services.ErrNoProductImage) {
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})

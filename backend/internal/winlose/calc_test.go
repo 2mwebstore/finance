@@ -16,12 +16,14 @@ func TestV1(t *testing.T) {
 	}{
 		{"win plus commission at 35%", "1000", "200", "35", "1200", "420"},
 		{"a loss", "-1500", "100", "35", "-1400", "-490"},
-		{"rounds half away from zero (up)", "5", "0", "50", "5", "3"},      // 2.5 → 3
-		{"rounds half away from zero (down)", "-5", "0", "50", "-5", "-3"}, // -2.5 → -3
-		{"below half rounds down", "1", "0", "49", "1", "0"},               // 0.49 → 0
-		{"decimals in the inputs", "10.25", "0.75", "10", "11", "1"},       // 1.1 → 1
+		{"keeps the cents", "5", "0", "50", "5", "2.5"},                                         // not 3
+		{"a loss keeps its cents", "-1000", "5", "10", "-995", "-99.5"},                         // -99.50, not -100
+		{"rounds to the cent half away from zero (up)", "0.25", "0", "50", "0.25", "0.13"},      // 0.125 → 0.13
+		{"rounds to the cent half away from zero (down)", "-0.25", "0", "50", "-0.25", "-0.13"}, // -0.125 → -0.13
+		{"below half a cent rounds down", "0.01", "0", "49", "0.01", "0"},                       // 0.0049 → 0
+		{"decimals in the inputs", "10.25", "0.75", "10", "11", "1.1"},
 		{"rate 0", "1000", "0", "0", "1000", "0"},
-		{"riel amounts", "-410000", "20500", "12.5", "-389500", "-48688"}, // -48687.5 → -48688
+		{"riel amounts", "-410000", "20500", "12.5", "-389500", "-48687.5"},
 	}
 	for _, c := range cases {
 		got, err := Calculate(V1, Input{WinLose: d(c.winLose), Commission: d(c.commission), RatePct: d(c.rate)})
@@ -42,8 +44,9 @@ func TestV2(t *testing.T) {
 	}{
 		{"commission taken away at 10%", "1000", "100", "10", "900", "90"},
 		{"a loss", "-1500", "100", "35", "-1600", "-560"},
-		{"rounds half away from zero", "5", "0", "50", "5", "3"},          // 2.5 → 3
-		{"riel amounts", "-410000", "20500", "12.5", "-430500", "-53813"}, // -53812.5 → -53813
+		{"keeps the cents", "5", "0", "50", "5", "2.5"},
+		{"rounds to the cent half away from zero", "0.25", "0", "50", "0.25", "0.13"}, // 0.125 → 0.13
+		{"riel amounts", "-410000", "20500", "12.5", "-430500", "-53812.5"},
 	}
 	for _, c := range cases {
 		got, err := Calculate(V2, Input{WinLose: d(c.winLose), Commission: d(c.commission), RatePct: d(c.rate)})
@@ -67,8 +70,9 @@ func TestV3(t *testing.T) {
 		{"rate 0 leaves it all", "1000", "100", "0", "900", "900"},
 		{"rate 100% leaves nothing", "1000", "100", "100", "900", "0"},
 		{"a loss", "-1500", "100", "35", "-1600", "-1040"},
-		{"rounds half away from zero", "5", "0", "50", "5", "3"},          // 2.5 → 3
-		{"riel amounts", "-410000", "20500", "87.5", "-430500", "-53813"}, // -53812.5 → -53813
+		{"keeps the cents", "5", "0", "50", "5", "2.5"},
+		{"rounds to the cent half away from zero", "0.25", "0", "50", "0.25", "0.13"}, // 0.125 → 0.13
+		{"riel amounts", "-410000", "20500", "87.5", "-430500", "-53812.5"},
 	}
 	for _, c := range cases {
 		got, err := Calculate(V3, Input{WinLose: d(c.winLose), Commission: d(c.commission), RatePct: d(c.rate)})
@@ -107,7 +111,8 @@ func TestKinds(t *testing.T) {
 		{"empty kind is PO", "", "1000", "100", "60", "900", "360"},
 		{"GI is minus the agent's share", GI, "1000", "100", "60", "900", "-540"},
 		{"GI on a loss turns positive", GI, "-1500", "100", "35", "-1600", "560"},
-		{"GI rounds half away from zero", GI, "5", "0", "50", "5", "-3"},
+		{"GI keeps the cents", GI, "5", "0", "50", "5", "-2.5"},
+		{"GI rounds to the cent half away from zero", GI, "0.25", "0", "50", "0.25", "-0.13"},
 		{"GI at 0%", GI, "1000", "0", "0", "1000", "0"},
 	}
 	for _, c := range cases {
@@ -137,10 +142,10 @@ func TestHundredAgents(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if want := adjusted.Mul(decimal.NewFromInt(100).Sub(rate)).Div(decimal.NewFromInt(100)).Round(0); !p.JamePS.Equal(want) {
+		if want := adjusted.Mul(decimal.NewFromInt(100).Sub(rate)).Div(decimal.NewFromInt(100)).Round(2); !p.JamePS.Equal(want) {
 			t.Fatalf("agent %d PO: got %s want %s", i, p.JamePS, want)
 		}
-		if want := adjusted.Mul(rate).Div(decimal.NewFromInt(100)).Round(0).Neg(); !g.JamePS.Equal(want) {
+		if want := adjusted.Mul(rate).Div(decimal.NewFromInt(100)).Round(2).Neg(); !g.JamePS.Equal(want) {
 			t.Fatalf("agent %d GI: got %s want %s", i, g.JamePS, want)
 		}
 		if !p.Adjusted.Equal(adjusted) || !g.Adjusted.Equal(adjusted) {
@@ -164,8 +169,12 @@ func TestV4(t *testing.T) {
 		{"PO on a loss", PO, "-100000", "10000", "60", "-90000", "-36000"},
 		{"GI: minus the share of win/lose plus commission", GI, "1000", "100", "60", "1100", "-660"},
 		{"GI on a loss turns positive", GI, "-1500", "100", "35", "-1400", "490"},
-		{"GI rounds half away from zero", GI, "4", "1", "50", "5", "-3"},
-		{"PO rounds half away from zero", PO, "4", "1", "50", "5", "3"},
+		{"GI keeps the cents", GI, "4", "1", "50", "5", "-2.5"},
+		{"PO keeps the cents", PO, "4", "1", "50", "5", "2.5"},
+		// W/L -1000, COMM 5: at 10% left (rate 90%) -99.50, not -100; GI at 10% +99.50.
+		{"PO loss to the cent", PO, "-1000", "5", "90", "-995", "-99.5"},
+		{"GI loss to the cent", GI, "-1000", "5", "10", "-995", "99.5"},
+		{"PO rounds to the cent half away from zero", PO, "0.2", "0.05", "50", "0.25", "0.13"}, // 0.125 → 0.13
 	}
 	for _, c := range cases {
 		got, err := CalculateKind(V4, c.kind, Input{WinLose: d(c.winLose), Commission: d(c.commission), RatePct: d(c.rate)})
@@ -194,10 +203,10 @@ func TestHundredAgentsV4(t *testing.T) {
 		adjusted := in.WinLose.Add(in.Commission)
 		p, _ := CalculateKind(V4, PO, in)
 		g, _ := CalculateKind(V4, GI, in)
-		if want := adjusted.Mul(decimal.NewFromInt(100).Sub(rate)).Div(decimal.NewFromInt(100)).Round(0); !p.JamePS.Equal(want) {
+		if want := adjusted.Mul(decimal.NewFromInt(100).Sub(rate)).Div(decimal.NewFromInt(100)).Round(2); !p.JamePS.Equal(want) {
 			t.Fatalf("agent %d PO: got %s want %s", i, p.JamePS, want)
 		}
-		if want := adjusted.Mul(rate).Div(decimal.NewFromInt(100)).Round(0).Neg(); !g.JamePS.Equal(want) {
+		if want := adjusted.Mul(rate).Div(decimal.NewFromInt(100)).Round(2).Neg(); !g.JamePS.Equal(want) {
 			t.Fatalf("agent %d GI: got %s want %s", i, g.JamePS, want)
 		}
 	}

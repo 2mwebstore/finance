@@ -27,19 +27,23 @@
         <table class="w-full text-left text-sm">
           <thead class="bg-canvas text-[10px] uppercase tracking-wide text-slate-500">
             <tr>
-              <th class="px-2 py-2 font-bold sm:w-52 sm:px-3">Created at</th>
+              <!-- (phones: the date and who made it go under the title, so the title and its reactions fit on one line) -->
+              <th class="px-2 py-2 font-bold max-sm:hidden sm:w-52 sm:px-3">Created at</th>
               <th class="px-2 py-2 font-bold sm:px-3">Title</th>
               <th class="px-2 py-2 sm:px-3"><span class="sr-only">Actions</span></th>
             </tr>
           </thead>
           <tbody class="divide-y divide-border">
             <tr v-for="e in entries" :key="e.id" class="text-navy">
-              <td class="px-2 py-2.5 text-[10px] text-muted sm:whitespace-nowrap sm:px-3 sm:text-xs"><span class="block sm:inline">{{ formatDocDate(e.created_at) }}</span><template v-if="e.created_by"><span class="hidden sm:inline"> · </span><span class="block whitespace-nowrap font-medium text-navy sm:inline">{{ e.created_by }}</span></template></td>
+              <td class="px-2 py-2.5 text-[10px] text-muted max-sm:hidden sm:whitespace-nowrap sm:px-3 sm:text-xs"><span class="block sm:inline">{{ formatDocDate(e.created_at) }}</span><template v-if="e.created_by"><span class="hidden sm:inline"> · </span><span class="block whitespace-nowrap font-medium text-navy sm:inline">{{ e.created_by }}</span></template></td>
               <td class="px-2 py-2.5 sm:px-3">
-                <span class="block font-semibold">{{ e.title }}</span>
-                <span v-if="rp.show.value && e.branch_code" class="block text-[11px] text-muted">{{ e.branch_name || e.branch_code }}</span>
-                <!-- ✅ / ❌: hovering (or tapping) one shows who -->
-                <div class="mt-1"><WinloseEntryReactions :url="`/winlose/entries/${e.id}/reactions`" :reactions="e.reactions || []" /></div>
+                <!-- The title (and branch) with its ✅ / ❌ / 📤 on one line (on the narrowest phones the
+                     reactions go under it, whole); hovering (or tapping) one shows who -->
+                <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <p class="min-w-0"><span class="font-semibold">{{ e.title }}</span><span v-if="rp.show.value && e.branch_code" class="text-[11px] text-muted"> · {{ e.branch_name || e.branch_code }}</span></p>
+                  <WinloseEntryReactions :url="`/winlose/entries/${e.id}/reactions`" :reactions="e.reactions || []" />
+                </div>
+                <p class="mt-0.5 text-[10px] text-muted sm:hidden">{{ formatDocDate(e.created_at) }}<template v-if="e.created_by"> · <span class="font-medium text-navy">{{ e.created_by }}</span></template></p>
               </td>
               <td class="px-2 py-2 sm:px-3">
                 <!-- On phones the buttons are icons only. -->
@@ -125,12 +129,15 @@
               <tr v-for="{ row, no } in part.rows" :key="row.platform_id" :class="changed(row) ? 'bg-amber-50/40' : ''">
                 <td class="row-no px-3 py-2.5 text-center text-sm tabular-nums text-muted">{{ no }}</td>
                 <td class="px-3 py-2.5">
-                  <!-- The currency the amounts are entered in (on phones the row's number comes first) -->
-                  <p class="font-mono text-sm font-semibold text-navy"><span class="row-no-inline font-sans text-muted">{{ no }}. </span>{{ row.platform_code }} <span class="font-sans text-xs font-normal text-muted">· {{ row.currency }}</span></p>
+                  <!-- The agent, the currency the amounts are entered in, whether it is saved and, once
+                       saved, its ✅ / ❌ / 📤 in the entry, on one line (on phones the row's number comes first) -->
+                  <div class="flex items-center gap-2">
+                    <p class="shrink-0 whitespace-nowrap font-mono text-sm font-semibold text-navy"><span class="row-no-inline font-sans text-muted">{{ no }}. </span>{{ row.platform_code }} <span class="font-sans text-xs font-normal text-muted">· {{ row.currency }} ·</span></p>
+                    <!-- (on a narrow phone it is shortened with … first, before the reactions make room) -->
+                    <span class="row-status min-w-0 shrink-[100] truncate text-[11px]" :class="changed(row) ? 'font-semibold text-amber-700' : 'text-muted'" :title="statusOf(row)">{{ statusOf(row) }}</span>
+                    <WinloseEntryReactions v-if="row.result_id" class="shrink-0" :url="`/winlose/results/${row.result_id}/reactions`" :reactions="row.reactions || []" />
+                  </div>
                   <p v-if="row.platform_name && row.platform_name !== row.platform_code" class="text-[11px] text-muted">{{ row.platform_name }}</p>
-                  <p class="text-[11px]" :class="changed(row) ? 'font-semibold text-amber-700' : 'text-muted'">{{ statusOf(row) }}</p>
-                  <!-- ✅ / ❌ on this agent in the entry, once saved -->
-                  <div v-if="row.result_id" class="mt-1"><WinloseEntryReactions :url="`/winlose/results/${row.result_id}/reactions`" :reactions="row.reactions || []" /></div>
                 </td>
                 <td class="px-2 py-2" data-label="W/L">
                   <MoneyInput v-model="edits[row.platform_id]!.win_lose" :currency="row.currency" signed class="w-full rounded-lg border border-border px-2.5 py-1.5 text-right text-sm tabular-nums disabled:bg-canvas disabled:text-muted" :class="Number(edits[row.platform_id]!.win_lose) < 0 ? 'text-expense' : 'text-navy'" :aria-invalid="invalid(edits[row.platform_id]!.win_lose) ? 'true' : undefined" :disabled="!editable(row)" :aria-label="`Win/lose for ${row.platform_code}`" />

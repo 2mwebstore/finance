@@ -54,6 +54,12 @@ export const P = {
   PurchasesApprove: 'purchases.approve',
   PurchasesVoid: 'purchases.void',
   PurchasesEdit: 'purchases.edit',
+  QuotationsView: 'quotations.view',
+  QuotationsCreate: 'quotations.create',
+  QuotationsEdit: 'quotations.edit',
+  QuotationsDelete: 'quotations.delete',
+  CustomersManage: 'customers.manage',
+  SuppliersManage: 'suppliers.manage',
 
   InventoryExpensesView: 'inventory-expenses.view',
   InventoryExpensesCreate: 'inventory-expenses.create',
@@ -136,11 +142,17 @@ export const PERMISSION_CATALOG: {
   { code: P.SalesCreate, name: 'Create Sales', module: 'Sales', description: 'Record sales; their stock goes out right away' },
   { code: P.SalesVoid, name: 'Void Sales', module: 'Sales', description: 'Void a sale and put its stock back' },
   { code: P.SalesEdit, name: 'Edit Sales', module: 'Sales', description: 'Change a sale; its goods are put back and the new lines taken out of stock' },
+  { code: P.QuotationsView, name: 'View Quotations', module: 'Quotations', description: 'See quotations (price offers to customers) of your branches' },
+  { code: P.QuotationsCreate, name: 'Create Quotations', module: 'Quotations', description: 'Make quotations for customers; they move no stock (turning one into a sale needs Create Sales)' },
+  { code: P.QuotationsEdit, name: 'Edit Quotations', module: 'Quotations', description: 'Change a quotation, and mark it accepted, declined or open again' },
+  { code: P.QuotationsDelete, name: 'Delete Quotations', module: 'Quotations', description: 'Delete a quotation that wasn\'t turned into a sale' },
   { code: P.PurchasesView, name: 'View Purchases', module: 'Purchases', description: 'See purchases of your branches' },
   { code: P.PurchasesCreate, name: 'Create Purchases', module: 'Purchases', description: 'Record purchases from suppliers; stock goes in once approved' },
   { code: P.PurchasesApprove, name: 'Approve Purchases', module: 'Purchases', description: 'Approve or reject purchases; approved purchases add stock' },
   { code: P.PurchasesVoid, name: 'Void Purchases', module: 'Purchases', description: 'Void a purchase and take its stock back out' },
   { code: P.PurchasesEdit, name: 'Edit Purchases', module: 'Purchases', description: 'Change a pending purchase (an approved one also needs Approve Purchases)' },
+  { code: P.CustomersManage, name: 'Manage Customers', module: 'Customers', description: 'See the customer list; add, change and turn off customers (those shared by every branch: owner/admin only)' },
+  { code: P.SuppliersManage, name: 'Manage Suppliers', module: 'Suppliers', description: 'See the supplier list; add, change and turn off suppliers (those shared by every branch: owner/admin only)' },
 
   { code: P.InventoryExpensesView, name: 'View Inventory Expenses', module: 'Inventory Expenses', description: 'See inventory expenses of your branches' },
   { code: P.InventoryExpensesCreate, name: 'Create Inventory Expenses', module: 'Inventory Expenses', description: 'Record inventory expenses (shipping, packaging, storage…)' },
@@ -159,13 +171,13 @@ export const PERMISSION_CATALOG: {
   { code: P.WinLoseEdit, name: 'Update Data Entry', module: 'Win/Lose', description: 'Change an entry\'s title and amounts already saved, with a reason (kept in the audit log)' },
   { code: P.WinLoseDelete, name: 'Delete Data Entry', module: 'Win/Lose', description: 'Delete an entry and its amounts, with a reason (kept in the audit log)' },
   { code: P.WinLoseReact, name: 'React to Data Entry', module: 'Win/Lose', description: 'Give an entry, or an agent in it, ✅ or ❌, on Data entry and the Report' },
-  { code: P.WinLoseReportsView, name: 'View Report', module: 'Win/Lose Reports', description: 'The Report and the group summary for your groups, one group at a time' },
+  { code: P.WinLoseReportsView, name: 'View Report', module: 'Win/Lose Reports', description: 'The Report, the group summary and History (its downloaded or shared images) for your groups, one group at a time' },
   { code: P.WinLoseReportsConsolidated, name: 'View Consolidated Win/Lose', module: 'Win/Lose Reports', description: 'Combined totals across all your groups' },
   { code: P.WinLoseReportsRates, name: 'View Rates in Reports', module: 'Win/Lose Reports', description: 'Show each agent\'s rate on the Report and the Group Summary; without it the rates are hidden' },
 ]
 
 /** Permission modules in the same order as the sidebar (Settings holds Categories). */
-export const PERMISSION_MODULE_ORDER = ['Dashboard', 'Transactions', 'Income', 'Expenses', 'Reports', 'Inventory', 'Sales', 'Purchases', 'Inventory Expenses', 'Win/Lose', 'Win/Lose Reports', 'Branches', 'Platforms', 'Roles', 'Users', 'Settings', 'Audit', 'Backups']
+export const PERMISSION_MODULE_ORDER = ['Dashboard', 'Transactions', 'Income', 'Expenses', 'Reports', 'Inventory', 'Quotations', 'Sales', 'Purchases', 'Customers', 'Suppliers', 'Inventory Expenses', 'Win/Lose', 'Win/Lose Reports', 'Branches', 'Platforms', 'Roles', 'Users', 'Settings', 'Audit', 'Backups']
 
 /** Sort key for a module: sidebar order, unknown modules last. */
 export function permissionModuleRank(module: string) {
@@ -188,11 +200,15 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionCode[]> = {
   '/admin/categories': [P.CategoriesManage],
   '/inventory/products': [P.InventoryView],
   '/inventory/stock': [P.InventoryView],
+  '/inventory/quotations': [P.QuotationsView],
+  '/inventory/quotations/new': [P.QuotationsCreate],
   '/inventory/sales': [P.SalesView],
   '/inventory/sales/new': [P.SalesCreate],
   '/inventory/pos': [P.SalesCreate],
   '/inventory/purchases': [P.PurchasesView],
   '/inventory/purchases/new': [P.PurchasesCreate],
+  '/inventory/customers': [P.CustomersManage],
+  '/inventory/suppliers': [P.SuppliersManage],
   '/inventory/transfers': [P.InventoryView],
   '/inventory/expenses': [P.InventoryExpensesView],
   '/inventory/expense-categories': [P.InventoryManage],

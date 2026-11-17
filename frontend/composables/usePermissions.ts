@@ -89,6 +89,9 @@ export function usePermissions() {
   // Inventory (separate from income/expense): stock and documents of the user's own branches.
   const canViewInventory = computed(() => can(P.InventoryView))
   const canViewSales = computed(() => can(P.SalesView))
+  const canViewQuotations = computed(() => can(P.QuotationsView))
+  const canManageCustomers = computed(() => can(P.CustomersManage))
+  const canManageSuppliers = computed(() => can(P.SuppliersManage))
   const canViewPurchases = computed(() => can(P.PurchasesView))
   const canViewTransfers = computed(() => can(P.InventoryView, P.InventoryTransfer))
   const canViewInventoryExpenses = computed(() => can(P.InventoryExpensesView))
@@ -133,6 +136,9 @@ export function usePermissions() {
     canManageBackups,
     canViewInventory,
     canViewSales,
+    canViewQuotations,
+    canManageCustomers,
+    canManageSuppliers,
     canViewPurchases,
     canViewTransfers,
     canViewInventoryReports,

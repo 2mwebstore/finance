@@ -1,4 +1,4 @@
-import { formatMoney } from '~/utils/money'
+import { currencyMeta, formatMoney } from '~/utils/money'
 
 /** A rate as a percent label: "35%" (rates are stored as percents). */
 export function formatRate(value: string | number | null | undefined) {
@@ -72,9 +72,15 @@ export function weekLabel(start: string, end: string) {
   return `${day(start, false)} – ${day(end, true)}`
 }
 
-/** An amount in its currency; losses show with a minus. */
+/** An amount in its currency; losses show with a minus. Totals keep their cents (-99.50, never
+ *  rounded to -100), so an amount with cents shows them even in a currency shown without decimals
+ *  (riel: -៛99.50; ៛22,500 stays as it is). */
 export function formatAmount(value: string | number | null | undefined, currency: string) {
-  return formatMoney(Number(value || 0), currency)
+  const amount = Number(value || 0)
+  const { decimals } = currencyMeta(currency)
+  const scaled = amount * 10 ** decimals
+  const hasCents = decimals < 2 && Math.abs(scaled - Math.round(scaled)) > 1e-6
+  return formatMoney(amount, currency, hasCents ? 2 : undefined)
 }
 
 function iso(d: Date) {

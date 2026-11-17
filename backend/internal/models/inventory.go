@@ -14,16 +14,21 @@ import (
 // The tables only point at older tables by ID (no foreign keys to them), so creating them on a
 // running database can never fail on an older table's collation.
 
-// ProductCategory groups products (shared by every branch).
+// ProductCategory groups products. It is shared by every branch or belongs to one (BranchID).
 type ProductCategory struct {
 	Base
 	Code        string `gorm:"size:64;uniqueIndex;not null" json:"code"`
 	Name        string `gorm:"size:128;not null" json:"name"`
 	Description string `gorm:"size:512" json:"description"`
 	IsActive    bool   `gorm:"default:true;not null" json:"is_active"`
+	// BranchID is nil when every branch shares it (managed by the owner or an admin), else the one
+	// branch that sees and uses it. BranchName is filled in for lists.
+	BranchID   *uuid.UUID `gorm:"type:char(36);index" json:"branch_id"`
+	BranchName string     `gorm:"-" json:"branch_name,omitempty"`
 }
 
-// Product is an item the business buys and sells (shared by every branch). Prices and costs are
+// Product is an item the business buys and sells, shared by every branch or one branch's own
+// (BranchID; a shared product only goes in a shared category). Prices and costs are
 // in USD (the base currency); a sale or purchase in KHR converts them at the exchange rate. The
 // SKU is generated.
 // A standard product is stocked (bought, sold, counted, moved); a service is only sold: it has no
@@ -46,6 +51,10 @@ type Product struct {
 	ReorderLevel decimal.Decimal `gorm:"type:decimal(19,4);not null;default:0" json:"reorder_level"`
 	Description  string          `gorm:"size:512" json:"description"`
 	IsActive     bool            `gorm:"default:true;not null" json:"is_active"`
+	// BranchID is nil when every branch shares it (managed by the owner or an admin), else the one
+	// branch that sees and uses it. BranchName is filled in for lists.
+	BranchID   *uuid.UUID `gorm:"type:char(36);index" json:"branch_id"`
+	BranchName string     `gorm:"-" json:"branch_name,omitempty"`
 }
 
 // Product types.
@@ -104,14 +113,38 @@ const (
 	DocVoided    = "voided"
 )
 
+// Party is a customer or a supplier: someone in the shared lists (every branch uses them) that
+// sales, quotations, the POS and purchases pick from. Documents also keep the name, so a document
+// typed without the list (or from before it) still shows one.
+type Party struct {
+	Base
+	Name     string `gorm:"size:191;index;not null" json:"name"`
+	Phone    string `gorm:"size:64" json:"phone"`
+	Email    string `gorm:"size:191" json:"email"`
+	Address  string `gorm:"size:512" json:"address"`
+	Note     string `gorm:"size:512" json:"note"`
+	IsActive bool   `gorm:"default:true;not null" json:"is_active"`
+	// BranchID is nil when every branch shares it (managed by the owner or an admin), else the one
+	// branch that sees and uses it. BranchName is filled in for lists.
+	BranchID   *uuid.UUID `gorm:"type:char(36);index" json:"branch_id"`
+	BranchName string     `gorm:"-" json:"branch_name,omitempty"`
+}
+
+// Customer is someone the business sells to (table customers).
+type Customer struct{ Party }
+
+// Supplier is someone the business buys from (table suppliers).
+type Supplier struct{ Party }
+
 // Purchase is goods bought from a supplier for a branch. Stock goes in once it is approved.
 type Purchase struct {
 	Base
-	Number       string    `gorm:"size:32;uniqueIndex;not null" json:"number"`
-	BranchID     uuid.UUID `gorm:"type:char(36);index;not null" json:"branch_id"`
-	Supplier     string    `gorm:"size:191;index" json:"supplier"`
-	PurchaseDate time.Time `gorm:"index;not null" json:"purchase_date"`
-	Currency     string    `gorm:"size:3;not null" json:"currency"`
+	Number       string     `gorm:"size:32;uniqueIndex;not null" json:"number"`
+	BranchID     uuid.UUID  `gorm:"type:char(36);index;not null" json:"branch_id"`
+	SupplierID   *uuid.UUID `gorm:"type:char(36);index" json:"supplier_id,omitempty"` // from the suppliers list
+	Supplier     string     `gorm:"size:191;index" json:"supplier"`
+	PurchaseDate time.Time  `gorm:"index;not null" json:"purchase_date"`
+	Currency     string     `gorm:"size:3;not null" json:"currency"`
 	// Subtotal (lines after their discounts) − Discount + Shipping = Total. Discount and shipping
 	// are spread over the lines into their landed cost.
 	Subtotal        decimal.Decimal `gorm:"type:decimal(19,4);not null;default:0" json:"subtotal"`
@@ -151,6 +184,7 @@ type Sale struct {
 	Base
 	Number          string     `gorm:"size:32;uniqueIndex;not null" json:"number"`
 	BranchID        uuid.UUID  `gorm:"type:char(36);index;not null" json:"branch_id"`
+	CustomerID      *uuid.UUID `gorm:"type:char(36);index" json:"customer_id,omitempty"` // from the customers list
 	Customer        string     `gorm:"size:191;index" json:"customer"`
 	SaleDate        time.Time  `gorm:"index;not null" json:"sale_date"`
 	DueDate         *time.Time `gorm:"index" json:"due_date"` // when the customer should pay by (optional)
@@ -186,6 +220,58 @@ type SaleItem struct {
 	NetTotal     decimal.Decimal `gorm:"type:decimal(19,4);not null;default:0" json:"net_total"`
 	NetTotalBase decimal.Decimal `gorm:"type:decimal(19,4);not null;default:0" json:"net_total_base"` // NetTotal in USD
 	Note         string          `gorm:"size:255" json:"note"`
+}
+
+// Quotation statuses: open (given to the customer; it can still change), accepted or declined by
+// the customer, and converted (a sale was made from it). An open one past its valid-until date
+// shows as expired.
+const (
+	QuoteOpen      = "open"
+	QuoteAccepted  = "accepted"
+	QuoteDeclined  = "declined"
+	QuoteConverted = "converted"
+)
+
+// Quotation is a price offer from a branch to a customer. It moves no stock: turning it into a sale
+// does (the sale is saved like any other, at the quotation's prices).
+type Quotation struct {
+	Base
+	Number     string     `gorm:"size:32;uniqueIndex;not null" json:"number"`
+	BranchID   uuid.UUID  `gorm:"type:char(36);index;not null" json:"branch_id"`
+	CustomerID *uuid.UUID `gorm:"type:char(36);index" json:"customer_id,omitempty"` // from the customers list
+	Customer   string     `gorm:"size:191;index" json:"customer"`
+	Contact    string     `gorm:"size:191" json:"contact"` // phone, email or address (optional)
+	QuoteDate  time.Time  `gorm:"index;not null" json:"quote_date"`
+	ValidUntil *time.Time `gorm:"index" json:"valid_until"` // the offer holds through this day (optional)
+	Currency   string     `gorm:"size:3;not null" json:"currency"`
+	// Subtotal (lines after their discounts) − Discount + Shipping (charged to the customer) = Total.
+	Subtotal      decimal.Decimal `gorm:"type:decimal(19,4);not null;default:0" json:"subtotal"`
+	Discount      decimal.Decimal `gorm:"type:decimal(19,4);not null;default:0" json:"discount"`
+	Shipping      decimal.Decimal `gorm:"type:decimal(19,4);not null;default:0" json:"shipping"`
+	Total         decimal.Decimal `gorm:"type:decimal(19,4);not null" json:"total"`
+	ExchangeRate  decimal.Decimal `gorm:"type:decimal(19,4);not null;default:0" json:"exchange_rate"` // units of Currency per 1 USD when saved
+	TotalBase     decimal.Decimal `gorm:"type:decimal(19,4);not null;default:0" json:"total_base"`    // Total in USD
+	Status        string          `gorm:"size:16;index;not null" json:"status"`
+	Note          string          `gorm:"type:text" json:"note"` // sanitized rich text
+	CreatedByID   uuid.UUID       `gorm:"type:char(36);index;not null" json:"created_by_id"`
+	DecidedByID   *uuid.UUID      `gorm:"type:char(36)" json:"decided_by_id,omitempty"` // marked accepted or declined by
+	DecidedAt     *time.Time      `json:"decided_at,omitempty"`
+	SaleID        *uuid.UUID      `gorm:"type:char(36);index" json:"sale_id,omitempty"` // the sale made from it
+	ConvertedByID *uuid.UUID      `gorm:"type:char(36)" json:"converted_by_id,omitempty"`
+	ConvertedAt   *time.Time      `json:"converted_at,omitempty"`
+	Items         []QuotationItem `gorm:"foreignKey:QuotationID" json:"items,omitempty"`
+}
+
+type QuotationItem struct {
+	ID          uuid.UUID       `gorm:"type:char(36);primaryKey" json:"id"`
+	QuotationID uuid.UUID       `gorm:"type:char(36);index;not null" json:"quotation_id"`
+	Position    int             `gorm:"not null;default:0" json:"-"` // the line's place on the quotation
+	ProductID   uuid.UUID       `gorm:"type:char(36);index;not null" json:"product_id"`
+	Quantity    decimal.Decimal `gorm:"type:decimal(19,4);not null" json:"quantity"`
+	UnitPrice   decimal.Decimal `gorm:"type:decimal(19,4);not null" json:"unit_price"`
+	Discount    decimal.Decimal `gorm:"type:decimal(19,4);not null;default:0" json:"discount"`
+	LineTotal   decimal.Decimal `gorm:"type:decimal(19,4);not null" json:"line_total"` // quantity × unit price − discount
+	Note        string          `gorm:"size:255" json:"note"`
 }
 
 // StockTransfer moves stock from one branch to another (at the sending branch's average cost).
@@ -244,17 +330,21 @@ func InventoryModels() []interface{} {
 	return []interface{}{
 		&ProductCategory{}, &Product{}, &StockLevel{}, &StockMovement{},
 		&Purchase{}, &PurchaseItem{}, &Sale{}, &SaleItem{}, &StockTransfer{}, &StockTransferItem{},
-		&InventoryExpense{},
+		&InventoryExpense{}, &Quotation{}, &QuotationItem{}, &Customer{}, &Supplier{},
 	}
 }
 
 // InventoryColumns are columns added after the inventory tables first shipped; when one is
 // missing the start-up check brings the tables up to date.
 var InventoryColumns = map[interface{}][]string{
-	&Product{}:          {"image_key", "image_type", "image_url", "type"},
-	&Purchase{}:         {"subtotal", "discount", "shipping", "payment_method_id", "exchange_rate", "total_base"},
+	&ProductCategory{}:  {"branch_id"},
+	&Product{}:          {"image_key", "image_type", "image_url", "type", "branch_id"},
+	&Customer{}:         {"branch_id"},
+	&Supplier{}:         {"branch_id"},
+	&Purchase{}:         {"subtotal", "discount", "shipping", "payment_method_id", "exchange_rate", "total_base", "supplier_id"},
 	&PurchaseItem{}:     {"discount", "landed_cost"},
-	&Sale{}:             {"subtotal", "discount", "shipping", "exchange_rate", "total_base", "due_date"},
+	&Sale{}:             {"subtotal", "discount", "shipping", "exchange_rate", "total_base", "due_date", "customer_id"},
+	&Quotation{}:        {"customer_id"},
 	&SaleItem{}:         {"discount", "net_total", "net_total_base", "note"},
 	&InventoryExpense{}: {"exchange_rate", "amount_base"},
 }

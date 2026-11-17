@@ -36,9 +36,10 @@ const (
 )
 
 // storageKeyRule is the shape of stored file keys (transaction attachments, see
-// services.AttachmentService.Add, and product pictures, see services.SetProductImage), so a
-// restored file can only ever land in those areas of the storage.
-var storageKeyRule = regexp.MustCompile(`^(transactions|products)/[0-9a-fA-F-]{36}/[A-Za-z0-9._-]+$`)
+// services.AttachmentService.Add, product pictures, see services.SetProductImage, and Group
+// summary's pictures in RP's History, see services.SaveEntryImage), so a restored file can only
+// ever land in those areas of the storage.
+var storageKeyRule = regexp.MustCompile(`^(transactions|products|winlose-images)/[0-9a-fA-F-]{36}/[A-Za-z0-9._-]+$`)
 
 type manifest struct {
 	Version     int       `json:"version"`
@@ -83,6 +84,18 @@ func (s *Service) writeArchive(ctx context.Context, w io.Writer) (files, missing
 				return 0, 0, err
 			}
 			keys = append(keys, pictures...)
+		}
+		if s.db.Migrator().HasTable(&models.WeeklyEntryImage{}) {
+			var images []models.WeeklyEntryImage
+			if err := s.db.WithContext(ctx).Select("storage_key", "thumb_key").Find(&images).Error; err != nil {
+				return 0, 0, err
+			}
+			for _, img := range images {
+				keys = append(keys, img.StorageKey)
+				if img.ThumbKey != "" {
+					keys = append(keys, img.ThumbKey)
+				}
+			}
 		}
 	}
 

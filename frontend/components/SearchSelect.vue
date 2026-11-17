@@ -37,6 +37,8 @@
         </button>
         <p v-if="!filteredOptions.length" class="search-select-empty">{{ emptyText }}</p>
       </div>
+      <!-- Optional: add a new choice (e.g. a customer) with what was typed. -->
+      <button v-if="createLabel" type="button" class="search-select-create" @click="create"><Plus :size="13" /> <span>{{ search.trim() ? `Add “${search.trim()}”` : createLabel }}</span></button>
     </div>
     </Teleport>
   </div>
@@ -44,7 +46,7 @@
 
 <script setup lang="ts">
 import { onClickOutside, useEventListener } from '@vueuse/core'
-import { Check, ChevronDown, Search } from 'lucide-vue-next'
+import { Check, ChevronDown, Plus, Search } from 'lucide-vue-next'
 
 interface SearchSelectOption {
   value: string
@@ -63,16 +65,22 @@ const props = withDefaults(defineProps<{
   disabled?: boolean
   /** Short lists (currency, rows per page) read better without a search box. */
   searchable?: boolean
+  /** With multiple: the list closes after each pick (as with one value). */
+  closeOnSelect?: boolean
+  /** Shows "+ <createLabel>" under the list; picking it emits `create` with the text typed. */
+  createLabel?: string
 }>(), {
   searchable: true,
+  closeOnSelect: false,
   multiple: false,
   placeholder: 'Select an option',
   searchPlaceholder: 'Search…',
   emptyText: 'No matching options',
   ariaLabel: '',
   disabled: false,
+  createLabel: '',
 })
-const emit = defineEmits<{ 'update:modelValue': [value: any] }>()
+const emit = defineEmits<{ 'update:modelValue': [value: any]; create: [text: string] }>()
 
 const root = ref<HTMLElement | null>(null)
 const menu = ref<HTMLElement | null>(null)
@@ -131,10 +139,17 @@ function select(option: SearchSelectOption) {
     emit('update:modelValue', current.includes(option.value)
       ? current.filter(value => value !== option.value)
       : [...current, option.value])
+    if (props.closeOnSelect) open.value = false
     return
   }
   emit('update:modelValue', option.value)
   open.value = false
+}
+
+function create() {
+  const text = search.value.trim()
+  open.value = false
+  emit('create', text)
 }
 
 function isSelected(option: SearchSelectOption) {
@@ -170,10 +185,14 @@ onClickOutside(root, () => { open.value = false }, { ignore: [menu] })
 .search-select-option:hover, .search-select-option.selected { color: #1769d2; background: #f0f6ff; }
 .search-select-option:disabled { color: #a3afbf; cursor: not-allowed; }
 .search-select-empty { margin: 0; padding: 10px 8px; color: #8b9ab0; font-size: 10px; text-align: center; }
+.search-select-create { display: flex; width: 100%; align-items: center; gap: 6px; border: 0; border-top: 1px solid #edf1f7; padding: 9px 12px; color: #1769d2; background: #fff; font: inherit; font-size: 10px; font-weight: 700; text-align: left; cursor: pointer; }
+.search-select-create:hover { background: #f0f6ff; }
+.search-select-create > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 700px) {
   .search-select-trigger { min-height: 42px; padding: 10px 12px; font-size: 13px; }
   .search-input-wrap input { padding: 10px 0; font-size: 13px; }
   .search-select-option { padding: 11px 10px; font-size: 13px; }
   .search-select-empty { font-size: 12px; }
+  .search-select-create { padding: 12px; font-size: 13px; }
 }
 </style>

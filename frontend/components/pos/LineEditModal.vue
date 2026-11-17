@@ -3,13 +3,8 @@
     <div class="space-y-4">
       <div class="space-y-1.5 text-xs font-semibold text-navy">
         Discount
-        <div class="flex items-center gap-2">
-          <span class="flex shrink-0 overflow-hidden rounded-lg border border-border text-sm font-bold" role="group" aria-label="Discount type">
-            <button type="button" class="px-3 py-2" :class="mode === 'percent' ? 'bg-primary text-white' : 'bg-white text-muted'" :aria-pressed="mode === 'percent'" @click="mode = 'percent'">%</button>
-            <button type="button" class="border-l border-border px-3 py-2" :class="mode === 'amount' ? 'bg-primary text-white' : 'bg-white text-muted'" :aria-pressed="mode === 'amount'" @click="mode = 'amount'">{{ symbol }}</button>
-          </span>
-          <input ref="discountEl" v-model.trim="discount" type="text" inputmode="decimal" autocomplete="off" placeholder="0" class="min-w-0 flex-1 rounded-lg border border-border px-3 py-2 text-sm font-normal text-navy" aria-label="Discount" :aria-invalid="error ? 'true' : undefined" />
-        </div>
+        <span class="font-normal text-muted">(10% = percent, 10 = amount)</span>
+        <InventoryDiscountInput ref="discountEl" v-model:value="discount" v-model:mode="mode" class="font-normal" :currency="(currency as Currency)" aria-label="Discount" :invalid="!!error" />
         <p v-if="off" class="text-[11px] font-normal text-muted">−{{ formatMoney(off, currency) }} on this item</p>
       </div>
       <label class="block space-y-1.5 text-xs font-semibold text-navy">
@@ -26,9 +21,9 @@
 </template>
 
 <script setup lang="ts">
-import type { DiscountMode, DocLineForm } from '~/types/api'
+import type { Currency, DiscountMode, DocLineForm } from '~/types/api'
 import { sentence } from '~/composables/useToast'
-import { currencyMeta, formatMoney } from '~/utils/money'
+import { formatMoney } from '~/utils/money'
 import { formatQty, lineDiscount, linesCheck } from '~/utils/inventory'
 
 /** A cart line's discount (percent or amount) and note, edited together. */
@@ -39,8 +34,7 @@ const discount = ref('')
 const mode = ref<DiscountMode>('amount')
 const note = ref('')
 const error = ref('')
-const discountEl = ref<HTMLInputElement | null>(null)
-const symbol = computed(() => currencyMeta(props.currency).symbol.trim())
+const discountEl = ref<{ focus: () => void } | null>(null)
 const off = computed(() => props.line ? lineDiscount({ ...props.line, discount: discount.value, discount_mode: mode.value }, props.currency) : 0)
 
 watch(() => props.line, (line) => {

@@ -468,6 +468,10 @@ func (s *PlatformService) DeleteGroup(ctx context.Context, id uuid.UUID, scope B
 		if err := tx.Unscoped().Where("group_id = ?", g.ID).Delete(&models.HQPlatformAssignment{}).Error; err != nil {
 			return err
 		}
+		// History keeps the group's pictures, with its title as it was.
+		if err := tx.Model(&models.WeeklyEntryImage{}).Where("group_id = ?", g.ID).Update("group_id", nil).Error; err != nil {
+			return err
+		}
 		return tx.Delete(g).Error
 	})
 	if err != nil {

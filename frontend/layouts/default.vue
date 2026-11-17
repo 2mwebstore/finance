@@ -158,6 +158,7 @@ import {
   Building2,
   CalendarRange,
   ChartColumn,
+  History,
   Layers,
   Network,
   NotebookPen,
@@ -167,6 +168,9 @@ import {
   Coins,
   Package,
   ShoppingCart,
+  FileText,
+  Contact,
+  Factory,
   Store,
   Truck,
   Wallet,
@@ -208,6 +212,9 @@ const {
   canManageBackups,
   canViewInventory,
   canViewSales,
+  canViewQuotations,
+  canManageCustomers,
+  canManageSuppliers,
   canViewPurchases,
   canViewTransfers,
   canViewInventoryReports,
@@ -239,8 +246,11 @@ const inventoryNav = computed<NavItem[]>(() => {
   if (canViewInventory.value) items.push({ label: 'Products', to: '/inventory/products', icon: Package })
   if (canViewInventory.value) items.push({ label: 'Stock', to: '/inventory/stock', icon: Boxes })
   if (can('sales.create')) items.push({ label: 'POS', to: '/inventory/pos', icon: Store })
+  if (canViewQuotations.value) items.push({ label: 'Quotations', to: '/inventory/quotations', icon: FileText })
   if (canViewSales.value) items.push({ label: 'Sales', to: '/inventory/sales', icon: ShoppingCart })
   if (canViewPurchases.value) items.push({ label: 'Purchases', to: '/inventory/purchases', icon: Truck })
+  if (canManageCustomers.value) items.push({ label: 'Customers', to: '/inventory/customers', icon: Contact })
+  if (canManageSuppliers.value) items.push({ label: 'Suppliers', to: '/inventory/suppliers', icon: Factory })
   if (canViewInventoryExpenses.value) items.push({ label: 'Expenses', to: '/inventory/expenses', icon: ReceiptText })
   if (can('inventory.manage')) items.push({ label: 'Expense Categories', to: '/inventory/expense-categories', icon: Tags })
   if (can('inventory.manage', 'categories.manage')) items.push({ label: 'Payment Methods', to: '/inventory/payment-methods', icon: Wallet })
@@ -256,6 +266,8 @@ const platformsNav = computed<NavItem[]>(() => {
   if (can('winlose-reports.view')) {
     items.push({ label: 'Group Summary', to: '/winlose/reports/branch-summary', icon: ChartColumn })
     items.push({ label: 'Report', to: '/winlose/reports/weekly', icon: CalendarRange })
+    // Group summary images that were downloaded or shared
+    items.push({ label: 'History', to: '/winlose/reports/history', icon: History })
   }
   if (can('platforms.view', 'platforms.create', 'platforms.edit', 'platforms.delete')) items.push({ label: 'Agents', to: '/admin/platforms', icon: Layers })
   if (can('platform-assignments.view', 'platform-assignments.create', 'platform-assignments.edit', 'platform-assignments.delete')) items.push({ label: 'Group Agent Assignments', to: '/admin/platform-assignments', icon: Network })

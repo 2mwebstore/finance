@@ -147,7 +147,8 @@ func (s *TransactionService) Create(ctx context.Context, in CreateTransactionInp
 	var paymentMethodID uuid.UUID
 	if in.PaymentMethodID == "" {
 		var pm models.PaymentMethod
-		if err := s.db.WithContext(ctx).Where("is_active = ?", true).Order("created_at ASC").First(&pm).Error; err != nil {
+		// The first one on that the branch can use (shared, or its own).
+		if err := s.db.WithContext(ctx).Where("is_active = ? AND (branch_id IS NULL OR branch_id = ?)", true, branchID).Order("created_at ASC").First(&pm).Error; err != nil {
 			return nil, fmt.Errorf("no active payment method is configured")
 		}
 		paymentMethodID = pm.ID
@@ -174,6 +175,9 @@ func (s *TransactionService) Create(ctx context.Context, in CreateTransactionInp
 	var pm models.PaymentMethod
 	if err := s.db.WithContext(ctx).First(&pm, "id = ? AND is_active = ?", paymentMethodID, true).Error; err != nil {
 		return nil, fmt.Errorf("payment method not found or inactive")
+	}
+	if !usableIn(pm.BranchID, branchID) {
+		return nil, fieldError("payment_method_id", "this payment method belongs to another branch")
 	}
 
 	txnDate := time.Now()
@@ -386,6 +390,13 @@ func (s *TransactionService) Update(ctx context.Context, id uuid.UUID, in Update
 			return nil, fmt.Errorf("invalid payment_method_id")
 		}
 		if pid != txn.PaymentMethodID {
+			var pm models.PaymentMethod
+			if err := s.db.WithContext(ctx).First(&pm, "id = ? AND is_active = ?", pid, true).Error; err != nil {
+				return nil, fieldError("payment_method_id", "this payment method was not found or is inactive")
+			}
+			if !usableIn(pm.BranchID, txn.BranchID) {
+				return nil, fieldError("payment_method_id", "this payment method belongs to another branch")
+			}
 			updates["payment_method_id"] = pid
 		}
 	}

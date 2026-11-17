@@ -38,7 +38,7 @@
         <InventoryProductImage :product="product" size="sm" />
         <span class="min-w-0 flex-1">
           <span class="block truncate text-sm font-semibold text-navy">{{ product.name }}</span>
-          <span class="block text-[11px] text-muted"><span class="font-mono">{{ product.sku }}</span><template v-if="product.category_name"> · {{ product.category_name }}</template><template v-if="showStock"> · <span :class="soldOut(product) ? 'text-expense' : ''">{{ isService(product) ? 'service' : soldOut(product) ? 'out of stock' : `${formatQty(availableQty(product, held))} ${product.unit} in stock` }}</span></template></span>
+          <span class="block text-[11px] text-muted"><span class="font-mono">{{ product.sku }}</span><template v-if="product.category_name"> · {{ product.category_name }}</template><template v-if="showStock"> · <span :class="noStock(product) ? 'text-expense' : ''">{{ isService(product) ? 'service' : noStock(product) ? 'out of stock' : `${formatQty(availableQty(product, held))} ${product.unit} in stock` }}</span></template></span>
         </span>
         <span v-if="currency" class="shrink-0 text-sm font-semibold text-navy">{{ formatMoney(defaultPrice(product), currency) }}</span>
         <span v-if="cartQty(lines, product.id)" class="shrink-0 rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-bold text-white">×{{ formatQty(cartQty(lines, product.id)) }}</span>
@@ -60,14 +60,14 @@ import { availableQty, cartQty, formatQty, isService } from '~/utils/inventory'
 /**
  * The search/scan box of a sale, purchase or transfer: a dropdown of matches (type, or scan a
  * barcode/SKU) that emits `pick` with the chosen product and its usual price. Sales and transfers
- * can't pick what the branch doesn't have. Catalog prices are USD and shown in the document's
- * currency at its rate.
+ * can't pick what the branch doesn't have (a quotation can: it takes no stock). Catalog prices are
+ * USD and shown in the document's currency at its rate.
  */
 const props = defineProps<{
   products: Product[]
   /** The document's lines so far (for the "×2" already-added badge). */
   lines: DocLineForm[]
-  mode: 'sale' | 'purchase' | 'transfer'
+  mode: 'sale' | 'quote' | 'purchase' | 'transfer'
   currency?: Currency
   /** Editing a sale: units it already took out of this branch, available to it again. */
   held?: Record<string, number>
@@ -86,8 +86,9 @@ let messageTimer: ReturnType<typeof setTimeout> | undefined
 onClickOutside(boxEl, () => { open.value = false })
 
 const showStock = computed(() => props.mode !== 'purchase')
+const selling = computed(() => props.mode === 'sale' || props.mode === 'quote')
 // Services are only sold: purchases and transfers don't offer them.
-const active = computed(() => props.products.filter(p => p.is_active && (props.mode === 'sale' || !isService(p))))
+const active = computed(() => props.products.filter(p => p.is_active && (selling.value || !isService(p))))
 const matches = computed(() => {
   const q = query.value.toLowerCase()
   if (!q) return active.value
@@ -96,15 +97,18 @@ const matches = computed(() => {
 const shown = computed(() => matches.value.slice(0, 12))
 watch(query, () => { highlight.value = 0; open.value = true })
 
-// Sales and transfers can only take what the branch has.
-function soldOut(product: Product) {
+function noStock(product: Product) {
   return showStock.value && !isService(product) && availableQty(product, props.held) <= 0
+}
+// Sales and transfers can only take what the branch has; a quotation may offer more.
+function soldOut(product: Product) {
+  return props.mode !== 'quote' && noStock(product)
 }
 
 // The usual price in the document's currency: sale price, or cost (else average cost) for purchases.
 function defaultPrice(product: Product) {
   if (!props.currency) return 0
-  const usd = props.mode === 'sale' ? product.sale_price : (Number(product.cost_price) > 0 ? product.cost_price : product.avg_cost)
+  const usd = selling.value ? product.sale_price : (Number(product.cost_price) > 0 ? product.cost_price : product.avg_cost)
   return fromUSD(usd, props.currency)
 }
 

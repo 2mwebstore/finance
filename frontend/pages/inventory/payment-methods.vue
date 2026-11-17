@@ -4,15 +4,17 @@
       <div>
         <p class="text-[10px] font-bold tracking-[0.14em] text-slate-400">INVENTORY</p>
         <h1 class="text-xl font-bold text-navy">Payment methods</h1>
-        <p class="mt-1 text-xs text-muted">How money is paid or received: used on sales, purchases, inventory expenses and transactions. New forms start with Cash.</p>
+        <p class="mt-1 text-xs text-muted">How money is paid or received: used on sales, purchases, inventory expenses and transactions. New forms start with Cash. A method is shared by every branch or one branch’s own (only it sees and uses it){{ hasFullAccess ? '' : '; shared ones are managed by the owner or an admin' }}.</p>
       </div>
       <button type="button" class="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white hover:bg-primary-hover" @click="openCreate"><Plus :size="16" /> Add method</button>
     </header>
 
+    <div class="sm:w-60"><SearchSelect v-model="ownerFilter" :options="ownerFilterOptions" :searchable="false" aria-label="Shared or branch" /></div>
+
     <div v-if="loading" class="text-sm text-muted">Loading…</div>
     <AppAlert v-else-if="error" title="Couldn’t load payment methods" :message="error"><template #action><button type="button" @click="load">Try again</button></template></AppAlert>
     <ul v-else class="divide-y divide-border rounded-xl border border-border bg-white">
-      <li v-for="method in items" :key="method.id" class="flex items-center justify-between gap-3 p-4">
+      <li v-for="method in shownItems" :key="method.id" class="flex items-center justify-between gap-3 p-4">
         <div class="flex min-w-0 items-center gap-3">
           <span class="grid h-10 w-10 shrink-0 place-items-center rounded-xl" :class="method.is_active ? 'bg-blue-50 text-primary' : 'bg-slate-100 text-slate-400'"><Wallet :size="18" /></span>
           <div class="min-w-0">
@@ -20,22 +22,24 @@
               <h2 class="truncate text-sm font-semibold" :class="method.is_active ? 'text-navy' : 'text-slate-400'">{{ method.name }}</h2>
               <span v-if="method.code === 'cash'" class="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold uppercase text-emerald-700">Default</span>
               <span v-if="method.is_system" class="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase text-muted">Built-in</span>
+              <InventoryOwnerBadge :branch-id="method.branch_id" :branch-name="method.branch_name" />
               <span v-if="!method.is_active" class="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase text-muted">Off</span>
             </div>
             <p class="font-mono text-[11px] text-muted">{{ method.code }}</p>
           </div>
         </div>
-        <div class="flex shrink-0 gap-1.5">
+        <div v-if="canChange(method)" class="flex shrink-0 gap-1.5">
           <button type="button" class="action-chip action-edit" @click="openEdit(method)"><Pencil :size="13" /> Edit</button>
           <button type="button" class="action-chip" :class="method.is_active ? 'action-danger' : 'action-success'" :disabled="busyId === method.id" @click="toggle(method)">{{ method.is_active ? 'Turn off' : 'Turn on' }}</button>
         </div>
       </li>
-      <li v-if="!items.length" class="p-6 text-center text-sm text-muted">No payment methods yet.</li>
+      <li v-if="!shownItems.length" class="p-6 text-center text-sm text-muted">{{ ownerFilter ? 'No payment methods match.' : 'No payment methods yet.' }}</li>
     </ul>
 
-    <AppModal :model-value="formOpen" form :title="editing ? `Edit ${editing.name}` : 'Add payment method'" eyebrow="PAYMENT METHOD" subtitle="Shown on sales, purchases, expenses and transactions." :busy="saving" width="460px" @update:model-value="(open) => { if (!open && !saving) formOpen = false }" @submit="save">
+    <AppModal :model-value="formOpen" form :title="editing ? `Edit ${editing.name}` : 'Add payment method'" eyebrow="PAYMENT METHOD" :subtitle="form.branch_id ? 'Shown on this branch’s sales, purchases, expenses and transactions only.' : 'Shown on every branch’s sales, purchases, expenses and transactions.'" :busy="saving" width="460px" @update:model-value="(open) => { if (!open && !saving) formOpen = false }" @submit="save">
       <template #icon><Wallet :size="20" /></template>
       <div class="space-y-3">
+        <div class="space-y-1 text-xs font-medium text-muted">Who uses it<SearchSelect v-model="form.branch_id" :options="ownerOptions" :searchable="false" :disabled="!!editing?.is_system" aria-label="Who uses it" :aria-invalid="formCheck.invalid('branch_id')" /><small v-if="editing?.is_system" class="block font-normal">Built-in methods are shared by every branch.</small></div>
         <label class="block space-y-1 text-xs font-medium text-muted">Name<input v-model.trim="form.name" maxlength="128" :aria-invalid="formCheck.invalid('name')" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" placeholder="e.g. ABA Bank, Wing, KHQR" /></label>
         <label class="block space-y-1 text-xs font-medium text-muted">Code
           <input v-model.trim="form.code" :disabled="!!editing" maxlength="64" :aria-invalid="formCheck.invalid('code')" class="w-full rounded-lg border border-border px-3 py-2 font-mono text-sm text-navy disabled:bg-canvas" placeholder="e.g. aba-bank" @input="codeEdited = true" />
@@ -55,12 +59,16 @@
 import { Pencil, Plus, Wallet } from 'lucide-vue-next'
 import { useToast } from '~/composables/useToast'
 import { useFormErrors } from '~/composables/useFormErrors'
+import { useOwner } from '~/composables/useOwner'
 import { rule } from '~/utils/validation'
-
-interface PaymentMethod { id: string; code: string; name: string; is_active: boolean; is_system: boolean }
+import type { PaymentMethod } from '~/types/api'
 
 const { api } = useApi()
 const toast = useToast()
+// Shared by every branch, or one branch's own.
+const { ownerOptions, defaultOwner, canChange, filterOptions: ownerFilterOptions, matchesFilter, hasFullAccess } = useOwner()
+const ownerFilter = ref('')
+const shownItems = computed(() => items.value.filter(m => matchesFilter(m, ownerFilter.value)))
 const items = ref<PaymentMethod[]>([])
 const loading = ref(true)
 const error = ref('')
@@ -98,7 +106,7 @@ const editing = ref<PaymentMethod | null>(null)
 const saving = ref(false)
 const formError = ref('')
 const codeEdited = ref(false)
-const form = reactive({ name: '', code: '' })
+const form = reactive({ name: '', code: '', branch_id: '' })
 // Same rules as the API (Create/UpdatePaymentMethodInput).
 const formCheck = reactive(useFormErrors(
   () => ({ ...form }),
@@ -113,7 +121,7 @@ watch(() => form.name, (name) => {
 
 function openCreate() {
   editing.value = null
-  Object.assign(form, { name: '', code: '' })
+  Object.assign(form, { name: '', code: '', branch_id: defaultOwner() })
   codeEdited.value = false
   formError.value = ''
   formCheck.reset()
@@ -122,7 +130,7 @@ function openCreate() {
 
 function openEdit(method: PaymentMethod) {
   editing.value = method
-  Object.assign(form, { name: method.name, code: method.code })
+  Object.assign(form, { name: method.name, code: method.code, branch_id: method.branch_id || '' })
   formError.value = ''
   formCheck.reset()
   formOpen.value = true
@@ -133,10 +141,10 @@ async function save() {
   if (!formCheck.check()) return
   saving.value = true
   try {
-    if (editing.value) await api(`/payment-methods/${editing.value.id}`, { method: 'PATCH', body: { name: form.name } })
-    else await api('/payment-methods', { method: 'POST', body: { name: form.name, code: form.code } })
+    if (editing.value) await api(`/payment-methods/${editing.value.id}`, { method: 'PATCH', body: { name: form.name, ...(editing.value.is_system ? {} : { branch_id: form.branch_id }) } })
+    else await api('/payment-methods', { method: 'POST', body: { name: form.name, code: form.code, branch_id: form.branch_id } })
     formOpen.value = false
-    toast.success(`${form.name} is available on forms.`, { title: editing.value ? 'Payment method updated' : 'Payment method added' })
+    toast.success(`${form.name} is available on ${form.branch_id ? 'its branch’s' : 'every branch’s'} forms.`, { title: editing.value ? 'Payment method updated' : 'Payment method added' })
     await load()
   } catch (e: any) {
     if (!formCheck.fromApi(e)) formError.value = e?.data?.error || 'Could not save this payment method.'

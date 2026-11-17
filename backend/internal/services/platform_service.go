@@ -11,6 +11,7 @@ import (
 
 	"github.com/cambodia-finance/income-expense/internal/accounting"
 	"github.com/cambodia-finance/income-expense/internal/models"
+	"github.com/cambodia-finance/income-expense/internal/storage"
 	"github.com/cambodia-finance/income-expense/internal/winlose"
 	"github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
@@ -24,6 +25,8 @@ import (
 type PlatformService struct {
 	db  *gorm.DB
 	loc *time.Location
+	// store keeps Group summary's pictures (History); nil: they aren't kept.
+	store storage.Store
 }
 
 func NewPlatformService(db *gorm.DB, timezone string) *PlatformService {

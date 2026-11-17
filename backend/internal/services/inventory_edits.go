@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/cambodia-finance/income-expense/internal/models"
@@ -45,11 +44,11 @@ func (s *InventoryService) UpdateSale(ctx context.Context, id uuid.UUID, in Sale
 	if err != nil {
 		return nil, err
 	}
-	paymentID, err := s.paymentMethod(ctx, in.PaymentMethodID)
+	paymentID, err := s.paymentMethod(ctx, in.PaymentMethodID, branchID)
 	if err != nil {
 		return nil, err
 	}
-	lines, err := s.parseLines(ctx, in.Items, "unit_price")
+	lines, err := s.parseLines(ctx, in.Items, "unit_price", &branchID)
 	if err != nil {
 		return nil, err
 	}
@@ -71,6 +70,10 @@ func (s *InventoryService) UpdateSale(ctx context.Context, id uuid.UUID, in Sale
 		}
 		if sale.Status != models.DocCompleted {
 			return fmt.Errorf("a %s sale can't be changed", sale.Status)
+		}
+		customerID, customer, err := s.pickParty(ctx, Customers, in.CustomerID, in.Customer, sale.CustomerID, branchID)
+		if err != nil {
+			return err
 		}
 		rate, err := s.keepRate(ctx, sale.Currency, sale.ExchangeRate, in.Currency)
 		if err != nil {
@@ -115,7 +118,7 @@ func (s *InventoryService) UpdateSale(ctx context.Context, id uuid.UUID, in Sale
 			return err
 		}
 		return tx.Model(&models.Sale{}).Where("id = ?", sale.ID).Updates(map[string]interface{}{
-			"branch_id": branchID, "customer": strings.TrimSpace(in.Customer), "sale_date": date, "due_date": due, "currency": in.Currency,
+			"branch_id": branchID, "customer_id": customerID, "customer": customer, "sale_date": date, "due_date": due, "currency": in.Currency,
 			"payment_method_id": paymentID, "subtotal": subtotal, "discount": discount, "shipping": shipping, "total": total,
 			"exchange_rate": rate, "total_base": toBase(total, in.Currency, rate), "total_cost": totalCost, "note": note,
 			"updated_at": time.Now(),
@@ -138,7 +141,7 @@ func (s *InventoryService) UpdatePurchase(ctx context.Context, id uuid.UUID, in 
 	if err != nil {
 		return nil, err
 	}
-	lines, err := s.parseLines(ctx, in.Items, "unit_cost")
+	lines, err := s.parseLines(ctx, in.Items, "unit_cost", &branchID)
 	if err != nil {
 		return nil, err
 	}
@@ -146,7 +149,7 @@ func (s *InventoryService) UpdatePurchase(ctx context.Context, id uuid.UUID, in 
 	if err != nil {
 		return nil, err
 	}
-	paymentID, err := s.paymentMethod(ctx, in.PaymentMethodID)
+	paymentID, err := s.paymentMethod(ctx, in.PaymentMethodID, branchID)
 	if err != nil {
 		return nil, err
 	}
@@ -161,6 +164,10 @@ func (s *InventoryService) UpdatePurchase(ctx context.Context, id uuid.UUID, in 
 		}
 		if p.Status != models.DocPending && p.Status != models.DocApproved {
 			return fmt.Errorf("a %s purchase can't be changed", p.Status)
+		}
+		supplierID, supplier, err := s.pickParty(ctx, Suppliers, in.SupplierID, in.Supplier, p.SupplierID, branchID)
+		if err != nil {
+			return err
 		}
 		rate, err := s.keepRate(ctx, p.Currency, p.ExchangeRate, in.Currency)
 		if err != nil {
@@ -206,7 +213,7 @@ func (s *InventoryService) UpdatePurchase(ctx context.Context, id uuid.UUID, in 
 			return err
 		}
 		return tx.Model(&models.Purchase{}).Where("id = ?", p.ID).Updates(map[string]interface{}{
-			"branch_id": branchID, "supplier": strings.TrimSpace(in.Supplier), "purchase_date": date, "currency": in.Currency,
+			"branch_id": branchID, "supplier_id": supplierID, "supplier": supplier, "purchase_date": date, "currency": in.Currency,
 			"payment_method_id": paymentID, "subtotal": subtotal, "discount": discount, "shipping": shipping, "total": total,
 			"exchange_rate": rate, "total_base": toBase(total, in.Currency, rate), "note": note, "updated_at": time.Now(),
 		}).Error

@@ -21,8 +21,8 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-// InventoryService: the product catalog (shared by every branch), stock per branch at average
-// cost, stock history, adjustments, and the documents that move stock (inventory_documents.go).
+// InventoryService: the product catalog (shared by every branch, or one branch's own: see
+// catalog_owner.go), stock per branch at average cost, stock history, adjustments, and the documents that move stock (inventory_documents.go).
 // Inventory is separate from the income/expense ledger.
 type InventoryService struct {
 	db      *gorm.DB
@@ -156,9 +156,9 @@ func cleanNote(raw string) (string, error) {
 	return out, nil
 }
 
-// paymentMethod checks the chosen payment method, or picks the default: Cash, else the first
-// active method (nil when none is set up).
-func (s *InventoryService) paymentMethod(ctx context.Context, raw string) (*uuid.UUID, error) {
+// paymentMethod checks the chosen payment method (shared, or the document branch's own), or picks
+// the default: Cash, else the first active method the branch can use (nil when none is set up).
+func (s *InventoryService) paymentMethod(ctx context.Context, raw string, branch uuid.UUID) (*uuid.UUID, error) {
 	var pm models.PaymentMethod
 	if strings.TrimSpace(raw) != "" {
 		id, err := uuid.Parse(raw)
@@ -168,9 +168,12 @@ func (s *InventoryService) paymentMethod(ctx context.Context, raw string) (*uuid
 		if err := s.db.WithContext(ctx).First(&pm, "id = ? AND is_active = ?", id, true).Error; err != nil {
 			return nil, fieldError("payment_method_id", "this payment method was not found or is inactive")
 		}
+		if !usableIn(pm.BranchID, branch) {
+			return nil, fieldError("payment_method_id", fmt.Sprintf("%s is %s's own payment method; choose another", pm.Name, BranchName(ctx, s.db, *pm.BranchID)))
+		}
 		return &pm.ID, nil
 	}
-	err := s.db.WithContext(ctx).Where("is_active = ?", true).Order("CASE WHEN code = 'cash' THEN 0 ELSE 1 END, created_at ASC").First(&pm).Error
+	err := s.db.WithContext(ctx).Where("is_active = ? AND (branch_id IS NULL OR branch_id = ?)", true, branch).Order("CASE WHEN code = 'cash' THEN 0 ELSE 1 END, created_at ASC").First(&pm).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
@@ -197,26 +200,67 @@ type ProductCategoryInput struct {
 	Name        string `json:"name" binding:"required,min=2,max=128"`
 	Description string `json:"description" binding:"max=512"`
 	IsActive    *bool  `json:"is_active"`
+	// BranchID: "" shared (owner/admin only) or one branch; left out when changing keeps it.
+	BranchID *string `json:"branch_id"`
 }
 
-func (s *InventoryService) ListCategories(ctx context.Context, includeInactive bool) ([]models.ProductCategory, error) {
-	q := s.db.WithContext(ctx).Order("name ASC")
+func strOr(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
+}
+
+// ListCategories: shared categories and those of the scope's branches (see OwnerFilter).
+func (s *InventoryService) ListCategories(ctx context.Context, includeInactive bool, scope BranchScope, f OwnerFilter) ([]models.ProductCategory, error) {
+	q, err := ownerWhere(s.db.WithContext(ctx).Order("name ASC"), "branch_id", scope, f)
+	if err != nil {
+		return nil, err
+	}
 	if !includeInactive {
 		q = q.Where("is_active = ?", true)
 	}
 	var out []models.ProductCategory
-	return out, q.Find(&out).Error
+	if err := q.Find(&out).Error; err != nil {
+		return nil, err
+	}
+	names := BranchNames(ctx, s.db)
+	for i := range out {
+		out[i].BranchName = ownerName(names, out[i].BranchID)
+	}
+	return out, nil
 }
 
-func (s *InventoryService) SaveCategory(ctx context.Context, id *uuid.UUID, in ProductCategoryInput) (*models.ProductCategory, error) {
+func (s *InventoryService) SaveCategory(ctx context.Context, id *uuid.UUID, in ProductCategoryInput, scope CatalogScope) (*models.ProductCategory, error) {
 	code := strings.ToLower(strings.TrimSpace(in.Code))
 	var cat models.ProductCategory
 	if id != nil {
 		if err := s.db.WithContext(ctx).First(&cat, "id = ?", *id).Error; err != nil {
 			return nil, notFound(err)
 		}
+		if err := MayChange(cat.BranchID, scope); err != nil {
+			return nil, err
+		}
 	} else {
 		cat = models.ProductCategory{Base: models.Base{ID: uuid.New()}, IsActive: true}
+	}
+	if id == nil || in.BranchID != nil {
+		owner, err := ParseOwner(ctx, s.db, strOr(in.BranchID), scope)
+		if err != nil {
+			return nil, err
+		}
+		if id != nil && owner != nil && !sameOwner(owner, cat.BranchID) {
+			// One branch's category only holds that branch's products.
+			var others int64
+			if err := s.db.WithContext(ctx).Model(&models.Product{}).
+				Where("category_id = ? AND (branch_id IS NULL OR branch_id <> ?)", cat.ID, *owner).Count(&others).Error; err != nil {
+				return nil, err
+			}
+			if others > 0 {
+				return nil, fieldError("branch_id", fmt.Sprintf("%d products in this category are shared or another branch's, so it can't be %s's own", others, BranchName(ctx, s.db, *owner)))
+			}
+		}
+		cat.BranchID = owner
 	}
 	var clash int64
 	q := s.db.WithContext(ctx).Model(&models.ProductCategory{}).Where("code = ?", code)
@@ -235,6 +279,9 @@ func (s *InventoryService) SaveCategory(ctx context.Context, id *uuid.UUID, in P
 	}
 	if err := s.db.WithContext(ctx).Save(&cat).Error; err != nil {
 		return nil, err
+	}
+	if cat.BranchID != nil {
+		cat.BranchName = BranchName(ctx, s.db, *cat.BranchID)
 	}
 	return &cat, nil
 }
@@ -255,6 +302,8 @@ type ProductInput struct {
 	// ImageURL: a picture on the web (https://…). Empty keeps an uploaded picture.
 	ImageURL string `json:"image_url" binding:"max=1024"`
 	IsActive *bool  `json:"is_active"`
+	// BranchID: "" shared (owner/admin only) or one branch; left out when changing keeps it.
+	BranchID *string `json:"branch_id"`
 }
 
 // ProductRow is a product with its category name and stock (in one branch, or every branch in
@@ -271,8 +320,9 @@ type ProductFilter struct {
 	Search     string
 	CategoryID *uuid.UUID
 	Active     *bool
-	BranchID   *uuid.UUID // stock of this branch (else the scope's total)
+	BranchID   *uuid.UUID // stock of this branch (else the scope's total), and only what it can use
 	Type       string     // standard or service (empty: both)
+	Owner      string     // "shared" or a branch id: only those (see OwnerFilter.Only)
 	Page       int
 	PageSize   int
 }
@@ -291,6 +341,10 @@ func (s *InventoryService) ListProducts(ctx context.Context, f ProductFilter, sc
 	}
 	if f.Type != "" {
 		q = q.Where("products.type = ?", f.Type)
+	}
+	q, err := ownerWhere(q, "products.branch_id", scope, OwnerFilter{For: f.BranchID, Only: f.Owner})
+	if err != nil {
+		return nil, 0, err
 	}
 	var total int64
 	if err := q.Count(&total).Error; err != nil {
@@ -343,7 +397,9 @@ func (s *InventoryService) ListProducts(ctx context.Context, f ProductFilter, sc
 	for _, x := range sums {
 		stock[x.ProductID] = x
 	}
+	branches := BranchNames(ctx, s.db)
 	for i := range rows {
+		rows[i].BranchName = ownerName(branches, rows[i].BranchID)
 		if rows[i].CategoryID != nil {
 			rows[i].CategoryName = names[*rows[i].CategoryID]
 		}
@@ -353,11 +409,14 @@ func (s *InventoryService) ListProducts(ctx context.Context, f ProductFilter, sc
 	return rows, total, nil
 }
 
-func (s *InventoryService) SaveProduct(ctx context.Context, id *uuid.UUID, in ProductInput) (*models.Product, error) {
+func (s *InventoryService) SaveProduct(ctx context.Context, id *uuid.UUID, in ProductInput, scope CatalogScope) (*models.Product, error) {
 	var p models.Product
 	if id != nil {
 		if err := s.db.WithContext(ctx).First(&p, "id = ?", *id).Error; err != nil {
 			return nil, notFound(err)
+		}
+		if err := MayChange(p.BranchID, scope); err != nil {
+			return nil, err
 		}
 	} else {
 		p = models.Product{Base: models.Base{ID: uuid.New()}, Type: models.ProductStandard, IsActive: true}
@@ -394,10 +453,39 @@ func (s *InventoryService) SaveProduct(ctx context.Context, id *uuid.UUID, in Pr
 		return nil, fieldError("category_id", "choose a valid category")
 	}
 	var cat models.ProductCategory
-	if err := s.db.WithContext(ctx).First(&cat, "id = ?", cid).Error; err != nil {
+	if err := s.db.WithContext(ctx).First(&cat, "id = ?", cid).Error; err != nil || !Visible(cat.BranchID, scope.Branches) {
 		return nil, fieldError("category_id", "this category was not found")
 	}
 	categoryID := &cid
+	owner := p.BranchID
+	if id == nil || in.BranchID != nil {
+		if owner, err = ParseOwner(ctx, s.db, strOr(in.BranchID), scope); err != nil {
+			return nil, err
+		}
+		if id != nil && owner != nil && !sameOwner(owner, p.BranchID) {
+			// Only what has never been used in another branch can become one branch's own.
+			used, err := countAny(s.db.WithContext(ctx), []string{
+				"SELECT COUNT(*) FROM stock_movements WHERE product_id = ? AND branch_id <> ?",
+				"SELECT COUNT(*) FROM sale_items i JOIN sales d ON d.id = i.sale_id WHERE i.product_id = ? AND d.branch_id <> ?",
+				"SELECT COUNT(*) FROM purchase_items i JOIN purchases d ON d.id = i.purchase_id WHERE i.product_id = ? AND d.branch_id <> ?",
+				"SELECT COUNT(*) FROM quotation_items i JOIN quotations d ON d.id = i.quotation_id WHERE i.product_id = ? AND d.branch_id <> ? AND d.deleted_at IS NULL",
+			}, p.ID, *owner)
+			if err != nil {
+				return nil, err
+			}
+			if used {
+				return nil, fieldError("branch_id", fmt.Sprintf("this product has been stocked, bought, sold or quoted in another branch, so it can't be %s's own", BranchName(ctx, s.db, *owner)))
+			}
+		}
+	}
+	// A shared product goes in a shared category; one branch's product in a shared one or its own.
+	if cat.BranchID != nil && !sameOwner(cat.BranchID, owner) {
+		if owner == nil {
+			return nil, fieldError("category_id", fmt.Sprintf("%s is %s's own category; a shared product needs a shared category", cat.Name, BranchName(ctx, s.db, *cat.BranchID)))
+		}
+		return nil, fieldError("category_id", fmt.Sprintf("%s is %s's own category; choose a shared one or %s's", cat.Name, BranchName(ctx, s.db, *cat.BranchID), BranchName(ctx, s.db, *owner)))
+	}
+	p.BranchID = owner
 	sale, err := parseMoney("sale_price", in.SalePrice)
 	if err != nil {
 		return nil, err
@@ -443,6 +531,9 @@ func (s *InventoryService) SaveProduct(ctx context.Context, id *uuid.UUID, in Pr
 		return nil, err
 	}
 	s.removeStored(ctx, oldKey)
+	if p.BranchID != nil {
+		p.BranchName = BranchName(ctx, s.db, *p.BranchID)
+	}
 	return &p, nil
 }
 
@@ -496,7 +587,7 @@ func (s *InventoryService) removeStored(ctx context.Context, key string) {
 }
 
 // SetProductImage stores an uploaded picture (replacing an earlier one or a picture address).
-func (s *InventoryService) SetProductImage(ctx context.Context, id uuid.UUID, contentType string, size int64, r io.Reader) (*models.Product, error) {
+func (s *InventoryService) SetProductImage(ctx context.Context, id uuid.UUID, contentType string, size int64, r io.Reader, scope CatalogScope) (*models.Product, error) {
 	if s.store == nil {
 		return nil, errors.New("file storage is not set up")
 	}
@@ -507,6 +598,9 @@ func (s *InventoryService) SetProductImage(ctx context.Context, id uuid.UUID, co
 	var p models.Product
 	if err := s.db.WithContext(ctx).First(&p, "id = ?", id).Error; err != nil {
 		return nil, notFound(err)
+	}
+	if err := MayChange(p.BranchID, scope); err != nil {
+		return nil, err
 	}
 	key := fmt.Sprintf("products/%s/%s.%s", p.ID, uuid.NewString()[:8], ext)
 	if err := s.store.Put(ctx, key, r, size, contentType); err != nil {
@@ -523,10 +617,13 @@ func (s *InventoryService) SetProductImage(ctx context.Context, id uuid.UUID, co
 }
 
 // ClearProductImage removes the picture (uploaded or address).
-func (s *InventoryService) ClearProductImage(ctx context.Context, id uuid.UUID) error {
+func (s *InventoryService) ClearProductImage(ctx context.Context, id uuid.UUID, scope CatalogScope) error {
 	var p models.Product
 	if err := s.db.WithContext(ctx).First(&p, "id = ?", id).Error; err != nil {
 		return notFound(err)
+	}
+	if err := MayChange(p.BranchID, scope); err != nil {
+		return err
 	}
 	// Updates writes the new values into p, so keep the stored file's key first.
 	oldKey := p.ImageKey
@@ -538,10 +635,13 @@ func (s *InventoryService) ClearProductImage(ctx context.Context, id uuid.UUID) 
 }
 
 // OpenProductImage opens the uploaded picture.
-func (s *InventoryService) OpenProductImage(ctx context.Context, id uuid.UUID) (io.ReadCloser, string, error) {
+func (s *InventoryService) OpenProductImage(ctx context.Context, id uuid.UUID, scope BranchScope) (io.ReadCloser, string, error) {
 	var p models.Product
-	if err := s.db.WithContext(ctx).Select("id", "image_key", "image_type").First(&p, "id = ?", id).Error; err != nil {
+	if err := s.db.WithContext(ctx).Select("id", "image_key", "image_type", "branch_id").First(&p, "id = ?", id).Error; err != nil {
 		return nil, "", notFound(err)
+	}
+	if !Visible(p.BranchID, scope) {
+		return nil, "", ErrInventoryNotFound
 	}
 	if p.ImageKey == "" || s.store == nil {
 		return nil, "", ErrNoProductImage
@@ -802,6 +902,9 @@ func (s *InventoryService) Adjust(ctx context.Context, in AdjustInput, scope Bra
 	}
 	if product.Type == models.ProductService {
 		return nil, fieldError("product_id", "a service has no stock to adjust")
+	}
+	if !usableIn(product.BranchID, branchID) {
+		return nil, fieldError("product_id", fmt.Sprintf("%s is %s's own product", product.Name, BranchName(ctx, s.db, *product.BranchID)))
 	}
 	var qty decimal.Decimal
 	var err error

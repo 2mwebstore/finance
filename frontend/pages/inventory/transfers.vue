@@ -36,7 +36,7 @@
     <InventoryPager v-model:page="page" :page-size="pageSize" :total="total" />
 
     <!-- New transfer -->
-    <AppModal :model-value="formOpen" form title="New transfer" eyebrow="TRANSFER" subtitle="The goods leave one branch and arrive at the other right away." :busy="saving" width="680px" @update:model-value="(open) => { if (!open && !saving) formOpen = false }" @submit="save">
+    <AppModal :model-value="formOpen" form title="New transfer" eyebrow="TRANSFER" subtitle="The goods leave one branch and arrive at the other right away. Only shared products move; a branch’s own stay there." :busy="saving" width="680px" @update:model-value="(open) => { if (!open && !saving) formOpen = false }" @submit="save">
       <template #icon><ArrowLeftRight :size="20" /></template>
       <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div class="space-y-1 text-xs font-medium text-muted">From<SearchSelect v-model="form.from_branch_id" :options="branchChoices" placeholder="Choose a branch" aria-label="From branch" /></div>
@@ -153,7 +153,8 @@ const formCheck = reactive(useFormErrors(
 async function loadBranchProducts() {
   if (!form.from_branch_id) { branchProducts.value = []; return }
   try {
-    branchProducts.value = (await api<Paged<Product>>('/inventory/products', { query: { branch_id: form.from_branch_id, active: 'true', type: 'standard', page_size: 500 } })).items || []
+    // Only shared products move between branches (a branch's own stays there).
+    branchProducts.value = (await api<Paged<Product>>('/inventory/products', { query: { branch_id: form.from_branch_id, owner: 'shared', active: 'true', type: 'standard', page_size: 500 } })).items || []
   } catch {
     branchProducts.value = []
   }

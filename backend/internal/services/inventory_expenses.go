@@ -59,7 +59,7 @@ func (s *InventoryService) CreateExpense(ctx context.Context, in InventoryExpens
 	if err != nil {
 		return nil, err
 	}
-	paymentID, err := s.paymentMethod(ctx, in.PaymentMethodID)
+	paymentID, err := s.paymentMethod(ctx, in.PaymentMethodID, branchID)
 	if err != nil {
 		return nil, err
 	}

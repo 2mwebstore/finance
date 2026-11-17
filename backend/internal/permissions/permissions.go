@@ -60,6 +60,17 @@ const (
 	PurchasesVoid     = "purchases.void"
 	PurchasesEdit     = "purchases.edit"
 
+	// Quotations: price offers to customers (no stock moves until one is turned into a sale).
+	QuotationsView   = "quotations.view"
+	QuotationsCreate = "quotations.create"
+	QuotationsEdit   = "quotations.edit"
+	QuotationsDelete = "quotations.delete"
+
+	// The shared customer and supplier lists. People who make sales, quotations or purchases can
+	// also add someone new from the form; changing or turning someone off needs these.
+	CustomersManage = "customers.manage"
+	SuppliersManage = "suppliers.manage"
+
 	InventoryExpensesView   = "inventory-expenses.view"
 	InventoryExpensesCreate = "inventory-expenses.create"
 	InventoryExpensesVoid   = "inventory-expenses.void"
@@ -140,11 +151,17 @@ func AllPermissions() []struct {
 		{SalesCreate, "Create Sales", "Sales", "Record sales; their stock goes out right away"},
 		{SalesVoid, "Void Sales", "Sales", "Void a sale and put its stock back"},
 		{SalesEdit, "Edit Sales", "Sales", "Change a sale; its goods are put back and the new lines taken out of stock"},
+		{QuotationsView, "View Quotations", "Quotations", "See quotations (price offers to customers) of your branches"},
+		{QuotationsCreate, "Create Quotations", "Quotations", "Make quotations for customers; they move no stock (turning one into a sale needs Create Sales)"},
+		{QuotationsEdit, "Edit Quotations", "Quotations", "Change a quotation, and mark it accepted, declined or open again"},
+		{QuotationsDelete, "Delete Quotations", "Quotations", "Delete a quotation that wasn't turned into a sale"},
 		{PurchasesView, "View Purchases", "Purchases", "See purchases of your branches"},
 		{PurchasesCreate, "Create Purchases", "Purchases", "Record purchases from suppliers; stock goes in once approved"},
 		{PurchasesApprove, "Approve Purchases", "Purchases", "Approve or reject purchases; approved purchases add stock"},
 		{PurchasesVoid, "Void Purchases", "Purchases", "Void a purchase and take its stock back out"},
 		{PurchasesEdit, "Edit Purchases", "Purchases", "Change a pending purchase (an approved one also needs Approve Purchases)"},
+		{CustomersManage, "Manage Customers", "Customers", "See the customer list; add, change and turn off customers (those shared by every branch: owner/admin only)"},
+		{SuppliersManage, "Manage Suppliers", "Suppliers", "See the supplier list; add, change and turn off suppliers (those shared by every branch: owner/admin only)"},
 		{InventoryExpensesView, "View Inventory Expenses", "Inventory Expenses", "See inventory expenses of your branches"},
 		{InventoryExpensesCreate, "Create Inventory Expenses", "Inventory Expenses", "Record inventory expenses (shipping, packaging, storage…)"},
 		{InventoryExpensesVoid, "Void Inventory Expenses", "Inventory Expenses", "Void an inventory expense"},
@@ -162,7 +179,7 @@ func AllPermissions() []struct {
 		{WinLoseEdit, "Update Data Entry", "Win/Lose", "Change an entry's title and amounts already saved, with a reason (kept in the audit log)"},
 		{WinLoseDelete, "Delete Data Entry", "Win/Lose", "Delete an entry and its amounts, with a reason (kept in the audit log)"},
 		{WinLoseReact, "React to Data Entry", "Win/Lose", "Give an entry, or an agent in it, ✅ or ❌, on Data entry and the Report"},
-		{WinLoseReportsView, "View Report", "Win/Lose Reports", "The Report and the group summary for your groups, one group at a time"},
+		{WinLoseReportsView, "View Report", "Win/Lose Reports", "The Report, the group summary and History (its downloaded or shared images) for your groups, one group at a time"},
 		{WinLoseReportsConsolidated, "View Consolidated Win/Lose", "Win/Lose Reports", "Combined totals across all your groups"},
 		{WinLoseReportsRates, "View Rates in Reports", "Win/Lose Reports", "Show each agent's rate on the Report and the Group Summary; without it the rates are hidden"},
 	}
@@ -209,7 +226,9 @@ func DefaultRoles() map[string]struct {
 				CategoriesManage, AuditLogsView, SettingsManage,
 				InventoryView, InventoryManage, InventoryAdjust, InventoryTransfer,
 				SalesView, SalesCreate, SalesVoid, SalesEdit,
+				QuotationsView, QuotationsCreate, QuotationsEdit, QuotationsDelete,
 				PurchasesView, PurchasesCreate, PurchasesApprove, PurchasesVoid, PurchasesEdit,
+				CustomersManage, SuppliersManage,
 				InventoryExpensesView, InventoryExpensesCreate, InventoryExpensesVoid,
 				PlatformsView, PlatformsCreate, PlatformsEdit, PlatformsDelete,
 				PlatformAssignmentsView, PlatformAssignmentsCreate, PlatformAssignmentsEdit, PlatformAssignmentsDelete,
@@ -231,7 +250,9 @@ func DefaultRoles() map[string]struct {
 				CategoriesManage,
 				InventoryView, InventoryAdjust,
 				SalesView, SalesCreate, SalesVoid, SalesEdit,
+				QuotationsView, QuotationsCreate, QuotationsEdit, QuotationsDelete,
 				PurchasesView, PurchasesCreate, PurchasesApprove, PurchasesEdit,
+				CustomersManage, SuppliersManage,
 				InventoryExpensesView, InventoryExpensesCreate,
 				PlatformsView, PlatformAssignmentsView,
 				WinLoseView, WinLoseCreate, WinLoseEdit, WinLoseDelete, WinLoseReact, WinLoseReportsView, WinLoseReportsRates,
@@ -247,7 +268,7 @@ func DefaultRoles() map[string]struct {
 				TransactionsView,
 				ReportsView, ReportsExport,
 				BranchesView,
-				InventoryView, SalesView, PurchasesView, PurchasesCreate, PurchasesEdit,
+				InventoryView, SalesView, QuotationsView, PurchasesView, PurchasesCreate, PurchasesEdit,
 				InventoryExpensesView, InventoryExpensesCreate,
 				PlatformsView, PlatformAssignmentsView,
 				WinLoseView, WinLoseCreate, WinLoseReact, WinLoseReportsView, WinLoseReportsRates,
@@ -261,7 +282,7 @@ func DefaultRoles() map[string]struct {
 				IncomeView, IncomeCreate,
 				ExpenseView, ExpenseCreate,
 				TransactionsView,
-				InventoryView, SalesView, SalesCreate,
+				InventoryView, SalesView, SalesCreate, QuotationsView, QuotationsCreate,
 			},
 		},
 		"viewer": {
@@ -274,7 +295,7 @@ func DefaultRoles() map[string]struct {
 				TransactionsView,
 				ReportsView,
 				BranchesView,
-				InventoryView, SalesView, PurchasesView, InventoryExpensesView,
+				InventoryView, SalesView, QuotationsView, PurchasesView, InventoryExpensesView,
 				PlatformsView, PlatformAssignmentsView, WinLoseView, WinLoseReportsView,
 			},
 		},

@@ -40,15 +40,16 @@ type Formula struct {
 // V1 is the formula read from the spreadsheet; it still has to be confirmed by the business:
 //
 //	adjusted = win_lose + commission
-//	jame_ps  = ROUND(adjusted × rate, 0)
+//	jame_ps  = ROUND(adjusted × rate, 2)
 //
-// ROUND is half away from zero, like Excel's (2.5 → 3, -2.5 → -3).
+// ROUND is to the cent, half away from zero, like Excel's (0.125 → 0.13, -0.125 → -0.13); a
+// Total keeps its cents (-995 × 10% = -99.50, not -100). Every version rounds the same way.
 const V1 = "v1"
 
 // V2 takes the commission away from the win/lose (the business's rule):
 //
 //	adjusted = win_lose − commission
-//	jame_ps  = ROUND(adjusted × rate, 0)
+//	jame_ps  = ROUND(adjusted × rate, 2)
 //
 // e.g. (1,000 − 100) × 10% = 90.
 const V2 = "v2"
@@ -56,7 +57,7 @@ const V2 = "v2"
 // V3 is V2 with the rate the agent's own share, so the Total is at what is left of 100%:
 //
 //	adjusted = win_lose − commission
-//	jame_ps  = ROUND(adjusted × (100% − rate), 0)
+//	jame_ps  = ROUND(adjusted × (100% − rate), 2)
 //
 // e.g. (1,000 − 100) × (100% − 60%) = 360.
 const V3 = "v3"
@@ -65,7 +66,7 @@ const V3 = "v3"
 // rule from November 2026):
 //
 //	adjusted = win_lose + commission
-//	jame_ps  = ROUND(adjusted × (100% − rate), 0)
+//	jame_ps  = ROUND(adjusted × (100% − rate), 2)
 //
 // e.g. (1,000 + 100) × (100% − 60%) = 440. A GI group under it gives −((win_lose + commission) × rate).
 const V4 = "v4"
@@ -75,42 +76,48 @@ const Default = V4
 
 var hundred = decimal.NewFromInt(100)
 
+// Places is how many decimals a Total keeps (cents): ROUND(…, 2), half away from zero.
+const Places = 2
+
+// Cents rounds an amount to the cent, half away from zero.
+func Cents(amount decimal.Decimal) decimal.Decimal { return amount.Round(Places) }
+
 var formulas = map[string]Formula{
 	V1: {
 		Version:     V1,
-		Description: "Total = ROUND((Win/Lose + Commission) × Partner %, 0)",
+		Description: "Total = ROUND((Win/Lose + Commission) × Partner %, 2)",
 		calc: func(in Input) (decimal.Decimal, decimal.Decimal) {
 			adjusted := in.WinLose.Add(in.Commission)
-			return adjusted, adjusted.Mul(in.RatePct).Div(hundred).Round(0)
+			return adjusted, Cents(adjusted.Mul(in.RatePct).Div(hundred))
 		},
 	},
 	V2: {
 		Version:     V2,
-		Description: "Total = ROUND((Win/Lose − Commission) × rate, 0)",
+		Description: "Total = ROUND((Win/Lose − Commission) × rate, 2)",
 		Confirmed:   true,
 		calc: func(in Input) (decimal.Decimal, decimal.Decimal) {
 			adjusted := in.WinLose.Sub(in.Commission)
-			return adjusted, adjusted.Mul(in.RatePct).Div(hundred).Round(0)
+			return adjusted, Cents(adjusted.Mul(in.RatePct).Div(hundred))
 		},
 	},
 	V3: {
 		Version:     V3,
-		Description: "Total = ROUND((Win/Lose − Commission) × (100% − rate), 0)",
+		Description: "Total = ROUND((Win/Lose − Commission) × (100% − rate), 2)",
 		Confirmed:   true,
 		Rest:        true,
 		calc: func(in Input) (decimal.Decimal, decimal.Decimal) {
 			adjusted := in.WinLose.Sub(in.Commission)
-			return adjusted, adjusted.Mul(hundred.Sub(in.RatePct)).Div(hundred).Round(0)
+			return adjusted, Cents(adjusted.Mul(hundred.Sub(in.RatePct)).Div(hundred))
 		},
 	},
 	V4: {
 		Version:     V4,
-		Description: "Total = ROUND((Win/Lose + Commission) × (100% − rate), 0)",
+		Description: "Total = ROUND((Win/Lose + Commission) × (100% − rate), 2)",
 		Confirmed:   true,
 		Rest:        true,
 		calc: func(in Input) (decimal.Decimal, decimal.Decimal) {
 			adjusted := in.WinLose.Add(in.Commission)
-			return adjusted, adjusted.Mul(hundred.Sub(in.RatePct)).Div(hundred).Round(0)
+			return adjusted, Cents(adjusted.Mul(hundred.Sub(in.RatePct)).Div(hundred))
 		},
 	},
 }
@@ -132,7 +139,7 @@ const (
 func ValidKind(k string) bool { return k == string(PO) || k == string(GI) }
 
 // CalculateKind works a week out for an agent of the given kind. An empty or PO kind follows the
-// formula version; GI is −ROUND(adjusted × rate, 0), with the adjusted amount of that version
+// formula version; GI is −ROUND(adjusted × rate, 2), with the adjusted amount of that version
 // (win_lose + commission under v4, win_lose − commission under v3).
 func CalculateKind(version string, kind Kind, in Input) (Result, error) {
 	if kind != GI {
@@ -143,7 +150,7 @@ func CalculateKind(version string, kind Kind, in Input) (Result, error) {
 		return Result{}, ErrUnknownFormula
 	}
 	adjusted, _ := f.calc(Input{WinLose: in.WinLose, Commission: in.Commission})
-	jame := adjusted.Mul(in.RatePct).Div(hundred).Round(0).Neg()
+	jame := Cents(adjusted.Mul(in.RatePct).Div(hundred)).Neg()
 	return Result{Version: version, Adjusted: adjusted.Round(4), JamePS: jame}, nil
 }
 

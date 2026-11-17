@@ -1,5 +1,5 @@
 <template>
-  <form class="max-w-4xl space-y-4" novalidate @submit.prevent="save">
+  <form class="space-y-4" novalidate @submit.prevent="save">
     <header class="flex min-w-0 items-center gap-3">
       <NuxtLink to="/inventory/sales" class="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-border bg-white text-muted hover:text-navy" aria-label="Back to sales"><ArrowLeft :size="17" /></NuxtLink>
       <div class="min-w-0">
@@ -11,11 +11,11 @@
 
     <div v-if="loadingSale" class="text-sm text-muted">Loading the sale…</div>
     <AppAlert v-else-if="loadError" title="Couldn’t open this sale" :message="loadError" />
-    <!-- One card, top to bottom: details, products, discount and shipping, note, totals. -->
+    <!-- One full-width card, top to bottom: details, products, discount and shipping, note, totals. -->
     <div v-else class="space-y-5 rounded-xl border border-border bg-white p-4 sm:p-5">
-      <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <div v-if="branches.length !== 1" class="space-y-1 text-xs font-medium text-muted">Branch<SearchSelect v-model="form.branch_id" :options="branchChoices" placeholder="Choose a branch" aria-label="Branch" :aria-invalid="formCheck.invalid('branch_id')" /></div>
-        <label class="block space-y-1 text-xs font-medium text-muted">Customer <span class="font-normal">(optional)</span><input v-model.trim="form.customer" maxlength="191" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" placeholder="Walk-in" /></label>
+        <div class="space-y-1 text-xs font-medium text-muted">Customer <span class="font-normal">(optional)</span><InventoryPartySelect v-model="form.customer_id" kind="customers" :branch-id="form.branch_id" :name="form.customer" none-label="Walk-in (no customer)" placeholder="Walk-in (no customer)" aria-label="Customer" :invalid="!!formCheck.invalid('customer_id')" @pick="(p) => form.customer = p?.name || ''" /></div>
         <div class="space-y-1 text-xs font-medium text-muted">Sale date<DatePicker v-model="form.sale_date" aria-label="Sale date" /></div>
         <div class="space-y-1 text-xs font-medium text-muted">
           Due date <span class="font-normal">(optional)</span>
@@ -40,11 +40,8 @@
 
       <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div class="space-y-1 text-xs font-medium text-muted">
-          Sale discount
-          <span class="flex overflow-hidden rounded-lg border border-border bg-white focus-within:border-primary">
-            <input v-model.trim="form.discount" type="text" inputmode="decimal" autocomplete="off" placeholder="0" class="min-w-0 flex-1 border-0 px-3 py-2 text-sm text-navy outline-none" aria-label="Discount on the sale" :aria-invalid="formCheck.invalid('discount')" />
-            <button type="button" class="shrink-0 border-l border-border bg-canvas px-3 text-xs font-bold text-navy" :title="form.discount_mode === 'percent' ? 'Percent of the subtotal (tap for an amount)' : 'Amount (tap for a percent)'" @click="form.discount_mode = form.discount_mode === 'percent' ? 'amount' : 'percent'">{{ form.discount_mode === 'percent' ? '%' : symbol }}</button>
-          </span>
+          Sale discount <span class="font-normal">(10% = percent, 10 = amount)</span>
+          <InventoryDiscountInput v-model:value="form.discount" v-model:mode="form.discount_mode" :currency="form.currency" aria-label="Discount on the sale" :invalid="!!formCheck.invalid('discount')" />
         </div>
         <div class="space-y-1 text-xs font-medium text-muted">
           Shipping <span class="font-normal">(charged to the customer)</span>
@@ -57,21 +54,24 @@
         <RichText v-model="form.note" aria-label="Note" placeholder="Anything to remember about this sale" />
       </div>
 
-      <div class="space-y-1 rounded-xl bg-canvas p-3 text-sm">
-        <div class="flex justify-between"><span class="text-muted">Subtotal</span><span class="text-navy">{{ formatMoney(gross, form.currency) }}</span></div>
-        <div v-if="itemDiscounts" class="flex justify-between"><span class="text-muted">Item discounts</span><span class="text-expense">−{{ formatMoney(itemDiscounts, form.currency) }}</span></div>
-        <div v-if="saleDiscount" class="flex justify-between"><span class="text-muted">Sale discount</span><span class="text-expense">−{{ formatMoney(saleDiscount, form.currency) }}</span></div>
-        <div v-if="shipping" class="flex justify-between"><span class="text-muted">Shipping</span><span class="text-navy">+{{ formatMoney(shipping, form.currency) }}</span></div>
-        <div class="flex items-baseline justify-between border-t border-border pt-1.5">
-          <span class="font-semibold text-navy">Total</span>
-          <span class="text-right"><strong class="text-lg text-navy">{{ formatMoney(total, form.currency) }}</strong><span v-if="otherCurrency" class="ml-1.5 text-xs text-muted">≈ {{ formatMoney(convert(total, form.currency, otherCurrency), otherCurrency) }}</span></span>
+      <!-- The totals and save, on the right -->
+      <div class="ml-auto w-full space-y-3 sm:max-w-md">
+        <div class="space-y-1 rounded-xl bg-canvas p-3 text-sm">
+          <div class="flex justify-between"><span class="text-muted">Subtotal</span><span class="text-navy">{{ formatMoney(gross, form.currency) }}</span></div>
+          <div v-if="itemDiscounts" class="flex justify-between"><span class="text-muted">Item discounts</span><span class="text-expense">−{{ formatMoney(itemDiscounts, form.currency) }}</span></div>
+          <div v-if="saleDiscount" class="flex justify-between"><span class="text-muted">Sale discount</span><span class="text-expense">−{{ formatMoney(saleDiscount, form.currency) }}</span></div>
+          <div v-if="shipping" class="flex justify-between"><span class="text-muted">Shipping</span><span class="text-navy">+{{ formatMoney(shipping, form.currency) }}</span></div>
+          <div class="flex items-baseline justify-between border-t border-border pt-1.5">
+            <span class="font-semibold text-navy">Total</span>
+            <span class="text-right"><strong class="text-lg text-navy">{{ formatMoney(total, form.currency) }}</strong><span v-if="otherCurrency" class="ml-1.5 text-xs text-muted">≈ {{ formatMoney(convert(total, form.currency, otherCurrency), otherCurrency) }}</span></span>
+          </div>
         </div>
-      </div>
 
-      <AppAlert v-if="formError || formCheck.messages.length" :title="formError ? 'Couldn’t save this sale' : 'Check the highlighted fields'" :message="formError" :items="formCheck.messages" dismissible @dismiss="formError = ''; formCheck.reset()" />
-      <div class="flex justify-end gap-2">
-        <NuxtLink to="/inventory/sales" class="rounded-lg border border-border bg-white px-4 py-2.5 text-center text-sm font-semibold text-muted">Cancel</NuxtLink>
-        <button type="submit" class="rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-60" :disabled="saving">{{ saving ? 'Saving…' : original ? 'Save changes' : 'Save sale' }}</button>
+        <AppAlert v-if="formError || formCheck.messages.length" :title="formError ? 'Couldn’t save this sale' : 'Check the highlighted fields'" :message="formError" :items="formCheck.messages" dismissible @dismiss="formError = ''; formCheck.reset()" />
+        <div class="flex gap-2">
+          <NuxtLink to="/inventory/sales" class="flex-1 rounded-lg border border-border bg-white px-4 py-2.5 text-center text-sm font-semibold text-muted">Cancel</NuxtLink>
+          <button type="submit" class="flex-1 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60" :disabled="saving">{{ saving ? 'Saving…' : original ? 'Save changes' : 'Save sale' }}</button>
+        </div>
       </div>
     </div>
   </form>
@@ -86,7 +86,7 @@ import { branchLabel, useBranchOptions } from '~/composables/useBranchOptions'
 import { usePaymentMethods } from '~/composables/usePaymentMethods'
 import { useCurrency } from '~/composables/useCurrency'
 import { rule } from '~/utils/validation'
-import { currencyMeta, formatMoney } from '~/utils/money'
+import { formatMoney } from '~/utils/money'
 import { addDaysISO, discountAmount, docDiscountCheck, lineDiscount, linesCheck, linesSubtotal, roundMoney, todayISO } from '~/utils/inventory'
 
 /** The sale form: a new sale, or (with saleId) a change to a completed one. */
@@ -97,7 +97,8 @@ const route = useRoute()
 const toast = useToast()
 const { branches } = useBranchOptions('All branches')
 const branchChoices = computed(() => branches.value.map(b => ({ value: b.id, label: branchLabel(b) })))
-const { options: paymentOptions, defaultId: defaultPayment, load: loadPayments } = usePaymentMethods()
+// Payment methods shared by every branch or the sale's branch's own.
+const { options: paymentOptions, defaultId: defaultPayment, load: loadPayments, keep: keepPayment } = usePaymentMethods(() => form.branch_id)
 const { active: activeCurrencies, currencyOptions, rateLabel, defaultCurrency, load: loadCurrency, convert } = useCurrency()
 
 const saving = ref(false)
@@ -114,10 +115,9 @@ const held = computed<Record<string, number>>(() => {
 })
 const formError = ref('')
 const branchProducts = ref<Product[]>([])
-const form = reactive({ branch_id: '', sale_date: todayISO(), due_date: '', currency: 'USD' as Currency, customer: '', payment_method_id: '', discount: '', discount_mode: 'amount' as DiscountMode, shipping: '', note: '', lines: [] as DocLineForm[] })
+const form = reactive({ branch_id: '', sale_date: todayISO(), due_date: '', currency: 'USD' as Currency, customer_id: '', customer: '', payment_method_id: '', discount: '', discount_mode: 'amount' as DiscountMode, shipping: '', note: '', lines: [] as DocLineForm[] })
 
 // Subtotal (before item discounts) − item discounts − sale discount + shipping = total.
-const symbol = computed(() => currencyMeta(form.currency).symbol.trim())
 const gross = computed(() => roundMoney(form.lines.reduce((sum, l) => sum + (Number(l.quantity) || 0) * (Number(l.price) || 0), 0), form.currency))
 const subtotal = computed(() => linesSubtotal(form.lines, form.currency))
 const itemDiscounts = computed(() => roundMoney(gross.value - subtotal.value, form.currency))
@@ -150,9 +150,12 @@ async function loadBranchProducts() {
   }
 }
 // Another branch has other stock: the cart starts again.
-watch(() => form.branch_id, (to, from) => {
+watch(() => form.branch_id, async (to, from) => {
   if (from && to !== from) form.lines = []
   loadBranchProducts()
+  // Another branch may not have the chosen payment method (one the old branch had on its own).
+  await loadPayments()
+  if (from || !form.payment_method_id) form.payment_method_id = keepPayment(form.payment_method_id)
 })
 // Switching currency converts the prices already typed (at the exchange rate).
 watch(() => form.currency, (to, from) => {
@@ -171,7 +174,7 @@ onMounted(async () => {
       if (!sale.can_edit) throw new Error(sale.status === 'voided' ? 'A voided sale can’t be changed.' : 'You can’t change this sale.')
       original.value = sale
       Object.assign(form, {
-        branch_id: sale.branch_id, sale_date: sale.sale_date.slice(0, 10), due_date: sale.due_date ? sale.due_date.slice(0, 10) : '', currency: sale.currency, customer: sale.customer,
+        branch_id: sale.branch_id, sale_date: sale.sale_date.slice(0, 10), due_date: sale.due_date ? sale.due_date.slice(0, 10) : '', currency: sale.currency, customer_id: sale.customer_id || '', customer: sale.customer,
         payment_method_id: sale.payment_method_id || defaultPayment.value, discount: Number(sale.discount) ? String(Number(sale.discount)) : '',
         discount_mode: 'amount', shipping: Number(sale.shipping) ? String(Number(sale.shipping)) : '', note: sale.note || '',
         lines: sale.lines.map((l, i) => ({ key: i + 1, product_id: l.product_id, quantity: String(Number(l.quantity)), price: String(Number(l.unit_price)), discount: Number(l.discount) ? String(Number(l.discount)) : '', discount_mode: 'amount' as DiscountMode, note: l.note || '' })),
@@ -206,7 +209,7 @@ async function save() {
     const sale = await api<Sale>(original.value ? `/inventory/sales/${original.value.id}` : '/inventory/sales', {
       method: original.value ? 'PATCH' : 'POST',
       body: {
-        branch_id: form.branch_id, sale_date: form.sale_date, due_date: form.due_date, currency: form.currency, customer: form.customer,
+        branch_id: form.branch_id, sale_date: form.sale_date, due_date: form.due_date, currency: form.currency, customer_id: form.customer_id, customer: form.customer,
         payment_method_id: form.payment_method_id, note: form.note,
         discount: String(saleDiscount.value), shipping: form.shipping || '0',
         items: form.lines.map(l => ({ product_id: l.product_id, quantity: l.quantity, unit_price: l.price || '0', discount: String(lineDiscount(l, form.currency)), note: (l.note || '').trim() })),

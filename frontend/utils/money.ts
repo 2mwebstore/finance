@@ -20,10 +20,12 @@ export function currencyMeta(code: string): CurrencyMeta {
   return registry[code] || { symbol: code ? `${code} ` : '', decimals: 2 }
 }
 
-export function formatMoney(amount: string | number | null | undefined, currency: SupportedCurrency): string {
+/** places: decimals to show instead of the currency's own. */
+export function formatMoney(amount: string | number | null | undefined, currency: SupportedCurrency, places?: number): string {
   const parsed = typeof amount === 'number' ? amount : Number(amount || 0)
   const value = Number.isFinite(parsed) ? parsed : 0
-  const { symbol, decimals } = currencyMeta(currency)
+  const { symbol } = currencyMeta(currency)
+  const decimals = places ?? currencyMeta(currency).decimals
   const formatted = new Intl.NumberFormat('en-US', {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,

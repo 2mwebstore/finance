@@ -154,11 +154,23 @@ export interface Category {
   branch_name?: string
 }
 
-export interface PaymentMethod {
+/**
+ * Products, product categories, customers, suppliers and payment methods are shared by every
+ * branch (branch_id null; the owner or an admin manages them) or one branch's own (only it sees
+ * and uses them).
+ */
+export interface BranchOwned {
+  branch_id?: string | null
+  /** The owning branch's name (empty when shared). */
+  branch_name?: string
+}
+
+export interface PaymentMethod extends BranchOwned {
   id: string
   code: string
   name: string
   is_active: boolean
+  is_system?: boolean
 }
 
 export interface Branch {
@@ -253,7 +265,7 @@ export interface AuditEntry {
 /** A currency code from Manage → Currency (USD, KHR, THB…). */
 export type Currency = string
 
-export interface ProductCategory {
+export interface ProductCategory extends BranchOwned {
   id: string
   code: string
   name: string
@@ -261,11 +273,11 @@ export interface ProductCategory {
   is_active: boolean
 }
 
-/** A product (shared by every branch) with its stock: one branch, or the user's branches added up. */
+/** A product (shared, or one branch's own) with its stock: one branch, or the user's branches added up. */
 /** standard: stocked (bought, sold, counted, moved). service: only sold; no stock and no cost. */
 export type ProductType = 'standard' | 'service'
 
-export interface Product {
+export interface Product extends BranchOwned {
   id: string
   /** Generated when the product is added (SKU-000001). */
   sku: string
@@ -354,6 +366,8 @@ export interface Purchase {
   branch_id: string
   branch_code: string
   branch_name: string
+  /** From the suppliers list (empty: typed). */
+  supplier_id?: string | null
   supplier: string
   purchase_date: string
   currency: Currency
@@ -383,12 +397,29 @@ export interface Purchase {
   payment_method_id?: string | null
 }
 
+/** Someone in the customer or supplier list (shared, or one branch's own). */
+export interface Party extends BranchOwned {
+  id: string
+  name: string
+  phone: string
+  email: string
+  address: string
+  note: string
+  is_active: boolean
+  /** How many documents name them (sales and quotations, or purchases); list pages only. */
+  documents?: number
+}
+
+export type PartyKind = 'customers' | 'suppliers'
+
 export interface Sale {
   id: string
   number: string
   branch_id: string
   branch_code: string
   branch_name: string
+  /** From the customers list (empty: typed, or walk-in). */
+  customer_id?: string | null
   customer: string
   sale_date: string
   /** When the customer should pay by (optional). */
@@ -415,6 +446,50 @@ export interface Sale {
   can_void: boolean
   can_edit: boolean
   payment_method_id?: string | null
+  /** The quotation this sale was made from, if any. */
+  quotation_id?: string | null
+  quotation_number?: string
+}
+
+/** A price offer to a customer; it moves no stock until it is turned into a sale. */
+export interface Quotation {
+  id: string
+  number: string
+  branch_id: string
+  branch_code: string
+  branch_name: string
+  customer_id?: string | null
+  customer: string
+  contact: string
+  quote_date: string
+  /** The offer holds until this day (optional). */
+  valid_until?: string | null
+  currency: Currency
+  subtotal: string
+  discount: string
+  shipping: string
+  total: string
+  exchange_rate: string
+  total_base: string
+  status: 'open' | 'accepted' | 'declined' | 'converted'
+  /** Open and past its valid-until day. */
+  expired: boolean
+  note: string
+  created_by: string
+  decided_by: string
+  decided_at?: string | null
+  converted_by: string
+  converted_at?: string | null
+  sale_id?: string | null
+  sale_number: string
+  lines: DocLine[]
+  created_at: string
+  updated_at: string
+  can_edit: boolean
+  can_convert: boolean
+  can_delete: boolean
+  /** Who the offer is from (only when one quotation is opened), for printing. */
+  seller?: { company: string; branch: string; address: string; phone: string; email: string }
 }
 
 export interface StockTransfer {
@@ -675,6 +750,31 @@ export interface WinLoseEntry {
   created_at: string
   created_by: string
   /** People's ✅ (yes) and ❌ (no) on the entry, one each. */
+  reactions: EntryReaction[]
+}
+
+/** A Group summary picture kept on its first Download or Share to Telegram (RP's History). The
+ *  titles are the data entry's and the group's when it was taken. */
+export interface WinLoseEntryImage {
+  id: string
+  /** null once the data entry is deleted (the picture stays in History). */
+  entry_id: string | null
+  entry_title: string
+  week_start: string
+  week_end: string
+  group_id: string | null
+  /** '' when the picture wasn't of one group. */
+  group_title: string
+  branch_id: string
+  branch_code: string
+  branch_name: string
+  size: number
+  has_thumb: boolean
+  downloaded_at: string | null
+  shared_at: string | null
+  created_at: string
+  created_by: string
+  /** ✅ / ❌ / 📤 on the picture's group in its data entry (the entry's own when it isn't of one group). */
   reactions: EntryReaction[]
 }
 

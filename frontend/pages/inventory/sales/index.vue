@@ -54,6 +54,7 @@
           <span v-if="detail.payment_method">· Paid by {{ detail.payment_method }}</span>
           <span v-if="detail.due_date">· Due <strong class="text-navy">{{ formatDocDate(detail.due_date) }}</strong></span>
           <span>· by {{ detail.created_by }}</span>
+          <span v-if="detail.quotation_number">· From quotation <NuxtLink v-if="can('quotations.view') && detail.quotation_id" :to="{ path: '/inventory/quotations', query: { open: detail.quotation_id } }" class="font-mono font-semibold text-primary underline">{{ detail.quotation_number }}</NuxtLink><strong v-else class="font-mono text-navy">{{ detail.quotation_number }}</strong></span>
         </div>
         <InventoryDocLines class="mt-3" :lines="detail.lines" :currency="detail.currency" price-field="unit_price" />
         <div class="mt-3 space-y-1 text-right text-sm">

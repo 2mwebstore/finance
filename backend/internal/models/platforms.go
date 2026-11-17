@@ -231,3 +231,29 @@ type WeeklyAgentReaction struct {
 }
 
 func (WeeklyAgentReaction) TableName() string { return "weekly_agent_reactions" }
+
+// WeeklyEntryImage is a picture of a card in Group summary (Image), kept when it is downloaded or
+// shared to Telegram, for RP's History. The data entry's and the group's titles are kept as they
+// were then, so it still reads the same after either is renamed or the entry is deleted.
+type WeeklyEntryImage struct {
+	ID       uuid.UUID  `gorm:"type:char(36);primaryKey" json:"id"`
+	EntryID  *uuid.UUID `gorm:"type:char(36)" json:"entry_id"`
+	BranchID uuid.UUID  `gorm:"type:char(36);not null" json:"branch_id"`
+	// EntryTitle and WeekStart: the data entry's.
+	EntryTitle string     `gorm:"size:128;not null" json:"entry_title"`
+	WeekStart  time.Time  `gorm:"type:date;not null" json:"-"`
+	GroupID    *uuid.UUID `gorm:"type:char(36)" json:"group_id"`
+	GroupTitle string     `gorm:"size:128;not null" json:"group_title"`
+	// StorageKey: the picture in the file storage; ThumbKey: a small copy for the list ("": none).
+	StorageKey   string     `gorm:"size:255;not null" json:"-"`
+	ThumbKey     string     `gorm:"size:255;not null" json:"-"`
+	ContentType  string     `gorm:"size:64;not null" json:"-"`
+	Size         int64      `gorm:"not null" json:"size"`
+	DownloadedAt *time.Time `json:"downloaded_at"`
+	SharedAt     *time.Time `json:"shared_at"`
+	CreatedByID  uuid.UUID  `gorm:"type:char(36);not null" json:"-"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
+}
+
+func (WeeklyEntryImage) TableName() string { return "weekly_entry_images" }

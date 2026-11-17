@@ -63,7 +63,7 @@
                 <template v-if="summary">
                   <!-- Left out of the picture -->
                   <div v-if="e.id" class="flex items-center gap-x-2" data-capture-skip><WinloseEntryReactions :url="`/winlose/entries/${e.id}/reactions`" :reactions="e.reactions || []" /></div>
-                  <WinloseEntryImage :target-id="`entry-card-${e.id || 'none'}`" :title="e.title" :group="groupTitle" />
+                  <WinloseEntryImage :target-id="`entry-card-${e.id || 'none'}`" :title="e.title" :group="groupTitle" :entry-id="e.id || entryId" :group-id="groupId" />
                 </template>
               </div>
             </div>
@@ -75,7 +75,7 @@
         <article v-else-if="groupId" id="group-card" class="space-y-1.5">
           <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-1">
             <h3 class="text-sm font-semibold text-navy">{{ formatDocDate(range.from) }} – {{ formatDocDate(range.to) }}</h3>
-            <WinloseEntryImage v-if="summary" target-id="group-card" :title="`${groupTitle} ${range.from} to ${range.to}`" :group="groupTitle" />
+            <WinloseEntryImage v-if="summary" target-id="group-card" :title="`${groupTitle} ${range.from} to ${range.to}`" :group="groupTitle" :entry-id="entryId" :group-id="groupId" />
           </div>
           <WinloseReportTable :report="groupCard || report" by-group selectable :reactions="summary" @select="openAgent" />
           <p v-if="summary && (report.entries?.length || 0) > 1 && can('winlose.react')" class="px-1 text-[11px] text-muted">To give an agent ✅ / ❌, open its week in By week.</p>

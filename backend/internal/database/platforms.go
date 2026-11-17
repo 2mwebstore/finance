@@ -232,6 +232,29 @@ var platformTables = []string{
 	KEY idx_weekly_agent_reactions_platform (platform_id),
 	KEY idx_weekly_agent_reactions_user (user_id)
 )`,
+	`CREATE TABLE IF NOT EXISTS weekly_entry_images (
+	id CHAR(36) NOT NULL,
+	entry_id CHAR(36) NULL,
+	branch_id CHAR(36) NOT NULL,
+	entry_title VARCHAR(128) NOT NULL,
+	week_start DATE NOT NULL,
+	group_id CHAR(36) NULL,
+	group_title VARCHAR(128) NOT NULL DEFAULT '',
+	storage_key VARCHAR(255) NOT NULL,
+	thumb_key VARCHAR(255) NOT NULL DEFAULT '',
+	content_type VARCHAR(64) NOT NULL,
+	size BIGINT NOT NULL,
+	downloaded_at DATETIME(3) NULL,
+	shared_at DATETIME(3) NULL,
+	created_by_id CHAR(36) NOT NULL,
+	created_at DATETIME(3) NULL,
+	updated_at DATETIME(3) NULL,
+	PRIMARY KEY (id),
+	KEY idx_weekly_entry_images_branch_created (branch_id, created_at),
+	KEY idx_weekly_entry_images_created (created_at),
+	KEY idx_weekly_entry_images_entry (entry_id),
+	KEY idx_weekly_entry_images_group (group_id)
+)`,
 }
 
 // platformColumns were added to a table after it first shipped: added when missing.
@@ -345,6 +368,10 @@ var platformForeignKeys = []foreignKey{
 	{"weekly_agent_reactions", "fk_weekly_agent_reactions_entry", "entry_id", "weekly_entries(id) ON DELETE CASCADE"},
 	{"weekly_agent_reactions", "fk_weekly_agent_reactions_platform", "platform_id", "platforms(id) ON DELETE CASCADE"},
 	{"weekly_agent_reactions", "fk_weekly_agent_reactions_user", "user_id", "users(id)"},
+	{"weekly_entry_images", "fk_weekly_entry_images_entry", "entry_id", "weekly_entries(id) ON DELETE SET NULL"},
+	{"weekly_entry_images", "fk_weekly_entry_images_branch", "branch_id", "branches(id)"},
+	{"weekly_entry_images", "fk_weekly_entry_images_group", "group_id", "assignment_groups(id) ON DELETE SET NULL"},
+	{"weekly_entry_images", "fk_weekly_entry_images_created_by", "created_by_id", "users(id)"},
 }
 
 func (fk foreignKey) sql() string {

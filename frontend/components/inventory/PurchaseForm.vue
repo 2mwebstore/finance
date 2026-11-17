@@ -13,33 +13,36 @@
 
     <div v-if="loadingPurchase" class="text-sm text-muted">Loading the purchase…</div>
     <AppAlert v-else-if="loadError" title="Couldn’t open this purchase" :message="loadError" />
-    <!-- Phones: details, products, note, totals. Wide screens: products and note on the left; details and totals on the right. -->
-    <div v-else class="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_340px] lg:grid-rows-[auto_auto_1fr]">
-      <div class="space-y-3 rounded-xl border border-border bg-white p-4 lg:col-start-2 lg:row-start-1">
-        <h2 class="text-sm font-semibold text-navy">Details</h2>
-        <div v-if="branches.length !== 1" class="space-y-1 text-xs font-medium text-muted">Branch<SearchSelect v-model="form.branch_id" :options="branchChoices" placeholder="Choose a branch" aria-label="Branch" :aria-invalid="formCheck.invalid('branch_id')" /></div>
-        <div class="grid grid-cols-2 gap-3">
+    <!-- Top to bottom, full width: details, products, note, then the totals and save. -->
+    <div v-else class="space-y-4">
+      <section class="rounded-xl border border-border bg-white p-4">
+        <h2 class="mb-3 text-sm font-semibold text-navy">Details</h2>
+        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <div v-if="branches.length !== 1" class="space-y-1 text-xs font-medium text-muted">Branch<SearchSelect v-model="form.branch_id" :options="branchChoices" placeholder="Choose a branch" aria-label="Branch" :aria-invalid="formCheck.invalid('branch_id')" /></div>
+          <div class="space-y-1 text-xs font-medium text-muted">Supplier <span class="font-normal">(optional)</span><InventoryPartySelect v-model="form.supplier_id" kind="suppliers" :branch-id="form.branch_id" :name="form.supplier" none-label="No supplier" placeholder="Choose or add a supplier" aria-label="Supplier" :invalid="!!formCheck.invalid('supplier_id')" @pick="(p) => form.supplier = p?.name || ''" /></div>
           <div class="space-y-1 text-xs font-medium text-muted">Date<DatePicker v-model="form.purchase_date" aria-label="Purchase date" /></div>
-          <div class="space-y-1 text-xs font-medium text-muted">Currency<SearchSelect v-model="form.currency" :options="currencyOptions" :searchable="false" aria-label="Currency" /></div>
+          <div class="space-y-1 text-xs font-medium text-muted">
+            Currency<SearchSelect v-model="form.currency" :options="currencyOptions" :searchable="false" aria-label="Currency" />
+            <p v-if="rateLabel(form.currency)" class="text-[11px] font-normal">{{ rateLabel(form.currency) }}</p>
+          </div>
+          <div class="space-y-1 text-xs font-medium text-muted">Payment<SearchSelect v-model="form.payment_method_id" :options="paymentOptions" placeholder="Choose" aria-label="Payment method" /></div>
         </div>
-        <p v-if="rateLabel(form.currency)" class="-mt-1 text-[11px] text-muted">{{ rateLabel(form.currency) }}</p>
-        <label class="block space-y-1 text-xs font-medium text-muted">Supplier <span class="font-normal">(optional)</span><input v-model.trim="form.supplier" maxlength="191" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" placeholder="e.g. ABC Trading" /></label>
-        <div class="space-y-1 text-xs font-medium text-muted">Payment<SearchSelect v-model="form.payment_method_id" :options="paymentOptions" placeholder="Choose" aria-label="Payment method" /></div>
-        <label v-if="canApprove && !original" class="flex items-start gap-2 text-xs font-medium text-navy"><input v-model="form.pending" type="checkbox" class="mt-0.5 accent-primary" /> Send for approval instead (someone else approves it)</label>
-      </div>
+        <label v-if="canApprove && !original" class="mt-3 flex items-start gap-2 text-xs font-medium text-navy"><input v-model="form.pending" type="checkbox" class="mt-0.5 accent-primary" /> Send for approval instead (someone else approves it)</label>
+      </section>
 
-      <div class="min-w-0 rounded-xl border border-border bg-white p-4 lg:col-start-1 lg:row-span-2 lg:row-start-1">
+      <section class="min-w-0 rounded-xl border border-border bg-white p-4">
         <h2 class="mb-3 flex items-center gap-2 text-sm font-semibold text-navy"><Truck :size="16" /> Products</h2>
         <InventoryPos v-model="form.lines" :products="catalog" mode="purchase" :currency="form.currency" />
-      </div>
+      </section>
 
-      <div class="min-w-0 rounded-xl border border-border bg-white p-4 lg:col-start-1 lg:row-start-3">
+      <section class="min-w-0 rounded-xl border border-border bg-white p-4">
         <h2 class="mb-2 text-sm font-semibold text-navy">Note <span class="text-xs font-normal text-muted">(optional)</span></h2>
         <RichText v-model="form.note" aria-label="Note" placeholder="Invoice number, delivery…" />
-      </div>
+      </section>
 
-      <div class="space-y-4 lg:col-start-2 lg:row-start-2">
-        <InventoryDocSummary v-model:discount="form.discount" v-model:discount-mode="form.discount_mode" v-model:shipping="form.shipping" class="!max-w-none !bg-white" :currency="form.currency" :subtotal="subtotal" hint="Shipping and the discount are spread over the products into their stock cost." />
+      <!-- The totals, under the note -->
+      <div class="ml-auto w-full space-y-3 sm:max-w-md">
+        <InventoryDocSummary v-model:discount="form.discount" v-model:discount-mode="form.discount_mode" v-model:shipping="form.shipping" class="!max-w-none !bg-white" :currency="form.currency" :subtotal="subtotal" hint="Discount: 10% is a percent, 10 an amount. Shipping and the discount are spread over the products into their stock cost." />
         <AppAlert v-if="formError || formCheck.messages.length" :title="formError ? 'Couldn’t save this purchase' : 'Check the highlighted fields'" :message="formError" :items="formCheck.messages" dismissible @dismiss="formError = ''; formCheck.reset()" />
         <div class="flex gap-2">
           <NuxtLink to="/inventory/purchases" class="flex-1 rounded-lg border border-border bg-white px-4 py-2.5 text-center text-sm font-semibold text-muted">Cancel</NuxtLink>
@@ -71,7 +74,8 @@ const toast = useToast()
 const canApprove = computed(() => can('purchases.approve'))
 const { branches } = useBranchOptions('All branches')
 const branchChoices = computed(() => branches.value.map(b => ({ value: b.id, label: branchLabel(b) })))
-const { options: paymentOptions, defaultId: defaultPayment, load: loadPayments } = usePaymentMethods()
+// Payment methods shared by every branch or the purchase's branch's own.
+const { options: paymentOptions, defaultId: defaultPayment, load: loadPayments, keep: keepPayment } = usePaymentMethods(() => form.branch_id)
 const { currencyOptions, rateLabel, defaultCurrency, load: loadCurrency, convert } = useCurrency()
 
 const saving = ref(false)
@@ -81,7 +85,7 @@ const loadingPurchase = ref(!!props.purchaseId)
 const loadError = ref('')
 const formError = ref('')
 const catalog = ref<Product[]>([])
-const form = reactive({ branch_id: '', purchase_date: todayISO(), currency: 'USD' as Currency, supplier: '', payment_method_id: '', discount: '', discount_mode: 'amount' as DiscountMode, shipping: '', note: '', pending: false, lines: [] as DocLineForm[] })
+const form = reactive({ branch_id: '', purchase_date: todayISO(), currency: 'USD' as Currency, supplier_id: '', supplier: '', payment_method_id: '', discount: '', discount_mode: 'amount' as DiscountMode, shipping: '', note: '', pending: false, lines: [] as DocLineForm[] })
 const subtotal = computed(() => linesSubtotal(form.lines, form.currency))
 const subtitle = computed(() => {
   if (original.value?.status === 'approved') return 'Already in stock: saving puts the new lines in and takes the old goods back out.'
@@ -109,21 +113,32 @@ watch(() => form.currency, (to, from) => {
   if (form.discount_mode === 'amount') form.discount = money(form.discount)
 })
 
-onMounted(async () => {
-  const [, , products] = await Promise.all([
-    loadCurrency(),
-    loadPayments(),
+// The products the purchase's branch can buy: shared ones and its own.
+async function loadCatalog() {
+  try {
     // Editing also loads turned-off products, so lines already on the purchase keep their names.
-    api<Paged<Product>>('/inventory/products', { query: { ...(props.purchaseId ? {} : { active: 'true' }), page_size: 500 } }).catch(() => ({ items: [] as Product[] })),
-  ])
-  catalog.value = products.items || []
+    catalog.value = (await api<Paged<Product>>('/inventory/products', { query: { ...(props.purchaseId ? {} : { active: 'true' }), branch_id: form.branch_id || undefined, page_size: 500 } })).items || []
+  } catch {
+    catalog.value = []
+  }
+}
+// Another branch can't use the old branch's own products or payment method.
+watch(() => form.branch_id, async (to, from) => {
+  if (to === from) return
+  await Promise.all([loadCatalog(), loadPayments()])
+  if (from) form.lines = form.lines.filter(l => catalog.value.some(p => p.id === l.product_id))
+  if (from || !form.payment_method_id) form.payment_method_id = keepPayment(form.payment_method_id)
+})
+
+onMounted(async () => {
+  await Promise.all([loadCurrency(), loadPayments(), loadCatalog()])
   if (props.purchaseId) {
     try {
       const purchase = await api<Purchase>(`/inventory/purchases/${props.purchaseId}`)
       if (!purchase.can_edit) throw new Error(purchase.status === 'pending' || purchase.status === 'approved' ? 'You can’t change this purchase.' : `A ${purchase.status} purchase can’t be changed.`)
       original.value = purchase
       Object.assign(form, {
-        branch_id: purchase.branch_id, purchase_date: purchase.purchase_date.slice(0, 10), currency: purchase.currency, supplier: purchase.supplier,
+        branch_id: purchase.branch_id, purchase_date: purchase.purchase_date.slice(0, 10), currency: purchase.currency, supplier_id: purchase.supplier_id || '', supplier: purchase.supplier,
         payment_method_id: purchase.payment_method_id || defaultPayment.value, discount: Number(purchase.discount) ? String(Number(purchase.discount)) : '',
         discount_mode: 'amount', shipping: Number(purchase.shipping) ? String(Number(purchase.shipping)) : '', note: purchase.note || '',
         lines: purchase.lines.map((l, i) => ({ key: i + 1, product_id: l.product_id, quantity: String(Number(l.quantity)), price: String(Number(l.unit_cost)), discount: Number(l.discount) ? String(Number(l.discount)) : '', discount_mode: 'amount' as DiscountMode })),
@@ -158,7 +173,7 @@ async function save() {
     const purchase = await api<Purchase>(original.value ? `/inventory/purchases/${original.value.id}` : '/inventory/purchases', {
       method: original.value ? 'PATCH' : 'POST',
       body: {
-        branch_id: form.branch_id, purchase_date: form.purchase_date, currency: form.currency, supplier: form.supplier,
+        branch_id: form.branch_id, purchase_date: form.purchase_date, currency: form.currency, supplier_id: form.supplier_id, supplier: form.supplier,
         payment_method_id: form.payment_method_id, note: form.note, pending: form.pending,
         discount: String(discountAmount(subtotal.value, form.discount, form.discount_mode, form.currency)), shipping: form.shipping || '0',
         items: form.lines.map(l => ({ product_id: l.product_id, quantity: l.quantity, unit_cost: l.price || '0', discount: String(lineDiscount(l, form.currency)) })),

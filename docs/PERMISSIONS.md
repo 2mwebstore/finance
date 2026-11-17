@@ -2,7 +2,7 @@
 
 Server-side authorization is enforced on every protected API. The UI uses the same codes for visibility only.
 
-**Total: 57 permissions** across 18 modules.
+**Total: 70 permissions** across 21 modules.
 
 ## Full table
 
@@ -47,10 +47,16 @@ Server-side authorization is enforced on every protected API. The UI uses the sa
 | `sales.create` | Create Sales | Sales | Record sales; their stock goes out right away |
 | `sales.edit` | Edit Sales | Sales | Change a sale; its goods are put back and the new lines taken out of stock |
 | `sales.void` | Void Sales | Sales | Void a sale and put its stock back |
+| `quotations.view` | View Quotations | Quotations | See quotations (price offers to customers) of your branches |
+| `quotations.create` | Create Quotations | Quotations | Make quotations for customers; they move no stock (turning one into a sale needs Create Sales) |
+| `quotations.edit` | Edit Quotations | Quotations | Change a quotation, and mark it accepted, declined or open again |
+| `quotations.delete` | Delete Quotations | Quotations | Delete a quotation that wasn't turned into a sale |
 | `purchases.view` | View Purchases | Purchases | See purchases of your branches |
 | `purchases.create` | Create Purchases | Purchases | Record purchases from suppliers; stock goes in once approved |
 | `purchases.approve` | Approve Purchases | Purchases | Approve or reject purchases; approved purchases add stock |
 | `purchases.edit` | Edit Purchases | Purchases | Change a pending purchase (an approved one also needs Approve Purchases) |
+| `customers.manage` | Manage Customers | Customers | See the customer list; add, change and turn off customers (those shared by every branch: owner/admin only) |
+| `suppliers.manage` | Manage Suppliers | Suppliers | See the supplier list; add, change and turn off suppliers (those shared by every branch: owner/admin only) |
 | `purchases.void` | Void Purchases | Purchases | Void a purchase and take its stock back out |
 | `inventory-expenses.view` | View Inventory Expenses | Inventory Expenses | See inventory expenses of your branches |
 | `inventory-expenses.create` | Create Inventory Expenses | Inventory Expenses | Record inventory expenses (shipping, packaging, storage…) |
@@ -68,7 +74,7 @@ Server-side authorization is enforced on every protected API. The UI uses the sa
 | `winlose.edit` | Update Data Entry | Win/Lose | Change an entry's title and amounts already saved, with a reason (kept in the audit log) |
 | `winlose.delete` | Delete Data Entry | Win/Lose | Delete an entry and its amounts, with a reason (kept in the audit log) |
 | `winlose.react` | React to Data Entry | Win/Lose | Give an entry, or a group or agent in it (at 0 too), ✅ or ❌ and 📤 (report sent), on Data entry, the Report and Group summary |
-| `winlose-reports.view` | View Report | Win/Lose Reports | The Report and the group summary for your groups, one group at a time |
+| `winlose-reports.view` | View Report | Win/Lose Reports | The Report, the group summary and History (its downloaded or shared images) for your groups, one group at a time |
 | `winlose-reports.consolidated` | View Consolidated Win/Lose | Win/Lose Reports | Combined totals across all your groups |
 | `winlose-reports.rates` | View Rates in Reports | Win/Lose Reports | Show each agent's rate on the Report and the Group Summary; without it the rates are hidden |
 
@@ -199,68 +205,23 @@ Inventory is separate from income/expense. Products are shared by every branch; 
 | `sales.create` | Record sales; their stock goes out right away |
 | `sales.edit` | Change a sale; its goods are put back and the new lines taken out of stock |
 | `sales.void` | Void a sale and put its stock back |
+| `quotations.view` | See quotations (price offers to customers) of your branches |
+| `quotations.create` | Make quotations for customers; they move no stock (turning one into a sale needs Create Sales) |
+| `quotations.edit` | Change a quotation, and mark it accepted, declined or open again |
+| `quotations.delete` | Delete a quotation that wasn't turned into a sale |
 | `purchases.view` | See purchases of your branches |
 | `purchases.create` | Record purchases from suppliers; stock goes in once approved |
 | `purchases.approve` | Approve or reject purchases; approved purchases add stock |
 | `purchases.edit` | Change a pending purchase (an approved one also needs Approve Purchases) |
 | `purchases.void` | Void a purchase and take its stock back out |
+| `customers.manage` | See the customer list; add, change and turn off customers (those shared by every branch: owner/admin only) |
+| `suppliers.manage` | See the supplier list; add, change and turn off suppliers (those shared by every branch: owner/admin only) |
 | `inventory-expenses.view` | See inventory expenses of your branches |
 | `inventory-expenses.create` | Record inventory expenses (shipping, packaging, storage…) |
 | `inventory-expenses.void` | Void an inventory expense |
 
-Inventory expenses use their own categories (type `inv_expense`, managed with `inventory.manage` on Inventory → Expense categories) and come off the sales profit as net profit. Inventory reports (stock value, sales and profit, purchases, expenses, low stock) need both `reports.view` and `inventory.view`. Nobody approves a purchase they created; people with `purchases.approve` record their own purchases as approved unless they send them for approval.
+**Quotations** (Inventory → Quotations, numbers `QUO-…`) are price offers to a customer: products (out-of-stock ones too), prices, discounts, shipping, a valid-until day and a note, printed as an A4 page (Print, or save as PDF). They move no stock. A quotation is *open* until it is marked *accepted* or *declined* (`quotations.edit`; editing one makes it open again); an open one past its valid-until day is listed as *expired*. **Turn into sale** (`sales.create`, an open or accepted quotation) makes a sale with its customer, lines and prices, takes the goods out of stock then (refused if the branch doesn't have them) and links the two; it can't be changed, reopened or deleted after that. API: `/api/v1/inventory/quotations` (`GET`, `POST`), `/:id` (`GET`, `PATCH`, `DELETE`), `POST /:id/status` `{"status": "open|accepted|declined"}`, `POST /:id/convert` `{"sale_date", "due_date", "payment_method_id"}` → the sale. When they first ship, roles with View, Create, Edit or Void Sales get View, Create, Edit or Delete Quotations.
 
-### Platforms & weekly win/lose
-In the RP menu (once called PLATFORMS) a platform is called an **agent** and a branch a **group** (the codes keep the old names). Win/lose is entered per group: people enter and see it only for their own groups (owner/admin see every group). An agent can be assigned to many groups and a group can have many agents, each assignment with its own partners (each at their own %) and currency.
+**Customers and suppliers** (Inventory → Customers / Suppliers) are two lists: name, phone, email, address and a note, on or off, each person shared by every branch or one branch's own (see *Shared or one branch's own* below). Sales, quotations and the POS pick a customer and purchases a supplier from a searchable dropdown (name or phone); its **+ Add** row adds someone new on the spot. Reading the lists and adding from a form only needs the document's own rights (view/create/edit sales or quotations; view/create/edit purchases); the pages, changing someone and turning them off need `customers.manage` / `suppliers.manage` (when they first ship: roles with Edit Sales / Edit Purchases). A document keeps the person's name: renaming someone renames them on their documents; someone turned off can't be picked for new documents but stays on theirs (and a quotation of theirs can still become a sale). A name is only once in what a branch sees (shared people and its own); two branches can each have their own of one name. When the lists first appear they are filled with the names already typed on sales, quotations and purchases, and those documents are linked. API: `GET/POST /api/v1/inventory/customers`, `PATCH /customers/:id` (and the same for `suppliers`); documents take `customer_id` / `supplier_id`. **Discounts** on sales, quotations, purchases and the POS are typed: `10%` is a percent, `10` an amount (the sign beside the box shows which; tapping it switches, for phones without a % key).
 
-| Code | Description |
-|------|-------------|
-| `platforms.view` | See the agents, their currency and how many groups have them |
-| `platforms.create` | Add agents with their currency |
-| `platforms.edit` | Edit agents; turn them off (with a reason) or on |
-| `platforms.delete` | Delete an agent that was never in a group or entered (a used one can only be turned off) |
-| `platform-assignments.view` | See the titled groups with their agents and rates |
-| `platform-assignments.create` | Make a titled group of agents with their rates (Assign agents) |
-| `platform-assignments.edit` | Change a group's title, agents and rates; turn it off or on |
-| `platform-assignments.delete` | Delete a group no week was entered for (a used one can only be turned off) |
-| `winlose.view` | See the entries and the W/L and COMM entered for your groups |
-| `winlose.create` | Make new entries and enter agents' W/L and COMM for your groups |
-| `winlose.edit` | Change an entry's title and amounts already saved, with a reason (kept in the audit log) |
-| `winlose.delete` | Delete an entry and its amounts, with a reason (kept in the audit log) |
-| `winlose.react` | Give an entry, or a group or agent in it (at 0 too), ✅ or ❌ and 📤 (report sent), on Data entry, the Report and Group summary |
-| `winlose-reports.view` | The Report and the group summary for your groups, one group at a time |
-| `winlose-reports.consolidated` | Combined totals across all your groups |
-| `winlose-reports.rates` | Show each agent's rate on the Report and the Group Summary (hidden without it) |
-
-Win/lose is entered once a week (Monday to Sunday) per branch and platform. A saved week keeps the partners, partner % and currency it was worked out with and follows the current formula and its agents' current rates; changing it needs `winlose.edit` and a reason (audit log). There is no finalizing: every week can be changed. Finalize Weekly Settlements (`winlose-settlements.finalize`) is gone: the API takes it off every role when it starts. Reports without one branch chosen (all your branches together) need `winlose-reports.consolidated`. Owner/admin (Manage Branches) get these permissions automatically when they first ship.
-
-Each RP page has its own **view, add, update and delete** (Data entry also **react**). They took
-over from Manage Agents (`platforms.manage`) and Manage Group Agent Assignments
-(`platform-assignments.manage`), which are gone: when the API first starts with them, every role
-that had an old permission gets the ones that replace it (Manage Agents → add, update and delete
-agents; Manage Group Agent Assignments → add, update and delete groups; View Agents → view groups;
-Correct Win/Lose → delete entries; any Data entry or Report permission → react), and then the old
-ones are removed. Nobody loses what they could do; take permissions off on Roles & permissions.
-
-## Default system roles (summary)
-
-| Role | Typical access |
-|------|----------------|
-| **super_admin** | All permissions (flag `is_super_admin`; not only role codes) |
-| **admin** | Broad manage: users, branches, roles, reports, transactions, settings |
-| **manager** | Branch operations, approvals, reports, limited admin |
-| **accountant** | Income/expense full cycle, reports, categories |
-| **cashier** | Create income/expense, view own-branch data |
-| **viewer** | Read-only dashboard, transactions, reports |
-
-Exact role → permission mappings are seeded in `backend/internal/permissions` and returned by `GET /api/v1/roles`.
-
-## Machine-readable catalog
-
-Project root: [`permissions.catalog.json`](../permissions.catalog.json) (48 entries, versioned).
-
-## Source of truth
-
-- Backend constants: `backend/internal/permissions/permissions.go`
-- Frontend constants: `frontend/utils/permissions.ts` (`P` + `PERMISSION_CATALOG`)
-- API list: `GET /api/v1/permissions` (requires `roles.view`)
+**Shared or one branch's own.** Products, product categories, customers, suppliers and payment methods each belong to every branch (*Shared*, as everything that existed before is) or to one branch (*Branch only*). Lists show what is shared plus the user's own branches' items (with a branch picked in the top bar: shared plus that branch's), each marked with a Shared or branch badge, and can be filtered to shared only or one branch's own. Only the owner or an admin (`branches.manage`) adds or changes shared items; branch staff with the page's permission (`inventory.manage`, `customers.manage`, `suppliers.manage`, or `inventory.manage`/`categories.manage` for payment methods) add and change their branches' own, and never see other branches'. A document only uses what is shared or its own branch's: sales, quotations, purchases, the POS, stock counts and inventory expenses refuse another branch's product, customer, supplier or payment method, and income/expense transactions another branch's payment method; transfers move shared products only. A shared product goes in a shared category, a branch's product in a shared one or its branch's own. The owner or an admin can make a shared item one branch's own only while no other branch has used it (stock, documents, transactions); built-in payment methods always stay shared, and at least one shared payment method stays on. API: the lists take `branch_id` (shared plus that branch's) and `owner` (`shared` or a branch id); saving takes `branch_id` (`""` shared; left out when changing keeps it).

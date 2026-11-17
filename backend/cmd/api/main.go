@@ -70,6 +70,12 @@ func main() {
 	} else if n > 0 {
 		log.Printf("win/lose: %d saved results worked out again with the current formula", n)
 	}
+	// Once: Totals saved rounded to a whole amount get their cents back (-99.5, not -100).
+	if n, err := wl.RecalculateToCents(context.Background()); err != nil {
+		log.Printf("win/lose: could not work saved weeks out to the cent: %v", err)
+	} else if n > 0 {
+		log.Printf("win/lose: %d saved results worked out again to the cent", n)
+	}
 	if n, err := wl.ApplyCurrentRates(context.Background()); err != nil {
 		log.Printf("win/lose: could not work saved weeks out at the current rates: %v", err)
 	} else if n > 0 {

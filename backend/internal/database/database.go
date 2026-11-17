@@ -5,10 +5,12 @@ import (
 	"io"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/cambodia-finance/income-expense/internal/config"
 	"github.com/cambodia-finance/income-expense/internal/models"
+	"github.com/google/uuid"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -150,6 +152,13 @@ func EnsureRequiredTables(db *gorm.DB) error {
 			return err
 		}
 	}
+	// A payment method can belong to one branch (see migration 000014).
+	if !db.Migrator().HasColumn(&models.PaymentMethod{}, "branch_id") {
+		log.Println("adding column payment_methods.branch_id")
+		if err := db.Exec("ALTER TABLE payment_methods ADD COLUMN branch_id CHAR(36) NULL, ADD INDEX idx_payment_methods_branch_id (branch_id)").Error; err != nil {
+			return err
+		}
+	}
 	if err := ensureRoleDataScope(db); err != nil {
 		return err
 	}
@@ -212,9 +221,21 @@ func ownBranchesOnly(db *gorm.DB) error {
 // a newer column is missing (see models/inventory.go; they have no foreign keys to older tables,
 // so this can't fail on an older table's collation). It only adds.
 func ensureInventoryTables(db *gorm.DB) error {
+	newCustomers, newSuppliers := !db.Migrator().HasTable(&models.Customer{}), !db.Migrator().HasTable(&models.Supplier{})
 	if !inventoryUpToDate(db) {
 		log.Println("updating inventory tables")
 		if err := db.AutoMigrate(models.InventoryModels()...); err != nil {
+			return err
+		}
+	}
+	// The customer and supplier lists start with the names already typed on documents.
+	if newCustomers {
+		if err := importParties(db, "customers", [][2]string{{"sales", "customer"}, {"quotations", "customer"}}); err != nil {
+			return err
+		}
+	}
+	if newSuppliers {
+		if err := importParties(db, "suppliers", [][2]string{{"purchases", "supplier"}}); err != nil {
 			return err
 		}
 	}
@@ -249,6 +270,54 @@ func ensureInventoryTables(db *gorm.DB) error {
 		}
 	}
 	return nil
+}
+
+// importParties fills a new customers or suppliers list with the names typed on documents (one
+// per name, as the database compares them) and links those documents to them.
+func importParties(db *gorm.DB, table string, docs [][2]string) error {
+	seen := map[string]bool{}
+	var names []string
+	for _, d := range docs {
+		if !db.Migrator().HasTable(d[0]) {
+			continue
+		}
+		var found []string
+		if err := db.Raw("SELECT DISTINCT TRIM(" + d[1] + ") FROM " + d[0] + " WHERE " + d[1] + " <> '' AND deleted_at IS NULL").Scan(&found).Error; err != nil {
+			return err
+		}
+		for _, n := range found {
+			key := strings.ToLower(n)
+			if n != "" && !seen[key] {
+				seen[key] = true
+				names = append(names, n)
+			}
+		}
+	}
+	if len(names) == 0 {
+		return nil
+	}
+	log.Printf("adding %d name(s) from documents to %s", len(names), table)
+	return db.Transaction(func(tx *gorm.DB) error {
+		for _, n := range names {
+			p := models.Party{Base: models.Base{ID: uuid.New()}, Name: n, IsActive: true}
+			if len([]rune(n)) > 191 {
+				p.Name = string([]rune(n)[:191])
+			}
+			if err := tx.Table(table).Create(&p).Error; err != nil {
+				return err
+			}
+			for _, d := range docs {
+				if !tx.Migrator().HasTable(d[0]) {
+					continue
+				}
+				col := strings.TrimSuffix(table, "s") + "_id"
+				if err := tx.Table(d[0]).Where(col+" IS NULL AND TRIM("+d[1]+") = ?", n).Update(col, p.ID).Error; err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
 }
 
 func inventoryUpToDate(db *gorm.DB) bool {

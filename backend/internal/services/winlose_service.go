@@ -620,7 +620,7 @@ func workOut(version string, kind winlose.Kind, wl, cm, rate decimal.Decimal, sh
 			return winlose.Result{}, err
 		}
 		for i := range shares {
-			jp := total.Adjusted.Mul(shares[i].CommissionRate).Div(decimal.NewFromInt(100)).Round(0)
+			jp := winlose.Cents(total.Adjusted.Mul(shares[i].CommissionRate).Div(decimal.NewFromInt(100)))
 			shares[i].JamePS = &jp
 		}
 		return total, nil
@@ -864,22 +864,57 @@ func (s *PlatformService) RecalculateWeeks(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	var results []models.WeeklyPlatformResult
+	changed := 0
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var results []models.WeeklyPlatformResult
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("formula_version <> ?", formula.Version).
 			Find(&results).Error; err != nil {
 			return err
 		}
-		return recalculate(tx, formula, results)
+		changed, err = recalculate(tx, formula, results)
+		return err
 	})
-	return len(results), err
+	return changed, err
+}
+
+// CentsSettingKey is set once the saved weeks' Totals are to the cent (RecalculateToCents).
+const CentsSettingKey = "winlose.totals_to_cents"
+
+// RecalculateToCents works every saved week out again once, with the current formula at the rates
+// it was saved with, so a Total saved rounded to a whole amount before Totals kept their cents
+// (-995 × 10% saved as -100) is to the cent (-99.50). Run at start-up, after RecalculateWeeks. It
+// returns how many results changed (0 once done).
+func (s *PlatformService) RecalculateToCents(ctx context.Context) (int, error) {
+	var done models.AppSetting
+	if err := s.db.WithContext(ctx).First(&done, "`key` = ?", CentsSettingKey).Error; err == nil {
+		return 0, nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return 0, err
+	}
+	formula, err := s.Formula(ctx)
+	if err != nil {
+		return 0, err
+	}
+	changed := 0
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var results []models.WeeklyPlatformResult
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Find(&results).Error; err != nil {
+			return err
+		}
+		if changed, err = recalculate(tx, formula, results); err != nil {
+			return err
+		}
+		return tx.Save(&models.AppSetting{Key: CentsSettingKey, Value: "done"}).Error
+	})
+	return changed, err
 }
 
 // recalculate works saved results out again with the formula: each in its groups at the rates it
-// was saved with (a week from before groups had their own rates, with its partners).
-func recalculate(tx *gorm.DB, formula winlose.Formula, results []models.WeeklyPlatformResult) error {
+// was saved with (a week from before groups had their own rates, with its partners). Only what
+// comes out different is written; it returns how many results changed.
+func recalculate(tx *gorm.DB, formula winlose.Formula, results []models.WeeklyPlatformResult) (int, error) {
 	if len(results) == 0 {
-		return nil
+		return 0, nil
 	}
 	ids := make([]uuid.UUID, len(results))
 	for i, r := range results {
@@ -887,11 +922,11 @@ func recalculate(tx *gorm.DB, formula winlose.Formula, results []models.WeeklyPl
 	}
 	var groups []models.WeeklyGroupResult
 	if err := tx.Where("result_id IN ?", ids).Find(&groups).Error; err != nil {
-		return err
+		return 0, err
 	}
 	var partners []models.WeeklyPartnerResult
 	if err := tx.Where("result_id IN ?", ids).Find(&partners).Error; err != nil {
-		return err
+		return 0, err
 	}
 	groupsOf, partnersOf := map[uuid.UUID][]models.WeeklyGroupResult{}, map[uuid.UUID][]PartnerShare{}
 	for _, g := range groups {
@@ -900,12 +935,13 @@ func recalculate(tx *gorm.DB, formula winlose.Formula, results []models.WeeklyPl
 	for _, p := range partners {
 		partnersOf[p.ResultID] = append(partnersOf[p.ResultID], PartnerShare{PartnerID: p.PartnerID, CommissionRate: p.CommissionRate})
 	}
+	changed := 0
 	for _, r := range results {
 		base, err := winlose.Calculate(formula.Version, winlose.Input{WinLose: r.WinLose, Commission: r.Commission})
 		if err != nil {
-			return err
+			return 0, err
 		}
-		total := decimal.Zero
+		total, partsChanged := decimal.Zero, false
 		for _, g := range groupsOf[r.ID] {
 			var shares []PartnerShare
 			if len(groupsOf[r.ID]) == 1 {
@@ -913,25 +949,32 @@ func recalculate(tx *gorm.DB, formula winlose.Formula, results []models.WeeklyPl
 			}
 			res, err := workOut(formula.Version, winlose.Kind(g.CalcType), r.WinLose, r.Commission, g.CommissionRate, shares)
 			if err != nil {
-				return err
+				return 0, err
 			}
-			if err := tx.Model(&models.WeeklyGroupResult{}).Where("id = ?", g.ID).UpdateColumn("jame_ps", res.JamePS).Error; err != nil {
-				return err
+			if !res.JamePS.Equal(g.JamePS) {
+				if err := tx.Model(&models.WeeklyGroupResult{}).Where("id = ?", g.ID).UpdateColumn("jame_ps", res.JamePS).Error; err != nil {
+					return 0, err
+				}
+				partsChanged = true
 			}
 			for _, sh := range shares {
 				if err := tx.Model(&models.WeeklyPartnerResult{}).Where("result_id = ? AND partner_id = ?", r.ID, sh.PartnerID).UpdateColumn("jame_ps", *sh.JamePS).Error; err != nil {
-					return err
+					return 0, err
 				}
 			}
 			total = total.Add(res.JamePS)
 		}
+		if !partsChanged && total.Equal(r.JamePS) && base.Adjusted.Equal(r.AdjustedAmount) && r.FormulaVersion == formula.Version {
+			continue // already this
+		}
 		if err := tx.Model(&models.WeeklyPlatformResult{}).Where("id = ?", r.ID).UpdateColumns(map[string]interface{}{
 			"adjusted_amount": base.Adjusted, "jame_ps": total, "formula_version": formula.Version,
 		}).Error; err != nil {
-			return err
+			return 0, err
 		}
+		changed++
 	}
-	return nil
+	return changed, nil
 }
 
 // applyCurrentRates puts saved weeks on their agents' current rates: where a result's part in a
@@ -1061,6 +1104,10 @@ func (s *PlatformService) DeleteEntry(ctx context.Context, id uuid.UUID, reason 
 		if err := tx.Where("entry_id = ?", entry.ID).Delete(&models.WeeklyAgentReaction{}).Error; err != nil {
 			return err
 		}
+		// History keeps the entry's pictures, with its title as it was.
+		if err := tx.Model(&models.WeeklyEntryImage{}).Where("entry_id = ?", entry.ID).Update("entry_id", nil).Error; err != nil {
+			return err
+		}
 		return tx.Delete(entry).Error
 	})
 	if err != nil {
@@ -1161,6 +1208,25 @@ func (s *PlatformService) ReactToAgent(ctx context.Context, entryID, platformID 
 	return entry, &agent, now, orNone(list[agent.ID]), err
 }
 
+// entryGroup reads a group of the entry into group: one of its HQ's active groups, or one that has
+// results in it.
+func entryGroup(tx *gorm.DB, entry *models.WeeklyEntry, groupID uuid.UUID, group *models.AssignmentGroup) error {
+	if err := tx.First(group, "id = ?", groupID).Error; err != nil {
+		return ErrGroupNotFound
+	}
+	if !group.IsActive || group.BranchID != entry.BranchID {
+		var n int64
+		if err := tx.Table("weekly_group_results AS g").Joins("JOIN weekly_platform_results r ON r.id = g.result_id").
+			Where("r.entry_id = ? AND g.group_id = ? AND r.deleted_at IS NULL", entry.ID, group.ID).Count(&n).Error; err != nil {
+			return err
+		}
+		if n == 0 {
+			return ErrGroupNotFound // not one of the entry's groups
+		}
+	}
+	return nil
+}
+
 // ReactToGroup sets the person's reaction on a group in an entry they can see (its agents' results
 // there, or 0 when it has none, as Group summary lists it), the same way. The group has results in
 // the entry, or is a switched-on group of the entry's branch. It returns the entry, the group, the
@@ -1177,18 +1243,8 @@ func (s *PlatformService) ReactToGroup(ctx context.Context, entryID, groupID uui
 		if entry, err = findEntry(tx, entryID.String(), scope, false); err != nil {
 			return err
 		}
-		if err := tx.First(&group, "id = ?", groupID).Error; err != nil {
-			return ErrGroupNotFound
-		}
-		if !group.IsActive || group.BranchID != entry.BranchID {
-			var n int64
-			if err := tx.Table("weekly_group_results AS g").Joins("JOIN weekly_platform_results r ON r.id = g.result_id").
-				Where("r.entry_id = ? AND g.group_id = ? AND r.deleted_at IS NULL", entry.ID, group.ID).Count(&n).Error; err != nil {
-				return err
-			}
-			if n == 0 {
-				return ErrGroupNotFound // not one of the entry's groups
-			}
+		if err := entryGroup(tx, entry, groupID, &group); err != nil {
+			return err
 		}
 		now, err = toggleReactionWhere(tx, groupReactions, map[string]interface{}{"entry_id": entry.ID, "group_id": group.ID}, actor, reaction)
 		return err

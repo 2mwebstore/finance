@@ -21,12 +21,15 @@
       <Can perm="categories.manage"><NuxtLink to="/admin/categories"><span>Categories</span><small>Categories for expense transactions</small><ChevronRight :size="17" /></NuxtLink></Can>
     </section>
 
-    <section v-if="canViewInventory || canViewSales || canViewPurchases || canViewTransfers || canViewInventoryExpenses" class="link-card">
+    <section v-if="canViewInventory || canViewQuotations || canViewSales || canManageCustomers || canManageSuppliers || canViewPurchases || canViewTransfers || canViewInventoryExpenses" class="link-card">
       <div class="section-label">INVENTORY</div>
-      <Can perm="inventory.view"><NuxtLink to="/inventory/products"><span>Products</span><small>The products every branch sells</small><ChevronRight :size="17" /></NuxtLink></Can>
+      <Can perm="inventory.view"><NuxtLink to="/inventory/products"><span>Products</span><small>Shared or one branch’s own</small><ChevronRight :size="17" /></NuxtLink></Can>
       <Can perm="inventory.view"><NuxtLink to="/inventory/stock"><span>Stock</span><small>What each branch has now</small><ChevronRight :size="17" /></NuxtLink></Can>
+      <Can perm="quotations.view"><NuxtLink to="/inventory/quotations"><span>Quotations</span><small>Price offers to customers</small><ChevronRight :size="17" /></NuxtLink></Can>
       <Can perm="sales.view"><NuxtLink to="/inventory/sales"><span>Sales</span><small>Goods sold</small><ChevronRight :size="17" /></NuxtLink></Can>
       <Can perm="purchases.view"><NuxtLink to="/inventory/purchases"><span>Purchases</span><small>Goods bought from suppliers</small><ChevronRight :size="17" /></NuxtLink></Can>
+      <Can perm="customers.manage"><NuxtLink to="/inventory/customers"><span>Customers</span><small>Who you sell to</small><ChevronRight :size="17" /></NuxtLink></Can>
+      <Can perm="suppliers.manage"><NuxtLink to="/inventory/suppliers"><span>Suppliers</span><small>Who you buy from</small><ChevronRight :size="17" /></NuxtLink></Can>
       <NuxtLink v-if="canViewInventoryExpenses" to="/inventory/expenses"><span>Inventory expenses</span><small>Shipping, packaging, storage…</small><ChevronRight :size="17" /></NuxtLink>
       <Can perm="inventory.manage"><NuxtLink to="/inventory/expense-categories"><span>Expense categories</span><small>Categories for inventory expenses</small><ChevronRight :size="17" /></NuxtLink></Can>
       <Can :any="['inventory.manage', 'categories.manage']"><NuxtLink to="/inventory/payment-methods"><span>Payment methods</span><small>Cash, bank, KHQR…</small><ChevronRight :size="17" /></NuxtLink></Can>
@@ -39,6 +42,7 @@
       <Can :any="['winlose.view', 'winlose.create', 'winlose.edit', 'winlose.delete']"><NuxtLink to="/winlose/entry"><span>Data entry</span><small>Titled weeks of each agent’s win/lose</small><ChevronRight :size="17" /></NuxtLink></Can>
       <Can perm="winlose-reports.view"><NuxtLink to="/winlose/reports/branch-summary"><span>Group summary</span><small>Totals per group, USD and KHR apart</small><ChevronRight :size="17" /></NuxtLink></Can>
       <Can perm="winlose-reports.view"><NuxtLink to="/winlose/reports/weekly"><span>Report</span><small>Weeks by group and agent</small><ChevronRight :size="17" /></NuxtLink></Can>
+      <Can perm="winlose-reports.view"><NuxtLink to="/winlose/reports/history"><span>History</span><small>Group summary images downloaded or shared</small><ChevronRight :size="17" /></NuxtLink></Can>
       <Can :any="['platforms.view', 'platforms.create', 'platforms.edit', 'platforms.delete']"><NuxtLink to="/admin/platforms"><span>Agents</span><small>Agents and their currencies</small><ChevronRight :size="17" /></NuxtLink></Can>
       <Can :any="['platform-assignments.view', 'platform-assignments.create', 'platform-assignments.edit', 'platform-assignments.delete']"><NuxtLink to="/admin/platform-assignments"><span>Group agent assignments</span><small>Which agents each group reports</small><ChevronRight :size="17" /></NuxtLink></Can>
     </section>
@@ -65,7 +69,7 @@
 <script setup lang="ts">
 import { ChevronRight, LogOut } from 'lucide-vue-next'
 const { user, logout } = useAuth()
-const { can, isSuperAdmin, permissions, canViewBranches, canViewUsers, canViewRoles, canViewPermissionCodes, canViewAudit, canManageBackups, canViewInventory, canViewSales, canViewPurchases, canViewTransfers, canViewInventoryReports, canViewInventoryExpenses } = usePermissions()
+const { can, isSuperAdmin, permissions, canViewBranches, canViewUsers, canViewRoles, canViewPermissionCodes, canViewAudit, canManageBackups, canViewInventory, canViewQuotations, canViewSales, canManageCustomers, canManageSuppliers, canViewPurchases, canViewTransfers, canViewInventoryReports, canViewInventoryExpenses } = usePermissions()
 const showAdmin = computed(() => canViewBranches.value || canViewUsers.value || canViewRoles.value || canViewPermissionCodes.value || canViewAudit.value || canManageBackups.value || can('currency-settings.manage'))
 const initials = computed(() => (user.value?.full_name || user.value?.username || 'A').split(/\s+/).filter(Boolean).slice(0, 2).map(part => part[0]?.toUpperCase()).join(''))
 async function onLogout() { await logout(); navigateTo('/login') }

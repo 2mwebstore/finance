@@ -40,11 +40,13 @@ func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config, store storage.Store, 
 	userCtrl := controllers.NewUserController(userSvc, db)
 	roleCtrl := controllers.NewRoleController(roleSvc, db)
 	catCtrl := controllers.NewCategoryController(catSvc, db)
-	pmCtrl := controllers.NewPaymentMethodController(pmSvc)
+	pmCtrl := controllers.NewPaymentMethodController(pmSvc, db)
 	attachmentSvc := services.NewAttachmentService(db, txnSvc, store)
 	txnCtrl := controllers.NewTransactionController(txnSvc, attachmentSvc, auditSvc, branchTelegram)
 	invCtrl := controllers.NewInventoryController(services.NewInventoryService(db, cfg.Timezone, store), db, auditSvc)
-	platformCtrl := controllers.NewPlatformController(services.NewPlatformService(db, cfg.Timezone), db, auditSvc)
+	platformSvc := services.NewPlatformService(db, cfg.Timezone)
+	platformSvc.SetStore(store) // Group summary's pictures (History)
+	platformCtrl := controllers.NewPlatformController(platformSvc, db, auditSvc)
 	reportCtrl := controllers.NewReportController(reportSvc, auditSvc)
 	auditCtrl := controllers.NewAuditController(auditSvc, db, cfg.Timezone)
 	notifyCtrl := controllers.NewNotificationController(tg)
@@ -193,7 +195,7 @@ func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config, store storage.Store, 
 			{
 				need := func(codes ...string) gin.HandlerFunc { return middleware.RequireAnyPermission(db, codes...) }
 				// Pickers on the sale/purchase/transfer forms need the catalog too.
-				catalogReaders := need(permissions.InventoryView, permissions.InventoryManage, permissions.SalesCreate, permissions.PurchasesCreate, permissions.InventoryTransfer, permissions.InventoryAdjust)
+				catalogReaders := need(permissions.InventoryView, permissions.InventoryManage, permissions.SalesCreate, permissions.PurchasesCreate, permissions.InventoryTransfer, permissions.InventoryAdjust, permissions.QuotationsCreate, permissions.QuotationsEdit)
 				inv.GET("/categories", catalogReaders, invCtrl.ListCategories)
 				inv.POST("/categories", need(permissions.InventoryManage), invCtrl.SaveCategory)
 				inv.PATCH("/categories/:id", need(permissions.InventoryManage), invCtrl.SaveCategory)
@@ -213,6 +215,24 @@ func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config, store storage.Store, 
 				inv.POST("/sales", need(permissions.SalesCreate), invCtrl.CreateSale)
 				inv.POST("/sales/:id/void", need(permissions.SalesVoid), invCtrl.VoidSale)
 				inv.PATCH("/sales/:id", need(permissions.SalesEdit), invCtrl.UpdateSale)
+
+				// Quotations move no stock; turning one into a sale needs Create Sales.
+				inv.GET("/quotations", need(permissions.QuotationsView), invCtrl.ListQuotations)
+				inv.GET("/quotations/:id", need(permissions.QuotationsView), invCtrl.GetQuotation)
+				inv.POST("/quotations", need(permissions.QuotationsCreate), invCtrl.CreateQuotation)
+				inv.PATCH("/quotations/:id", need(permissions.QuotationsEdit), invCtrl.UpdateQuotation)
+				inv.POST("/quotations/:id/status", need(permissions.QuotationsEdit), invCtrl.SetQuotationStatus)
+				inv.POST("/quotations/:id/convert", need(permissions.SalesCreate), invCtrl.ConvertQuotation)
+				inv.DELETE("/quotations/:id", need(permissions.QuotationsDelete), invCtrl.DeleteQuotation)
+
+				// The customer and supplier lists: the forms read them and can add someone new;
+				// changing or turning someone off needs Manage Customers / Manage Suppliers.
+				inv.GET("/customers", need(permissions.CustomersManage, permissions.SalesView, permissions.SalesCreate, permissions.SalesEdit, permissions.QuotationsView, permissions.QuotationsCreate, permissions.QuotationsEdit), invCtrl.ListCustomers)
+				inv.POST("/customers", need(permissions.CustomersManage, permissions.SalesCreate, permissions.SalesEdit, permissions.QuotationsCreate, permissions.QuotationsEdit), invCtrl.AddCustomer)
+				inv.PATCH("/customers/:id", need(permissions.CustomersManage), invCtrl.EditCustomer)
+				inv.GET("/suppliers", need(permissions.SuppliersManage, permissions.PurchasesView, permissions.PurchasesCreate, permissions.PurchasesEdit), invCtrl.ListSuppliers)
+				inv.POST("/suppliers", need(permissions.SuppliersManage, permissions.PurchasesCreate, permissions.PurchasesEdit), invCtrl.AddSupplier)
+				inv.PATCH("/suppliers/:id", need(permissions.SuppliersManage), invCtrl.EditSupplier)
 
 				inv.GET("/purchases", need(permissions.PurchasesView), invCtrl.ListPurchases)
 				inv.GET("/purchases/:id", need(permissions.PurchasesView), invCtrl.GetPurchase)
@@ -297,6 +317,12 @@ func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config, store storage.Store, 
 				wl.PUT("/entry", need(permissions.WinLoseCreate, permissions.WinLoseEdit), platformCtrl.SaveWeek)
 				// Totals across HQs also need winlose-reports.consolidated (checked in the service).
 				wl.GET("/reports", need(permissions.WinLoseReportsView), platformCtrl.Report)
+				// Group summary's pictures: kept on their first Download or Share to Telegram (the other
+				// marks the same picture), and RP's History of them.
+				wl.POST("/entries/:id/images", need(permissions.WinLoseReportsView), platformCtrl.SaveEntryImage)
+				wl.POST("/images/:id/actions", need(permissions.WinLoseReportsView), platformCtrl.MarkEntryImage)
+				wl.GET("/images", need(permissions.WinLoseReportsView), platformCtrl.ListEntryImages)
+				wl.GET("/images/:id/file", need(permissions.WinLoseReportsView), platformCtrl.EntryImageFile)
 			}
 
 			api.GET("/audit-logs", middleware.RequireAnyPermission(db, permissions.AuditLogsView), auditCtrl.List)

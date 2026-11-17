@@ -59,7 +59,7 @@ func newWLFixture(t *testing.T) *wlFixture {
 		t.Fatal(err)
 	}
 	f := &wlFixture{db: db, svc: NewPlatformService(db, "Asia/Phnom_Penh"), ctx: context.Background(), entries: map[string]string{}}
-	for _, table := range []string{"weekly_agent_reactions", "weekly_group_reactions", "weekly_group_results", "weekly_partner_results", "weekly_result_reactions", "weekly_platform_results", "weekly_entry_reactions", "weekly_entries", "assignment_partners", "hq_platform_assignments", "assignment_groups"} {
+	for _, table := range []string{"weekly_entry_images", "weekly_agent_reactions", "weekly_group_reactions", "weekly_group_results", "weekly_partner_results", "weekly_result_reactions", "weekly_platform_results", "weekly_entry_reactions", "weekly_entries", "assignment_partners", "hq_platform_assignments", "assignment_groups"} {
 		db.Exec("DELETE FROM " + table)
 	}
 	db.Exec("DELETE FROM platforms WHERE code LIKE 'TWL%'")

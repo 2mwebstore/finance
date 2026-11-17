@@ -20,7 +20,7 @@
     <div v-if="loading" class="py-6 text-center text-sm text-muted">Loading transactions…</div>
     <AppAlert v-else-if="error" class="mt-3" compact :message="error" />
     <div v-else class="mt-3 overflow-x-auto rounded-xl border border-border">
-      <table class="w-full min-w-[680px] text-left text-xs">
+      <table class="w-full text-left text-xs" :style="{ minWidth: `${(type === 'expense' ? 560 : 460) + amountColumns.length * 120}px` }">
         <thead class="bg-canvas text-[10px] uppercase tracking-wide text-slate-500">
           <tr>
             <th class="px-3 py-2 font-bold">Date</th>
@@ -29,7 +29,8 @@
             <th class="px-3 py-2 font-bold">Branch</th>
             <th class="px-3 py-2 font-bold">By</th>
             <th class="px-3 py-2 font-bold">Status</th>
-            <th class="px-3 py-2 text-right font-bold">Amount</th>
+            <!-- One amount column per currency (Manage → Currency order) -->
+            <th v-for="code in amountColumns" :key="code" class="whitespace-nowrap px-3 py-2 text-right font-bold">Amount ({{ code }})</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-border text-navy">
@@ -40,18 +41,18 @@
             <td class="whitespace-nowrap px-3 py-2">{{ t.branch?.name || '—' }}</td>
             <td class="px-3 py-2">{{ t.created_by?.name || '—' }}</td>
             <td class="px-3 py-2 capitalize">{{ t.status }}</td>
-            <td class="whitespace-nowrap px-3 py-2 text-right font-semibold tabular-nums" :class="type === 'income' ? 'text-income' : 'text-expense'">{{ formatMoney(t.amount, t.currency as SupportedCurrency) }}</td>
+            <td v-for="code in amountColumns" :key="code" class="whitespace-nowrap px-3 py-2 text-right font-semibold tabular-nums" :class="type === 'income' ? 'text-income' : 'text-expense'">{{ t.currency === code ? formatMoney(t.amount, code) : '' }}</td>
           </tr>
           <tr v-if="!items.length"><td :colspan="columns" class="px-3 py-6 text-center text-muted">No {{ type }} transactions match.</td></tr>
         </tbody>
         <tfoot class="border-t-2 border-border bg-canvas">
-          <tr v-for="(row, i) in footer" :key="row.currency">
-            <td :colspan="columns - 1" class="px-3 py-2 text-right text-[11px] font-semibold text-slate-500">
-              <template v-if="i === 0">Total {{ type }}{{ status && status !== 'approved' ? ' (approved only)' : '' }} · </template>{{ row.currency }}
+          <!-- The approved total of each currency, under its column -->
+          <tr>
+            <td :colspan="fixedColumns" class="px-3 py-2 text-right text-[11px] font-semibold text-slate-500">
+              Total {{ type }}{{ status !== 'approved' ? ' (approved only)' : '' }}{{ footer.length ? '' : ': nothing approved' }}
             </td>
-            <td class="whitespace-nowrap px-3 py-2 text-right text-sm font-bold tabular-nums" :class="type === 'income' ? 'text-income' : 'text-expense'">{{ formatMoney(row.amount, row.currency) }}</td>
+            <td v-for="code in amountColumns" :key="code" class="whitespace-nowrap px-3 py-2 text-right text-sm font-bold tabular-nums" :class="totalOf(code) === undefined ? 'text-muted' : type === 'income' ? 'text-income' : 'text-expense'">{{ totalOf(code) === undefined ? '—' : formatMoney(totalOf(code), code) }}</td>
           </tr>
-          <tr v-if="!footer.length"><td :colspan="columns" class="px-3 py-2 text-right text-[11px] text-muted">Total {{ type }}: nothing approved</td></tr>
         </tfoot>
       </table>
     </div>
@@ -63,13 +64,14 @@
 import { ArrowDownLeft, ArrowUpRight, Download } from 'lucide-vue-next'
 import type { Paged, Transaction } from '~/types/api'
 import { useToast } from '~/composables/useToast'
-import { formatMoney, type SupportedCurrency } from '~/utils/money'
+import { formatMoney } from '~/utils/money'
 import { formatDocDate } from '~/utils/inventory'
 import { useCurrency } from '~/composables/useCurrency'
 
 /**
  * One type of the report's transactions (income or expense) as a table, with its own filters,
- * paging, CSV export, and a footer with the approved total per currency.
+ * paging, CSV export, an amount column per currency, and a footer with each currency's approved
+ * total under its column.
  */
 const props = defineProps<{ type: 'income' | 'expense'; dateFrom: string; dateTo: string; branchId: string }>()
 
@@ -80,7 +82,8 @@ const canExport = canExportReports
 const statusOptions = [{ value: 'approved', label: 'Approved' }, { value: '', label: 'Any status' }, { value: 'pending', label: 'Pending' }, { value: 'rejected', label: 'Rejected' }, { value: 'voided', label: 'Voided' }]
 const { currencies: currencyList, options: currencyChoices } = useCurrency()
 const currencyOptions = computed(() => [{ value: '', label: 'All currencies' }, ...currencyChoices(currency.value)])
-const columns = computed(() => props.type === 'expense' ? 7 : 6)
+const fixedColumns = computed(() => props.type === 'expense' ? 6 : 5)
+const columns = computed(() => fixedColumns.value + amountColumns.value.length)
 
 const items = ref<Transaction[]>([])
 const total = ref(0)
@@ -94,6 +97,22 @@ const status = ref('approved')
 const currency = ref('')
 // Approved totals per currency for the same filters (all pages), in Manage → Currency order.
 const footer = ref<{ currency: string; amount: string }[]>([])
+
+// The amount columns: the chosen currency, or every active one (in Manage → Currency order) and any
+// other this page or the totals have, so the columns stay put from page to page.
+const currencyOrder = computed(() => currencyList.value.map(c => c.code))
+function rankOf(code: string) {
+  const i = currencyOrder.value.indexOf(code)
+  return i === -1 ? currencyOrder.value.length : i
+}
+const amountColumns = computed(() => {
+  if (currency.value) return [currency.value]
+  const codes = new Set(currencyList.value.filter(c => c.active).map(c => c.code))
+  for (const t of items.value) if (t.currency) codes.add(t.currency)
+  for (const row of footer.value) codes.add(row.currency)
+  return [...codes].sort((a, b) => rankOf(a) - rankOf(b) || a.localeCompare(b))
+})
+const totalOf = (code: string) => footer.value.find(row => row.currency === code)?.amount
 
 function query(pageNo: number, size: number) {
   return {
@@ -135,12 +154,10 @@ function totalsQuery() {
 }
 
 function footerRows(by?: Record<string, { income: string; expense: string }>) {
-  const order = currencyList.value.map(c => c.code)
-  const rank = (code: string) => order.indexOf(code) === -1 ? order.length : order.indexOf(code)
   return Object.entries(by || {})
     .map(([code, flow]) => ({ currency: code, amount: props.type === 'income' ? flow.income : flow.expense }))
     .filter(row => Number(row.amount))
-    .sort((a, b) => rank(a.currency) - rank(b.currency))
+    .sort((a, b) => rankOf(a.currency) - rankOf(b.currency))
 }
 
 watch(() => [props.dateFrom, props.dateTo, props.branchId, search.value, status.value, currency.value], () => {
@@ -161,10 +178,14 @@ async function exportCsv() {
       if (!result.items?.length) break
     }
     const escape = (value: string) => /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value
+    // As in the table: an amount column per currency (with every currency the rows have).
+    const codes = [...amountColumns.value]
+    for (const t of rows) if (t.currency && !codes.includes(t.currency)) codes.push(t.currency)
+    const line = (cells: unknown[]) => cells.map(v => escape(String(v ?? ''))).join(',')
     const lines = [
-      ['Date', 'Number', 'Category', 'Branch', 'By', 'Status', 'Currency', 'Amount'].join(','),
-      ...rows.map(t => [t.transaction_date.slice(0, 10), t.transaction_number, t.category?.name || '', t.branch?.name || '', t.created_by?.name || '', t.status, t.currency, t.amount].map(v => escape(String(v ?? ''))).join(',')),
-      ...footer.value.map(row => ['', `Total ${props.type} (approved)`, '', '', '', '', row.currency, row.amount].map(v => escape(String(v))).join(',')),
+      line(['Date', 'Number', 'Category', 'Branch', 'By', 'Status', ...codes.map(code => `Amount (${code})`)]),
+      ...rows.map(t => line([t.transaction_date.slice(0, 10), t.transaction_number, t.category?.name || '', t.branch?.name || '', t.created_by?.name || '', t.status, ...codes.map(code => t.currency === code ? t.amount : '')])),
+      line(['', `Total ${props.type} (approved)`, '', '', '', '', ...codes.map(code => totalOf(code) ?? '')]),
     ]
     const blob = new Blob(['﻿' + lines.join('\n')], { type: 'text/csv;charset=utf-8' })
     const url = URL.createObjectURL(blob)

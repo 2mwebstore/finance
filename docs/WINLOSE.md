@@ -30,6 +30,7 @@ This is enforced in the API, not just the UI. In the code and database an assign
 | `weekly_entry_reactions` | People's ✅ (`yes`) or ❌ (`no`) on an entry, and their 📤 (report sent, `sent_at`) beside it: one row per person and entry (`uq_weekly_entry_reaction`; `reaction` is empty when they gave only 📤), removed with the entry. `weekly_group_reactions` and `weekly_agent_reactions` have `sent_at` too (added when missing, at startup and in migration 000013). |
 | `weekly_agent_reactions` | The same on each agent in an entry, with or without a result there: one per person, entry and agent (`uq_weekly_agent_reaction`); a correction keeps them, deleting the entry removes them. |
 | `weekly_group_reactions` | The same on each group in an entry (Group summary): one per person, entry and group (`uq_weekly_group_reaction`), removed with the entry. |
+| `weekly_entry_images` | RP's **History**: a Group summary Image kept on its first Download or Share to Telegram — the data entry's title and week and the group's title as they were then (`entry_title`, `week_start`, `group_title`), the branch, who and when, `downloaded_at` / `shared_at` (the other action on the same picture sets the other), and the file (`storage_key`, a small copy for the list in `thumb_key`) under `winlose-images/<branch id>/` in the file storage (R2, or `UPLOAD_DIR`). Deleting the entry or the group keeps the picture (`entry_id` / `group_id` become empty). Created at startup and in migration 000013; backups include the files. |
 | `weekly_result_reactions` | Where an agent's ✅ / ❌ were kept before (on its result, so an agent with no result couldn't have one). Copied once to `weekly_agent_reactions` when that table is created (startup and migration 000013); no longer read or written. |
 
 - **No settled weeks:** every saved week can be corrected (with a reason) or deleted, and follows
@@ -144,9 +145,15 @@ Formula **v4** (the default, the business's rule) adds the commission to the win
 agent's rate in a group is the agent's own share: the Total is at what is left of 100%.
 
 ```
-Total = ROUND((win_lose + commission) × (100% − rate), 0)     -- half away from zero, like Excel's ROUND
+Total = ROUND((win_lose + commission) × (100% − rate), 2)     -- to the cent, half away from zero, like Excel's ROUND
 e.g.    (1,000 + 100) × (100% − 60%) = 440                    -- an agent at 60%: the Total is at 40%
+        (−1,000 + 5) × (100% − 90%) = −99.50                  -- keeps its cents, not −100
 ```
+
+A Total keeps its cents in every currency, and the app shows them (−$99.50; a riel Total with cents
+as −៛99.50, a whole one as ៛22,500). Totals were rounded to a whole amount before: the first start
+of the API after this change works every saved week out again once to the cent (app setting
+`winlose.totals_to_cents`, set when done; only weeks that come out different are written).
 
 So an agent at 0% leaves the whole amount, and at 100% nothing. An agent in two groups has a Total
 in each (at each group's rate); its own Total is their sum.
@@ -171,7 +178,7 @@ follows the current version: starting the API after the change works them out ag
 
 Groups from before agents had their own rates can still have partners. Under v1 and v2 each
 partner's share is worked out at their own %, and the platform's Total is the sum of the shares
-(each rounded on its own). Example: win/lose 1,000 and commission 200, Sok Dara at 40% and Chan Lina
+(each rounded to the cent on its own). Example: win/lose 1,000 and commission 200, Sok Dara at 40% and Chan Lina
 at 10%: shares 480 and 120, Total 600 (shown at 50% in all). Under v3 each partner's share is still
 their %, and the Total is what is left after all of them: (1,000 − 200) × (100% − 50%) = 400.
 
@@ -220,6 +227,20 @@ other; USD and KHR are never added together). By agent, By week and a group's or
 agents are a table per currency, USD first, each A to Z (ignoring case), and By agent and the
 agents' tables end with the currency's Total. Export CSV lists the USD agents, then the KHR ones. On Group summary, the
 **Image** of an entry or a group has the same tables, with the agent column titled **AG**.
+Its first **Download** or **Share to Telegram** (once the share sheet is done, or the picture is
+copied) keeps the picture on the server for **History**, in the background, with the data entry's and
+the group's titles (`POST /winlose/entries/:id/images`: `file`, an optional `thumb`, `action`
+`download` or `share`, and `group_id`; PNG or JPG by its bytes, up to 15 MB); the other one on the
+same picture marks it (`POST /winlose/images/:id/actions`, only by whoever kept it). The pop-up says
+"Saved to History" (or that it wasn't: Download or Share again retries). **History**
+(`/winlose/reports/history`, under Report; `GET /winlose/images` with `branch_id`, `search` (either
+title), `created_from` / `created_to`, `page`, `page_size`) shows them newest first, saved this month
+at first (All dates in the filter), a page at a time (12, 24 or 48 a page, Previous / Next), each with
+a small copy, the data entry's title (and branch, on the same line), then the group's, the group's
+✅ / ❌ / 📤 in the entry (as by its title in Group summary; the entry's own for a picture of no group;
+`reactions` in the list), Downloaded / Shared, when and by whom; one opens
+full size (`GET /winlose/images/:id/file`, `?thumb=1` for the small copy) to download again or open
+its entry in Group summary. Same permission as the reports (`winlose-reports.view`), in your branches.
 The group form (Assign agents) shows beside each rate what the Total is worked out at (60% → 40%).
 
 ## Permissions
@@ -285,6 +306,7 @@ weeks already entered.
   **Group Summary** (`/winlose/reports/branch-summary`; empty until a data entry is chosen in its
   Data entry filter (title and branch), then that entry: totals, by group, then its agents with ✅ / ❌ / 📤 and Image),
   **Report** (this month at first; by group, then by agent),
+  **History** (`/winlose/reports/history`: Group summary images that were downloaded or shared),
   **Agents** (`/admin/platforms`; **Add agent** (`/admin/platforms/new`) and **Update**
   (`/admin/platforms/:id`, which loads the agent with `GET /platforms/:id`) are pages), **Group Agent
   Assignments** (`/admin/platform-assignments`: your branch's titled groups of agents with their

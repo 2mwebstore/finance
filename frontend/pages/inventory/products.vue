@@ -4,7 +4,7 @@
       <div>
         <p class="text-[10px] font-bold tracking-[0.14em] text-slate-400">INVENTORY</p>
         <h1 class="text-xl font-bold text-navy">Products</h1>
-        <p class="mt-1 text-xs text-muted">The products every branch buys and sells. Stock shown is for {{ branchFilter ? labelForBranch(branchFilter) : activeBranch?.name || 'all your branches' }}.</p>
+        <p class="mt-1 text-xs text-muted">Products shared by every branch, or one branch’s own (only it sees and sells them). Stock shown is for {{ branchFilter ? labelForBranch(branchFilter) : activeBranch?.name || 'all your branches' }}.</p>
       </div>
       <div v-if="canManage" class="flex flex-wrap gap-2">
         <button type="button" class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-white px-3 py-2 text-sm font-medium text-navy" @click="categoriesOpen = true"><Tags :size="16" /> Categories</button>
@@ -14,8 +14,9 @@
 
     <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
       <div class="min-w-0 flex-1"><ListSearch v-model="search" placeholder="Search by SKU, name or barcode…" /></div>
-      <div class="grid grid-cols-2 gap-2" :class="showBranchFilter ? 'sm:w-[540px] sm:grid-cols-3' : 'sm:w-[360px]'">
+      <div class="grid grid-cols-2 gap-2" :class="showBranchFilter ? 'sm:w-[720px] sm:grid-cols-4' : 'sm:w-[540px] sm:grid-cols-3'">
         <SearchSelect v-if="showBranchFilter" v-model="branchFilter" :options="branchOptions" aria-label="Branch stock" />
+        <SearchSelect v-model="ownerFilter" :options="ownerFilterOptions" :searchable="false" aria-label="Shared or branch" />
         <SearchSelect v-model="categoryFilter" :options="categoryFilterOptions" aria-label="Category" />
         <SearchSelect v-model="activeFilter" :options="activeOptions" :searchable="false" aria-label="Status" />
       </div>
@@ -31,11 +32,12 @@
         <span v-if="!product.is_active" class="absolute left-1.5 top-1.5 rounded-full bg-slate-700/85 px-2 py-0.5 text-[9px] font-bold uppercase text-white">Inactive</span>
         <span v-else-if="isLow(product)" class="absolute left-1.5 top-1.5 rounded-full bg-amber-500/90 px-2 py-0.5 text-[9px] font-bold uppercase text-white">Low stock</span>
         <span v-else-if="product.type === 'service'" class="absolute left-1.5 top-1.5 rounded-full bg-violet-600/90 px-2 py-0.5 text-[9px] font-bold uppercase text-white">Service</span>
-        <button v-if="canManage" type="button" class="absolute right-1.5 top-1.5 grid h-8 w-8 place-items-center rounded-lg bg-white/90 text-primary shadow-sm" :aria-label="`Edit ${product.name}`" @click="openEdit(product)"><Pencil :size="14" /></button>
+        <button v-if="canManage && canChange(product)" type="button" class="absolute right-1.5 top-1.5 grid h-8 w-8 place-items-center rounded-lg bg-white/90 text-primary shadow-sm" :aria-label="`Edit ${product.name}`" @click="openEdit(product)"><Pencil :size="14" /></button>
         <div class="flex flex-1 flex-col gap-0.5 p-2.5">
           <h2 class="line-clamp-2 text-[13px] font-semibold leading-snug text-navy">{{ product.name }}</h2>
           <p class="truncate font-mono text-[10px] text-muted">{{ product.sku }}</p>
           <p class="truncate text-[11px] text-muted">{{ product.category_name || 'No category' }}</p>
+          <p class="flex min-w-0"><InventoryOwnerBadge class="max-w-full truncate !text-[9px]" :branch-id="product.branch_id" :branch-name="product.branch_name" /></p>
           <div class="mt-auto flex items-end justify-between gap-1 pt-1.5">
             <div class="min-w-0">
               <p class="truncate text-sm font-bold text-navy">{{ formatMoney(product.sale_price, 'USD') }}</p>
@@ -59,6 +61,7 @@
               <span v-if="!product.is_active" class="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase text-muted">Inactive</span>
               <span v-else-if="isLow(product)" class="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold uppercase text-amber-700">Low stock</span>
               <span v-if="product.type === 'service'" class="rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-bold uppercase text-violet-700">Service</span>
+              <InventoryOwnerBadge :branch-id="product.branch_id" :branch-name="product.branch_name" />
             </div>
             <p class="mt-0.5 font-mono text-[11px] text-muted">{{ product.sku }}<template v-if="product.barcode"> · {{ product.barcode }}</template></p>
             <p class="mt-0.5 text-xs text-muted">{{ product.category_name || 'No category' }} · per {{ product.unit }}</p>
@@ -77,14 +80,14 @@
             <p class="text-sm font-bold" :class="isLow(product) ? 'text-amber-700' : 'text-navy'">{{ formatQty(product.quantity) }}</p>
             <p class="text-[11px] text-muted">in stock</p>
           </div>
-          <button v-if="canManage" type="button" class="action-chip action-edit" @click="openEdit(product)"><Pencil :size="13" /> Edit</button>
+          <button v-if="canManage && canChange(product)" type="button" class="action-chip action-edit" @click="openEdit(product)"><Pencil :size="13" /> Edit</button>
         </div>
       </li>
       <li v-if="!items.length" class="p-6 text-center text-sm text-muted">{{ search ? `No products match “${search}”.` : 'No products yet.' }}</li>
     </ul>
     <InventoryPager v-model:page="page" :page-size="pageSize" :total="total" />
 
-    <AppModal :model-value="formOpen" form :title="editing ? `Edit ${editing.name}` : 'Add product'" :eyebrow="editing ? 'EDIT PRODUCT' : 'NEW PRODUCT'" subtitle="Shared by every branch; each branch keeps its own stock." :busy="saving" width="640px" @update:model-value="(open) => { if (!open) closeForm() }" @submit="save">
+    <AppModal :model-value="formOpen" form :title="editing ? `Edit ${editing.name}` : 'Add product'" :eyebrow="editing ? 'EDIT PRODUCT' : 'NEW PRODUCT'" subtitle="Shared by every branch, or one branch’s own; each branch keeps its own stock." :busy="saving" width="640px" @update:model-value="(open) => { if (!open) closeForm() }" @submit="save">
       <template #icon><Package :size="20" /></template>
       <div class="mb-3 flex items-start gap-3 rounded-xl border border-border bg-canvas p-3">
         <InventoryProductImage :product="previewProduct" size="lg" />
@@ -111,6 +114,7 @@
         <small v-if="editing" class="block font-normal">The type can’t change once the product has been bought, sold or stocked.</small>
       </div>
       <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div class="space-y-1 text-xs font-medium text-muted sm:col-span-2">Who sells it<SearchSelect v-model="form.branch_id" :options="ownerOptions" :searchable="false" aria-label="Who sells it" :aria-invalid="formCheck.invalid('branch_id')" /><small class="block font-normal">{{ form.branch_id ? 'Only this branch sees, buys and sells it (a shared or its own category).' : 'Every branch sees, buys and sells it (a shared category).' }}<template v-if="!hasFullAccess"> Only the owner or an admin can share one with every branch.</template></small></div>
         <div class="space-y-1 text-xs font-medium text-muted">SKU<p class="rounded-lg border border-dashed border-border bg-canvas px-3 py-2 font-mono text-sm text-navy">{{ editing ? editing.sku : 'Generated when you save' }}</p></div>
         <label class="space-y-1 text-xs font-medium text-muted">Name<input v-model.trim="form.name" maxlength="191" :aria-invalid="formCheck.invalid('name')" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" placeholder="e.g. Coffee beans 250 g" /></label>
         <div class="space-y-1 text-xs font-medium text-muted">Category<SearchSelect v-model="form.category_id" :options="categoryOptions" placeholder="Choose a category" aria-label="Category" :aria-invalid="formCheck.invalid('category_id')" /></div>
@@ -135,16 +139,17 @@
       <InventoryProductImage v-if="previewing" :product="previewing" size="xl" />
       <template #footer>
         <a v-if="previewing?.image_url" :href="previewing.image_url" target="_blank" rel="noopener noreferrer" class="border border-border bg-white text-muted">Open original</a>
-        <button v-if="canManage && previewing" type="button" class="border border-border bg-white text-primary" @click="openEdit(previewing); previewing = null">Change picture</button>
+        <button v-if="canManage && previewing && canChange(previewing)" type="button" class="border border-border bg-white text-primary" @click="openEdit(previewing); previewing = null">Change picture</button>
         <button type="button" class="bg-primary text-white" @click="previewing = null">Close</button>
       </template>
     </AppModal>
 
-    <AppModal v-model="categoriesOpen" title="Product categories" eyebrow="INVENTORY" subtitle="Group products for filters and reports." width="560px">
+    <AppModal v-model="categoriesOpen" title="Product categories" eyebrow="INVENTORY" subtitle="Group products for filters and reports. A branch’s own category holds only its own products." width="600px">
       <template #icon><Tags :size="20" /></template>
-      <form class="grid grid-cols-1 gap-2 rounded-xl border border-border bg-canvas p-3 sm:grid-cols-[1fr_1fr_auto]" novalidate @submit.prevent="saveCategory">
+      <form class="grid grid-cols-1 gap-2 rounded-xl border border-border bg-canvas p-3 sm:grid-cols-2" novalidate @submit.prevent="saveCategory">
         <input v-model.trim="categoryForm.code" maxlength="64" placeholder="Code (e.g. drinks)" :aria-invalid="categoryCheck.invalid('code')" class="rounded-lg border border-border px-3 py-2 font-mono text-sm" />
         <input v-model.trim="categoryForm.name" maxlength="128" placeholder="Name (e.g. Drinks)" :aria-invalid="categoryCheck.invalid('name')" class="rounded-lg border border-border px-3 py-2 text-sm" />
+        <SearchSelect v-model="categoryForm.branch_id" :options="ownerOptions" :searchable="false" aria-label="Who uses the category" :aria-invalid="categoryCheck.invalid('branch_id')" />
         <div class="flex gap-2">
           <button type="submit" class="rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-white disabled:opacity-60" :disabled="savingCategory">{{ categoryForm.id ? 'Save' : 'Add' }}</button>
           <button v-if="categoryForm.id" type="button" class="rounded-lg border border-border bg-white px-3 py-2 text-xs font-semibold text-muted" @click="resetCategory">Cancel</button>
@@ -154,10 +159,10 @@
       <ul class="mt-3 divide-y divide-border rounded-xl border border-border">
         <li v-for="cat in allCategories" :key="cat.id" class="flex items-center justify-between gap-2 px-3 py-2">
           <div class="min-w-0">
-            <p class="truncate text-sm font-semibold text-navy">{{ cat.name }} <span v-if="!cat.is_active" class="ml-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase text-muted">Inactive</span></p>
+            <p class="flex flex-wrap items-center gap-1.5 text-sm font-semibold text-navy"><span class="truncate">{{ cat.name }}</span> <InventoryOwnerBadge :branch-id="cat.branch_id" :branch-name="cat.branch_name" /> <span v-if="!cat.is_active" class="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase text-muted">Inactive</span></p>
             <p class="font-mono text-[11px] text-muted">{{ cat.code }}</p>
           </div>
-          <div class="flex shrink-0 gap-1.5">
+          <div v-if="canChange(cat)" class="flex shrink-0 gap-1.5">
             <button type="button" class="action-chip action-edit" @click="editCategory(cat)"><Pencil :size="12" /> Edit</button>
             <button type="button" class="action-chip" :class="cat.is_active ? 'action-danger' : 'action-success'" :disabled="savingCategory" @click="toggleCategory(cat)">{{ cat.is_active ? 'Hide' : 'Show' }}</button>
           </div>
@@ -179,6 +184,7 @@ import { formatMoney } from '~/utils/money'
 import { formatQty } from '~/utils/inventory'
 import { useCurrency } from '~/composables/useCurrency'
 import { useBranchOptions } from '~/composables/useBranchOptions'
+import { useOwner } from '~/composables/useOwner'
 
 const { api } = useApi()
 const { can } = usePermissions()
@@ -204,12 +210,17 @@ const activeFilter = ref('true')
 // Stock of one branch, or the total of the user's branches.
 const branchFilter = ref('')
 const { options: branchOptions, showFilter: showBranchFilter, labelFor: labelForBranch } = useBranchOptions('All my branches')
+// Shared products, or one branch's own.
+const { ownerOptions, defaultOwner, canChange, filterOptions: ownerFilterOptions, hasFullAccess } = useOwner()
+const ownerFilter = ref('')
 const { activeBranch } = useActiveBranch()
 const allCategories = ref<ProductCategory[]>([])
 
 const activeOptions = [{ value: 'true', label: 'Active' }, { value: 'false', label: 'Inactive' }, { value: '', label: 'All' }]
 const categoryFilterOptions = computed(() => [{ value: '', label: 'All categories' }, ...allCategories.value.map(c => ({ value: c.id, label: c.name }))])
-const categoryOptions = computed(() => allCategories.value.filter(c => c.is_active || c.id === form.category_id).map(c => ({ value: c.id, label: c.name })))
+// A shared product goes in a shared category; a branch's product in a shared one or the branch's own.
+const categoryFits = (c: ProductCategory) => !c.branch_id || c.branch_id === form.branch_id
+const categoryOptions = computed(() => allCategories.value.filter(c => (c.is_active || c.id === form.category_id) && categoryFits(c)).map(c => ({ value: c.id, label: c.branch_id ? `${c.name} (${c.branch_name || 'branch'})` : c.name })))
 const productTypes = [
   { value: 'standard', label: 'Standard', hint: 'Stocked; has a cost and a sale price' },
   { value: 'service', label: 'Service', hint: 'Only sold; a sale price, no stock' },
@@ -227,7 +238,7 @@ async function load() {
   error.value = ''
   try {
     const result = await api<Paged<Product>>('/inventory/products', {
-      query: { page: page.value, page_size: pageSize, search: search.value || undefined, category_id: categoryFilter.value || undefined, active: activeFilter.value || undefined, branch_id: branchFilter.value || undefined },
+      query: { page: page.value, page_size: pageSize, search: search.value || undefined, category_id: categoryFilter.value || undefined, active: activeFilter.value || undefined, branch_id: branchFilter.value || undefined, owner: ownerFilter.value || undefined },
     })
     if (request !== loadRequest) return
     items.value = result.items || []
@@ -247,7 +258,7 @@ async function loadCategories() {
   }
 }
 
-watch([search, categoryFilter, activeFilter, branchFilter], () => { page.value = 1; load() })
+watch([search, categoryFilter, activeFilter, branchFilter, ownerFilter], () => { page.value = 1; load() })
 watch(page, load)
 onMounted(() => { load(); loadCategories(); loadCurrency() })
 
@@ -256,8 +267,13 @@ const formOpen = ref(false)
 const editing = ref<Product | null>(null)
 const saving = ref(false)
 const formError = ref('')
-const emptyForm = () => ({ type: 'standard' as ProductType, name: '', category_id: '', unit: 'pcs', barcode: '', sale_price: '', cost_price: '', reorder_level: '', description: '', image_url: '', is_active: true })
+const emptyForm = () => ({ branch_id: defaultOwner(), type: 'standard' as ProductType, name: '', category_id: '', unit: 'pcs', barcode: '', sale_price: '', cost_price: '', reorder_level: '', description: '', image_url: '', is_active: true })
 const form = reactive(emptyForm())
+// Another owner may not fit the chosen category.
+watch(() => form.branch_id, () => {
+  const cat = allCategories.value.find(c => c.id === form.category_id)
+  if (cat && !categoryFits(cat)) form.category_id = ''
+})
 
 // Picture: an uploaded file (stored in R2) or a web address; "none" removes it.
 const pictureModes = [{ value: 'upload', label: 'Upload' }, { value: 'url', label: 'Web address' }, { value: 'none', label: 'No picture' }] as const
@@ -316,7 +332,7 @@ function openEdit(product: Product) {
   editing.value = product
   resetPicture(product)
   Object.assign(form, {
-    image_url: product.image_url || '', type: product.type || 'standard', name: product.name, category_id: product.category_id || '', unit: product.unit, barcode: product.barcode || '',
+    branch_id: product.branch_id || '', image_url: product.image_url || '', type: product.type || 'standard', name: product.name, category_id: product.category_id || '', unit: product.unit, barcode: product.barcode || '',
     sale_price: String(Number(product.sale_price)), cost_price: String(Number(product.cost_price)),
     reorder_level: Number(product.reorder_level) ? String(Number(product.reorder_level)) : '', description: product.description || '', is_active: product.is_active,
   })
@@ -365,7 +381,7 @@ async function save() {
 const categoriesOpen = ref(false)
 const savingCategory = ref(false)
 const categoryError = ref('')
-const categoryForm = reactive({ id: '', code: '', name: '', is_active: true })
+const categoryForm = reactive({ id: '', code: '', name: '', is_active: true, branch_id: '' })
 const categoryCheck = reactive(useFormErrors(
   () => ({ ...categoryForm }),
   () => ({
@@ -375,13 +391,13 @@ const categoryCheck = reactive(useFormErrors(
 ))
 
 function resetCategory() {
-  Object.assign(categoryForm, { id: '', code: '', name: '', is_active: true })
+  Object.assign(categoryForm, { id: '', code: '', name: '', is_active: true, branch_id: defaultOwner() })
   categoryCheck.reset()
   categoryError.value = ''
 }
 
 function editCategory(cat: ProductCategory) {
-  Object.assign(categoryForm, { id: cat.id, code: cat.code, name: cat.name, is_active: cat.is_active })
+  Object.assign(categoryForm, { id: cat.id, code: cat.code, name: cat.name, is_active: cat.is_active, branch_id: cat.branch_id || '' })
   categoryCheck.reset()
 }
 
@@ -403,12 +419,12 @@ async function writeCategory(id: string, body: Record<string, unknown>) {
 
 async function saveCategory() {
   if (!categoryCheck.check()) return
-  if (await writeCategory(categoryForm.id, { code: categoryForm.code, name: categoryForm.name, is_active: categoryForm.is_active })) resetCategory()
+  if (await writeCategory(categoryForm.id, { code: categoryForm.code, name: categoryForm.name, is_active: categoryForm.is_active, branch_id: categoryForm.branch_id })) resetCategory()
 }
 
 function toggleCategory(cat: ProductCategory) {
   writeCategory(cat.id, { code: cat.code, name: cat.name, description: cat.description || '', is_active: !cat.is_active })
 }
 
-watch(categoriesOpen, (open) => { if (!open) resetCategory() })
+watch(categoriesOpen, (open) => { resetCategory(); if (open) loadCategories() })
 </script>

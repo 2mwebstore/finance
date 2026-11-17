@@ -7,6 +7,14 @@
     <div class="overflow-auto rounded-lg border border-border bg-canvas p-2">
       <img v-if="url" :src="url" :alt="title" class="mx-auto block h-auto max-w-full" />
     </div>
+    <!-- Whether the picture is kept in RP's History (on its first Download or Share) -->
+    <p v-if="entryId" class="mt-2 flex items-center gap-1.5 text-[11px]" :class="saveState === 'failed' ? 'text-red-600' : 'text-muted'" role="status">
+      <History :size="12" class="shrink-0" />
+      <template v-if="saveState === 'saving'">Saving to History…</template>
+      <template v-else-if="saveState === 'saved'">Saved to History</template>
+      <template v-else-if="saveState === 'failed'">Not saved to History. Download or share again to retry.</template>
+      <template v-else>Download or Share saves it to History.</template>
+    </p>
     <template #footer>
       <button type="button" class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-white px-4 py-2 text-sm font-semibold text-navy" @click="download"><Download :size="15" /> Download</button>
       <button type="button" class="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white disabled:opacity-60" :disabled="sharing" @click="share"><Send :size="15" /> {{ sharing ? 'Sharing…' : 'Share to Telegram' }}</button>
@@ -15,7 +23,8 @@
 </template>
 
 <script setup lang="ts">
-import { Camera, Download, Send } from 'lucide-vue-next'
+import { Camera, Download, History, Send } from 'lucide-vue-next'
+import type { WinLoseEntryImage } from '~/types/api'
 import { useToast } from '~/composables/useToast'
 
 /**
@@ -26,9 +35,14 @@ import { useToast } from '~/composables/useToast'
  * currency, USD first, as on the page. Sharing uses the phone's share sheet, where Telegram is one
  * of the choices; where the browser can't share files the image is copied so it can be pasted in
  * Telegram.
+ *
+ * With an entry (Group summary), the picture's first Download or Share is kept on the server for
+ * RP's History, with the data entry's and the group's titles; doing the other with the same picture
+ * marks it as that too. It goes up in the background: sharing isn't held up.
  */
-const props = defineProps<{ targetId: string; title: string; group?: string }>()
+const props = defineProps<{ targetId: string; title: string; group?: string; entryId?: string; groupId?: string }>()
 const toast = useToast()
+const { api } = useApi()
 
 const open = ref(false)
 const busy = ref(false)
@@ -38,11 +52,76 @@ let blob: Blob | null = null
 
 const fileName = computed(() => `${props.title.trim().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-|-$/g, '') || 'entry'}.png`)
 
+// --- History: the picture kept on the server ---
+type ImageAction = 'download' | 'share'
+const saveState = ref<'' | 'saving' | 'saved' | 'failed'>('')
+// The kept picture's id, once it is up; what was already sent for it.
+let kept: Promise<string> | null = null
+const marked = new Set<ImageAction>()
+
+// A small copy of the picture's top for History's list (JPG, 720 px wide: sharp on phones).
+async function thumbnail(picture: Blob): Promise<Blob | null> {
+  try {
+    const bitmap = await createImageBitmap(picture)
+    const scale = Math.min(1, 720 / bitmap.width)
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.round(bitmap.width * scale)
+    canvas.height = Math.min(Math.round(bitmap.height * scale), 900)
+    const context = canvas.getContext('2d')
+    if (!context) return null
+    context.fillStyle = '#ffffff'
+    context.fillRect(0, 0, canvas.width, canvas.height)
+    context.drawImage(bitmap, 0, 0, Math.round(bitmap.width * scale), Math.round(bitmap.height * scale))
+    bitmap.close()
+    return await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.8))
+  } catch {
+    return null
+  }
+}
+
+async function upload(picture: Blob, action: ImageAction): Promise<string> {
+  const form = new FormData()
+  form.append('file', picture, fileName.value)
+  const small = await thumbnail(picture)
+  if (small) form.append('thumb', small, 'thumb.jpg')
+  form.append('action', action)
+  if (props.groupId) form.append('group_id', props.groupId)
+  const row = await api<WinLoseEntryImage>(`/winlose/entries/${props.entryId}/images`, { method: 'POST', body: form })
+  return row.id
+}
+
+// Keeps the picture (its first action) or marks the other action on it; not awaited.
+function keep(action: ImageAction) {
+  const picture = blob
+  if (!props.entryId || !picture || marked.has(action)) return
+  marked.add(action)
+  const first = !kept
+  if (first) {
+    saveState.value = 'saving'
+    kept = upload(picture, action)
+  }
+  const job = first ? kept! : kept!.then(id => api(`/winlose/images/${id}/actions`, { method: 'POST', body: { action } }))
+  job.then(() => {
+    if (first && blob === picture) saveState.value = 'saved'
+  }).catch(() => {
+    marked.delete(action)
+    if (!first || blob !== picture) return
+    kept = null
+    saveState.value = 'failed'
+  })
+}
+
 watch(open, (isOpen) => {
   if (!isOpen && url.value) {
     URL.revokeObjectURL(url.value)
     url.value = ''
     blob = null
+  }
+  // A new picture is a new one in History.
+  if (!isOpen) {
+    kept = null
+    marked.clear()
+    saveState.value = ''
   }
 })
 
@@ -111,6 +190,7 @@ function download() {
   link.href = url.value
   link.download = fileName.value
   link.click()
+  keep('download')
 }
 
 async function share() {
@@ -120,10 +200,12 @@ async function share() {
   try {
     if (navigator.canShare?.({ files: [file] })) {
       await navigator.share({ files: [file], title: props.title })
+      keep('share') // after the share sheet: a cancelled share isn't kept
       return
     }
     // No file sharing here (most desktop browsers): copy the image to paste into Telegram.
     await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+    keep('share')
     toast.success('Paste it in a Telegram chat, or use Download.', { title: 'Image copied' })
     window.open('https://web.telegram.org/', '_blank', 'noopener')
   } catch (e: any) {

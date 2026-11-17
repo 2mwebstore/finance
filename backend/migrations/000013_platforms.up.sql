@@ -281,6 +281,34 @@ PREPARE fill_reactions FROM @fill;
 EXECUTE fill_reactions;
 DEALLOCATE PREPARE fill_reactions;
 
+-- weekly_entry_images (Group summary pictures that were downloaded or shared: RP's History)
+SET @ddl = CONCAT('CREATE TABLE IF NOT EXISTS weekly_entry_images (
+    id CHAR(36) NOT NULL,
+    entry_id CHAR(36) NULL,
+    branch_id CHAR(36) NOT NULL,
+    entry_title VARCHAR(128) NOT NULL,
+    week_start DATE NOT NULL,
+    group_id CHAR(36) NULL,
+    group_title VARCHAR(128) NOT NULL DEFAULT '''',
+    storage_key VARCHAR(255) NOT NULL,
+    thumb_key VARCHAR(255) NOT NULL DEFAULT '''',
+    content_type VARCHAR(64) NOT NULL,
+    size BIGINT NOT NULL,
+    downloaded_at DATETIME(3) NULL,
+    shared_at DATETIME(3) NULL,
+    created_by_id CHAR(36) NOT NULL,
+    created_at DATETIME(3) NULL,
+    updated_at DATETIME(3) NULL,
+    PRIMARY KEY (id),
+    KEY idx_weekly_entry_images_branch_created (branch_id, created_at),
+    KEY idx_weekly_entry_images_created (created_at),
+    KEY idx_weekly_entry_images_entry (entry_id),
+    KEY idx_weekly_entry_images_group (group_id)
+)', ' ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=', @coll);
+PREPARE create_table FROM @ddl;
+EXECUTE create_table;
+DEALLOCATE PREPARE create_table;
+
 -- Columns added after the first builds, each added only when missing.
 
 SET @col = IF(
@@ -730,6 +758,42 @@ SET @fk = IF(
     (SELECT COUNT(*) FROM information_schema.table_constraints
       WHERE table_schema = DATABASE() AND table_name = 'weekly_agent_reactions' AND constraint_name = 'fk_weekly_agent_reactions_user' AND constraint_type = 'FOREIGN KEY') = 0,
     'ALTER TABLE weekly_agent_reactions ADD CONSTRAINT fk_weekly_agent_reactions_user FOREIGN KEY (user_id) REFERENCES users(id)',
+    'SELECT 1');
+PREPARE add_fk FROM @fk;
+EXECUTE add_fk;
+DEALLOCATE PREPARE add_fk;
+
+SET @fk = IF(
+    (SELECT COUNT(*) FROM information_schema.table_constraints
+      WHERE table_schema = DATABASE() AND table_name = 'weekly_entry_images' AND constraint_name = 'fk_weekly_entry_images_entry' AND constraint_type = 'FOREIGN KEY') = 0,
+    'ALTER TABLE weekly_entry_images ADD CONSTRAINT fk_weekly_entry_images_entry FOREIGN KEY (entry_id) REFERENCES weekly_entries(id) ON DELETE SET NULL',
+    'SELECT 1');
+PREPARE add_fk FROM @fk;
+EXECUTE add_fk;
+DEALLOCATE PREPARE add_fk;
+
+SET @fk = IF(
+    (SELECT COUNT(*) FROM information_schema.table_constraints
+      WHERE table_schema = DATABASE() AND table_name = 'weekly_entry_images' AND constraint_name = 'fk_weekly_entry_images_branch' AND constraint_type = 'FOREIGN KEY') = 0,
+    'ALTER TABLE weekly_entry_images ADD CONSTRAINT fk_weekly_entry_images_branch FOREIGN KEY (branch_id) REFERENCES branches(id)',
+    'SELECT 1');
+PREPARE add_fk FROM @fk;
+EXECUTE add_fk;
+DEALLOCATE PREPARE add_fk;
+
+SET @fk = IF(
+    (SELECT COUNT(*) FROM information_schema.table_constraints
+      WHERE table_schema = DATABASE() AND table_name = 'weekly_entry_images' AND constraint_name = 'fk_weekly_entry_images_group' AND constraint_type = 'FOREIGN KEY') = 0,
+    'ALTER TABLE weekly_entry_images ADD CONSTRAINT fk_weekly_entry_images_group FOREIGN KEY (group_id) REFERENCES assignment_groups(id) ON DELETE SET NULL',
+    'SELECT 1');
+PREPARE add_fk FROM @fk;
+EXECUTE add_fk;
+DEALLOCATE PREPARE add_fk;
+
+SET @fk = IF(
+    (SELECT COUNT(*) FROM information_schema.table_constraints
+      WHERE table_schema = DATABASE() AND table_name = 'weekly_entry_images' AND constraint_name = 'fk_weekly_entry_images_created_by' AND constraint_type = 'FOREIGN KEY') = 0,
+    'ALTER TABLE weekly_entry_images ADD CONSTRAINT fk_weekly_entry_images_created_by FOREIGN KEY (created_by_id) REFERENCES users(id)',
     'SELECT 1');
 PREPARE add_fk FROM @fk;
 EXECUTE add_fk;

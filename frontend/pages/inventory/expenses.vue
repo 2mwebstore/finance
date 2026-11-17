@@ -101,7 +101,8 @@ const toast = useToast()
 const canCreate = computed(() => can('inventory-expenses.create'))
 const { branches, options: branchOptions, showFilter: showBranchFilter } = useBranchOptions('All branches')
 const branchChoices = computed(() => branches.value.map(b => ({ value: b.id, label: branchLabel(b) })))
-const { options: paymentOptions, defaultId: defaultPayment, load: loadPayments } = usePaymentMethods()
+// Payment methods shared by every branch or the expense's branch's own.
+const { options: paymentOptions, defaultId: defaultPayment, load: loadPayments, keep: keepPayment } = usePaymentMethods(() => form.branch_id)
 const { currencyOptions, rateLabel, defaultCurrency, load: loadCurrency, convert } = useCurrency()
 const statusOptions = [{ value: '', label: 'All statuses' }, { value: 'completed', label: 'Done' }, { value: 'voided', label: 'Voided' }]
 
@@ -165,7 +166,11 @@ const formCheck = reactive(useFormErrors(
   }),
 ))
 // A branch-only category doesn't fit another branch.
-watch(() => form.branch_id, () => { if (form.category_id && !categoryChoices.value.some(c => c.value === form.category_id)) form.category_id = '' })
+watch(() => form.branch_id, async () => {
+  if (form.category_id && !categoryChoices.value.some(c => c.value === form.category_id)) form.category_id = ''
+  await loadPayments()
+  form.payment_method_id = keepPayment(form.payment_method_id)
+})
 
 async function openCreate() {
   await loadCurrency()
@@ -174,7 +179,7 @@ async function openCreate() {
   formCheck.reset()
   formOpen.value = true
   await loadPayments()
-  if (!form.payment_method_id) form.payment_method_id = defaultPayment.value
+  form.payment_method_id = keepPayment(form.payment_method_id)
 }
 
 async function save() {

@@ -31,7 +31,7 @@
           <button type="button" class="-mr-2 p-2 text-muted hover:text-navy" aria-label="Back to products" @click="cartOpen = false"><X :size="20" /></button>
         </div>
         <div class="border-b border-border p-3">
-          <input v-model.trim="cart.customer" maxlength="191" class="w-full rounded-lg border border-border px-3 py-2 text-sm text-navy" placeholder="Customer (walk-in)" aria-label="Customer" />
+          <InventoryPartySelect v-model="cartCustomer" kind="customers" :branch-id="branchId" :name="cart.customer" none-label="Walk-in (no customer)" placeholder="Walk-in (no customer)" aria-label="Customer" @pick="(p) => cart.customer = p?.name || ''" />
         </div>
 
         <div ref="cartListEl" class="min-h-0 flex-1 divide-y divide-border overflow-y-auto">
@@ -66,10 +66,7 @@
         <div class="space-y-3 border-t border-border p-3">
           <div class="flex items-center gap-2">
             <span class="shrink-0 text-xs font-semibold text-muted">Discount</span>
-            <span class="flex min-w-0 flex-1 overflow-hidden rounded-lg border border-border focus-within:border-primary">
-              <input v-model.trim="cart.discount" type="text" inputmode="decimal" autocomplete="off" placeholder="0" class="min-w-0 flex-1 border-0 px-3 py-1.5 text-sm text-navy outline-none" aria-label="Discount on the sale" />
-              <button type="button" class="shrink-0 border-l border-border bg-canvas px-3 text-xs font-bold text-navy" :title="cart.discount_mode === 'percent' ? 'Percent (tap for an amount)' : 'Amount (tap for a percent)'" @click="cart.discount_mode = cart.discount_mode === 'percent' ? 'amount' : 'percent'">{{ cart.discount_mode === 'percent' ? '%' : symbol }}</button>
-            </span>
+            <InventoryDiscountInput v-model:value="cart.discount" v-model:mode="cart.discount_mode" class="min-w-0 flex-1" input-class="py-1.5" :currency="currency" aria-label="Discount on the sale" />
           </div>
           <div class="space-y-1 text-sm">
             <div class="flex justify-between"><span class="text-muted">Subtotal</span><span class="font-mono text-navy">{{ formatMoney(gross, currency) }}</span></div>
@@ -148,7 +145,7 @@ import { branchLabel as pickerLabel, useBranchOptions } from '~/composables/useB
 import { usePaymentMethods } from '~/composables/usePaymentMethods'
 import { useCurrency } from '~/composables/useCurrency'
 import { useHeldSales, usePosCart, type PosPayment } from '~/composables/usePosCart'
-import { currencyMeta, formatMoney } from '~/utils/money'
+import { formatMoney } from '~/utils/money'
 import { availableQty as stockOf, cartQty, docDiscountCheck, formatQty, isService, lineDiscount, linesCheck, todayISO } from '~/utils/inventory'
 
 /**
@@ -166,13 +163,15 @@ const toast = useToast()
 const canViewSales = computed(() => can('sales.view'))
 const { branches } = useBranchOptions()
 const branchChoices = computed(() => branches.value.map(b => ({ value: b.id, label: pickerLabel(b) })))
-const { methods: paymentMethods, defaultId: defaultPayment, load: loadPayments } = usePaymentMethods()
+// Payment methods shared by every branch or this branch's own.
+const { methods: paymentMethods, defaultId: defaultPayment, load: loadPayments } = usePaymentMethods(() => branchId.value)
 const { active: activeCurrencies, defaultCurrency, load: loadCurrency, fromUSD, convert } = useCurrency()
 
 const currency = computed(() => defaultCurrency.value)
-const symbol = computed(() => currencyMeta(currency.value).symbol.trim())
 const otherCurrency = computed(() => currency.value === 'USD' ? activeCurrencies.value.find(c => !c.base)?.code : 'USD')
 const { cart, itemCount, gross, lineDiscounts, saleDiscount, total, lineTotal, add, update, step, remove, clear, restore } = usePosCart(() => currency.value)
+// The cart's customer from the list ('' = walk-in; carts kept from before the list have none).
+const cartCustomer = computed({ get: () => cart.value.customer_id || '', set: (id: string) => { cart.value.customer_id = id } })
 
 // --- branch: the cart's, else the one used last on this browser, else the user's own, else the first ---
 const branchKey = computed(() => `pos-branch:${user.value?.id || ''}`)
@@ -219,7 +218,7 @@ async function loadProducts() {
     if (request === productsRequest) loadingProducts.value = false
   }
 }
-watch(branchId, () => { products.value = []; category.value = ''; loadProducts() })
+watch(branchId, () => { products.value = []; category.value = ''; loadProducts(); loadPayments() })
 
 function productOf(id: string) {
   return products.value.find(p => p.id === id)
@@ -321,7 +320,7 @@ const recentOpen = ref(false)
 
 function holdSale() {
   if (!cart.value.lines.length) return
-  held.hold({ currency: currency.value, total: total.value, customer: cart.value.customer, discount: cart.value.discount, discount_mode: cart.value.discount_mode, lines: cart.value.lines })
+  held.hold({ currency: currency.value, total: total.value, customer_id: cart.value.customer_id || '', customer: cart.value.customer, discount: cart.value.discount, discount_mode: cart.value.discount_mode, lines: cart.value.lines })
   clear()
   toast.success('Resume it from Held when the customer is ready.', { title: 'Sale held' })
 }
@@ -367,7 +366,7 @@ async function pay(payment: PosPayment) {
     const sale = await api<Sale>('/inventory/sales', {
       method: 'POST',
       body: {
-        branch_id: branchId.value, sale_date: todayISO(), currency: currency.value, customer: cart.value.customer,
+        branch_id: branchId.value, sale_date: todayISO(), currency: currency.value, customer_id: cart.value.customer_id || '', customer: cart.value.customer,
         payment_method_id: payment.payment_method_id, discount: String(saleDiscount.value), shipping: '0',
         note: payment.reference ? `<p>Payment reference: ${escapeHtml(payment.reference)}</p>` : '',
         items: cart.value.lines.map(l => ({ product_id: l.product_id, quantity: l.quantity, unit_price: l.price || '0', discount: String(lineDiscount(l, currency.value)), note: (l.note || '').trim() })),

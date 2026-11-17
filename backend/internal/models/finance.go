@@ -42,13 +42,15 @@ type Category struct {
 	BranchID *uuid.UUID `gorm:"type:char(36);index" json:"branch_id,omitempty"`
 }
 
-// PaymentMethod is a configurable payment channel (Cash, Bank, KHQR, etc.).
+// PaymentMethod is a configurable payment channel (Cash, Bank, KHQR, etc.), shared by every
+// branch (BranchID nil; built-in ones always are) or one branch's own.
 type PaymentMethod struct {
 	Base
-	Code     string `gorm:"size:64;uniqueIndex;not null" json:"code"`
-	Name     string `gorm:"size:128;not null" json:"name"`
-	IsActive bool   `gorm:"default:true;not null" json:"is_active"`
-	IsSystem bool   `gorm:"default:false;not null" json:"is_system"`
+	Code     string     `gorm:"size:64;uniqueIndex;not null" json:"code"`
+	Name     string     `gorm:"size:128;not null" json:"name"`
+	IsActive bool       `gorm:"default:true;not null" json:"is_active"`
+	IsSystem bool       `gorm:"default:false;not null" json:"is_system"`
+	BranchID *uuid.UUID `gorm:"type:char(36);index" json:"branch_id"`
 }
 
 // TransactionNumberSeq tracks per-prefix monthly sequences for safe concurrent numbering.
@@ -83,22 +85,22 @@ type Transaction struct {
 	Description       string          `gorm:"type:text" json:"description"` // sanitized rich text (HTML)
 	Counterparty      string          `gorm:"size:255" json:"counterparty"` // payer or payee (no longer entered in the app)
 	// Legacy single attachment (before transaction_attachments); moved there on start, then left empty.
-	AttachmentKey  string `gorm:"size:255" json:"-"`
-	AttachmentName string `gorm:"size:255" json:"attachment_name,omitempty"`
-	AttachmentType string `gorm:"size:128" json:"attachment_type,omitempty"`
-	AttachmentSize int64  `gorm:"not null;default:0" json:"attachment_size,omitempty"`
-	CreatedByID       uuid.UUID       `gorm:"type:char(36);index;not null" json:"created_by_id"`
-	ApprovedByID      *uuid.UUID      `gorm:"type:char(36);index" json:"approved_by_id,omitempty"`
-	ApprovedAt        *time.Time      `json:"approved_at,omitempty"`
-	VoidedByID        *uuid.UUID      `gorm:"type:char(36);index" json:"voided_by_id,omitempty"`
-	VoidedAt          *time.Time      `json:"voided_at,omitempty"`
-	VoidReason        string          `gorm:"size:512" json:"void_reason,omitempty"`
-	ReversedByTxnID   *uuid.UUID      `gorm:"type:char(36);index" json:"reversed_by_txn_id,omitempty"`
-	ReversesTxnID     *uuid.UUID      `gorm:"type:char(36);index" json:"reverses_txn_id,omitempty"`
+	AttachmentKey   string     `gorm:"size:255" json:"-"`
+	AttachmentName  string     `gorm:"size:255" json:"attachment_name,omitempty"`
+	AttachmentType  string     `gorm:"size:128" json:"attachment_type,omitempty"`
+	AttachmentSize  int64      `gorm:"not null;default:0" json:"attachment_size,omitempty"`
+	CreatedByID     uuid.UUID  `gorm:"type:char(36);index;not null" json:"created_by_id"`
+	ApprovedByID    *uuid.UUID `gorm:"type:char(36);index" json:"approved_by_id,omitempty"`
+	ApprovedAt      *time.Time `json:"approved_at,omitempty"`
+	VoidedByID      *uuid.UUID `gorm:"type:char(36);index" json:"voided_by_id,omitempty"`
+	VoidedAt        *time.Time `json:"voided_at,omitempty"`
+	VoidReason      string     `gorm:"size:512" json:"void_reason,omitempty"`
+	ReversedByTxnID *uuid.UUID `gorm:"type:char(36);index" json:"reversed_by_txn_id,omitempty"`
+	ReversesTxnID   *uuid.UUID `gorm:"type:char(36);index" json:"reverses_txn_id,omitempty"`
 
-	Branch        *Branch        `gorm:"foreignKey:BranchID" json:"branch,omitempty"`
-	Category      *Category      `gorm:"foreignKey:CategoryID" json:"category,omitempty"`
-	PaymentMethod *PaymentMethod `gorm:"foreignKey:PaymentMethodID" json:"payment_method,omitempty"`
+	Branch        *Branch                 `gorm:"foreignKey:BranchID" json:"branch,omitempty"`
+	Category      *Category               `gorm:"foreignKey:CategoryID" json:"category,omitempty"`
+	PaymentMethod *PaymentMethod          `gorm:"foreignKey:PaymentMethodID" json:"payment_method,omitempty"`
 	Attachments   []TransactionAttachment `gorm:"foreignKey:TransactionID" json:"-"`
 }
 
@@ -119,9 +121,9 @@ type TransactionAttachment struct {
 	Size          int64     `gorm:"not null;default:0" json:"size"`
 	// Stage keeps the files from whoever entered the transaction (submitted) apart from the ones
 	// its approver added (approval); the app shows them separately.
-	Stage         string    `gorm:"size:16;not null;default:'submitted'" json:"stage"`
-	CreatedByID   uuid.UUID `gorm:"type:char(36);not null" json:"created_by_id"`
-	CreatedAt     time.Time `json:"created_at"`
+	Stage       string    `gorm:"size:16;not null;default:'submitted'" json:"stage"`
+	CreatedByID uuid.UUID `gorm:"type:char(36);not null" json:"created_by_id"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 func (a *TransactionAttachment) BeforeCreate(tx *gorm.DB) error {

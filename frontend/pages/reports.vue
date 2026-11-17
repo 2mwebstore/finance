@@ -17,32 +17,53 @@
           <span>Report date range</span>
           <DateRangePicker v-model="dateRange" />
         </div>
+        <!-- The currency the Total card exchanges every amount to (USD, the main currency, unless another is picked) -->
+        <div class="control-field currency-field">
+          <span>Currency</span>
+          <SearchSelect v-model="currency" :options="currencyChoices" :searchable="false" aria-label="Report currency" />
+        </div>
         <div v-if="showBranchFilter" class="control-field branch-field">
           <span>Branch</span>
           <SearchSelect v-model="branchFilter" :options="branchOptions" placeholder="All branches" search-placeholder="Search branches…" aria-label="Report branch" />
         </div>
       </div>
-      <p class="control-hint">Updates automatically when the dates or branch change.</p>
+      <p class="control-hint">Updates automatically when the dates, currency or branch change.</p>
     </section>
 
     <div v-if="loading" class="state-card"><span class="mini-spinner"></span> Loading report…</div>
     <div v-else-if="err" class="state-card state-error"><p>{{ err }}</p><button @click="load">Try again</button></div>
     <div v-else-if="data" class="space-y-3">
-      <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        <article v-for="row in currencyRows" :key="row.code" class="rounded-2xl border border-border bg-white p-4 shadow-sm">
+      <!-- Two cards: each currency on its own (left), and every currency exchanged to the chosen one and summed (right) -->
+      <div class="grid grid-cols-1 gap-3 xl:grid-cols-2">
+        <article class="rounded-2xl border border-border bg-white p-4 shadow-sm" aria-label="Report summary">
           <div class="flex items-center justify-between gap-2">
-            <span class="rounded-lg bg-blue-50 px-2 py-1 text-xs font-bold text-primary">{{ row.code }}</span>
-            <small class="text-[11px] text-muted">{{ row.name }}</small>
+            <span class="rounded-lg bg-blue-50 px-2 py-1 text-xs font-bold text-primary">All currencies</span>
           </div>
-          <p class="mt-3 text-[11px] text-muted">Net balance</p>
-          <strong class="text-xl font-bold" :class="Number(row.net) < 0 ? 'text-expense' : 'text-navy'">{{ formatMoney(row.net, row.code) }}</strong>
-          <div class="mt-3 grid grid-cols-2 gap-2 border-t border-border pt-3 text-xs">
-            <p><span class="block text-[11px] text-muted">Income</span><strong class="text-income">{{ formatMoney(row.income, row.code) }}</strong></p>
-            <p><span class="block text-[11px] text-muted">Expense</span><strong class="text-expense">{{ formatMoney(row.expense, row.code) }}</strong></p>
+          <!-- Phones: Income and Expense side by side, Net balance under them -->
+          <div class="keep-cols mt-3 grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3">
+            <div v-for="col in summaryColumns" :key="col.key" class="min-w-0 border-border sm:border-l sm:pl-4" :class="col.key === 'net' ? 'col-span-2 border-t pt-3 sm:col-span-1 sm:border-t-0 sm:pt-0' : ''">
+              <p class="text-[11px] text-muted">{{ col.label }}</p>
+              <p v-for="row in summaryRows" :key="row.code" class="break-words text-base font-bold tabular-nums" :class="amountClass(col.key, row.net)" :title="`${col.label} in ${row.code}`">{{ formatMoney(row[col.key], row.code) }}</p>
+            </div>
+          </div>
+        </article>
+        <article class="rounded-2xl border border-border bg-white p-4 shadow-sm" aria-label="Report total">
+          <div class="flex items-center justify-between gap-2">
+            <span class="rounded-lg bg-blue-50 px-2 py-1 text-xs font-bold text-primary">Total in {{ total.code }}</span>
+            <small class="text-right text-[11px] text-muted">{{ total.rates.length ? total.rates.join(' · ') : total.name }}</small>
+          </div>
+          <div class="keep-cols mt-3 grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3">
+            <div v-for="col in summaryColumns" :key="col.key" class="min-w-0 border-border sm:border-l sm:pl-4" :class="col.key === 'net' ? 'col-span-2 border-t pt-3 sm:col-span-1 sm:border-t-0 sm:pt-0' : ''">
+              <p class="text-[11px] text-muted">{{ col.label }}</p>
+              <p class="break-words text-base font-bold tabular-nums" :class="amountClass(col.key, total.net)">{{ formatMoney(total[col.key], total.code) }}</p>
+            </div>
           </div>
         </article>
       </div>
-      <p class="text-[11px] text-muted">{{ data.transaction_count }} approved transactions in this period. Each currency is shown on its own.</p>
+      <p class="text-[11px] text-muted">
+        {{ data.transaction_count }} approved transactions in this period. All currencies: each currency on its own. Total in {{ total.code }}: every currency exchanged to {{ total.code }} at the rates in Manage → Currency and summed.
+        <template v-if="total.skipped.length"> Not in the total (no rate): {{ total.skipped.join(', ') }}.</template>
+      </p>
     </div>
 
     <div class="mt-4 grid grid-cols-1 gap-4">
@@ -55,7 +76,7 @@
 <script setup lang="ts">
 import { Download } from 'lucide-vue-next'
 import type { DashboardSummary } from '~/types/api'
-import { formatMoney } from '~/utils/money'
+import { currencyMeta, formatMoney } from '~/utils/money'
 import { currentMonthRange } from '~/utils/dateRanges'
 import { useBranchOptions } from '~/composables/useBranchOptions'
 import { useToast } from '~/composables/useToast'
@@ -73,21 +94,83 @@ const loading = ref(true)
 const err = ref('')
 const exporting = ref(false)
 const toast = useToast()
-// A card per currency with amounts in the period (USD and KHR always), in Manage → Currency order.
-const { currencies } = useCurrency()
-const currencyRows = computed(() => {
-  const by = data.value?.by_currency || {
-    USD: { income: data.value?.income_usd || '0', expense: data.value?.expense_usd || '0', net: data.value?.net_usd || '0' },
-    KHR: { income: data.value?.income_khr || '0', expense: data.value?.expense_khr || '0', net: data.value?.net_khr || '0' },
+// Two summary cards of the approved transactions: All currencies, each currency on its own line
+// (nothing converted), and Total, every currency exchanged to the currency picked next to the date range
+// (USD, the main currency, unless another is picked) at the rates in Manage → Currency and summed.
+const { currencies, rateOf, rateLabel } = useCurrency()
+const currency = ref('USD')
+const flows = computed(() => data.value?.by_currency || {
+  USD: { income: data.value?.income_usd || '0', expense: data.value?.expense_usd || '0', net: data.value?.net_usd || '0' },
+  KHR: { income: data.value?.income_khr || '0', expense: data.value?.expense_khr || '0', net: data.value?.net_khr || '0' },
+})
+// The active currencies, in Manage → Currency order (each has a rate to exchange with).
+const currencyChoices = computed(() => currencies.value
+  .filter(c => c.active || c.code === currency.value)
+  .map(c => ({ value: c.code, label: `${c.code} (${c.symbol.trim()})` })))
+const summaryColumns = [
+  { key: 'income', label: 'Income' },
+  { key: 'expense', label: 'Expense' },
+  { key: 'net', label: 'Net balance' },
+] as const
+function rankOf(code: string) {
+  const i = currencies.value.findIndex(c => c.code === code)
+  return i === -1 ? currencies.value.length : i
+}
+// Every active currency, and any other with amounts in the period.
+const summaryRows = computed(() => {
+  const by = flows.value
+  const codes = [...new Set([...currencies.value.filter(c => c.active).map(c => c.code), ...Object.keys(by).filter(code => Number(by[code]?.income) || Number(by[code]?.expense))])]
+    .sort((a, b) => rankOf(a) - rankOf(b) || a.localeCompare(b))
+  return codes.map(code => ({ code, income: by[code]?.income || '0', expense: by[code]?.expense || '0', net: by[code]?.net || '0' }))
+})
+
+// Units of a currency per 1 USD (0: no rate, so it can't be exchanged).
+const unitsPerUSD = (code: string) => code === 'USD' ? 1 : rateOf(code)
+// An amount in `from` in the chosen currency, through USD; null when either has no rate.
+function inChosen(amount: string | number, from: string): number | null {
+  const value = Number(amount) || 0
+  if (from === currency.value) return value
+  const fromRate = unitsPerUSD(from), toRate = unitsPerUSD(currency.value)
+  return fromRate && toRate ? value / fromRate * toRate : null
+}
+function round(value: number, code: string) {
+  const f = 10 ** currencyMeta(code).decimals
+  return Math.round((value + Number.EPSILON) * f) / f
+}
+const total = computed(() => {
+  const code = currency.value
+  let income = 0
+  let expense = 0
+  const skipped: string[] = []
+  const rates: string[] = []
+  for (const row of summaryRows.value) {
+    if (!Number(row.income) && !Number(row.expense)) continue
+    const inc = inChosen(row.income, row.code)
+    const exp = inChosen(row.expense, row.code)
+    if (inc === null || exp === null) {
+      skipped.push(row.code)
+      continue
+    }
+    income += inc
+    expense += exp
+    // The rates used, as "1 USD = ៛4,100".
+    if (row.code !== code) for (const c of [row.code, code]) if (rateLabel(c) && !rates.includes(rateLabel(c))) rates.push(rateLabel(c))
   }
-  const known = currencies.value.map(c => c.code)
-  const codes = [...known.filter(code => code === 'USD' || code === 'KHR' || by[code]), ...Object.keys(by).filter(code => !known.includes(code))]
-  return codes.map(code => ({
+  // Income − Expense = Net as shown (each rounded to the currency's decimals).
+  const totalIncome = round(income, code)
+  const totalExpense = round(expense, code)
+  return {
     code,
     name: currencies.value.find(c => c.code === code)?.name || code,
-    income: by[code]?.income || '0', expense: by[code]?.expense || '0', net: by[code]?.net || '0',
-  }))
+    income: totalIncome, expense: totalExpense, net: round(totalIncome - totalExpense, code),
+    skipped, rates,
+  }
 })
+function amountClass(key: 'income' | 'expense' | 'net', net: string | number) {
+  if (key === 'income') return 'text-income'
+  if (key === 'expense') return 'text-expense'
+  return Number(net) < 0 ? 'text-expense' : 'text-navy'
+}
 
 async function load() {
   loading.value = true
@@ -154,9 +237,10 @@ onMounted(load)
 .export-button:disabled { opacity: .65; cursor: wait; }
 .reports-controls { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px; margin-bottom: 16px; border: 1px solid #e2eaf5; border-radius: 14px; padding: 15px; background: #fff; box-shadow: 0 4px 16px rgb(24 60 110 / 4%); }
 .control-fields { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
-.control-field { display: flex; width: min(360px, 100%); flex-direction: column; gap: 7px; color: #51688e; font-size: 10px; font-weight: 700; }
-.branch-field { width: min(240px, 100%); }
-.branch-field :deep(.search-select-trigger) { font-size: 12px; }
+.control-field { display: flex; width: 360px; max-width: 100%; flex-direction: column; gap: 7px; color: #51688e; font-size: 10px; font-weight: 700; }
+.branch-field { width: 240px; }
+.currency-field { width: 170px; }
+.branch-field :deep(.search-select-trigger), .currency-field :deep(.search-select-trigger) { font-size: 12px; }
 .control-hint { margin: 0; color: #96a4b9; font-size: 10px; }
 .state-card { display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid #e2eaf5; border-radius: 14px; padding: 22px; color: #7184a2; background: #fff; font-size: 12px; }
 .state-error { color: #bd3e50; }
@@ -182,7 +266,7 @@ onMounted(load)
 .income-text { color: #12865f; }
 .expense-text { color: #d94357; }
 @media (max-width: 700px) {
-  .control-fields, .control-field, .branch-field { width: 100%; }
+  .control-fields, .control-field, .branch-field, .currency-field { width: 100%; }
   .reports-heading { display: block; margin-bottom: 18px; }
   .export-button { width: 100%; justify-content: center; margin-top: 14px; }
   .reports-grid { grid-template-columns: 1fr; }

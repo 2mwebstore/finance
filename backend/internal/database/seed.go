@@ -122,6 +122,14 @@ func EnsureRequiredPermissions(db *gorm.DB) error {
 		permissions.WinLoseDelete:             {permissions.WinLoseEdit},
 		permissions.WinLoseReportsRates:       {permissions.WinLoseReportsView},
 		permissions.WinLoseReact:              {permissions.WinLoseView, permissions.WinLoseCreate, permissions.WinLoseEdit, permissions.WinLoseReportsView},
+		// Quotations go with the matching sales rights when they first appear.
+		permissions.QuotationsView:   {permissions.SalesView},
+		permissions.QuotationsCreate: {permissions.SalesCreate},
+		permissions.QuotationsEdit:   {permissions.SalesEdit},
+		permissions.QuotationsDelete: {permissions.SalesVoid},
+		// The customer and supplier lists go to those who can change sales or purchases.
+		permissions.CustomersManage: {permissions.SalesEdit},
+		permissions.SuppliersManage: {permissions.PurchasesEdit},
 	} {
 		required[code] = append([]string{permissions.BranchesManage}, from...)
 	}

@@ -102,7 +102,8 @@ Those PINs are public, so only do this for a private test project, and remove th
 
 ## Attachments in Cloudflare R2
 
-Each transaction can carry one image or PDF (up to 10 MB). Railway's disk is wiped on every deploy, so
+Each transaction can carry one image or PDF (up to 10 MB), and RP's History keeps the Group summary
+images that were downloaded or shared. Railway's disk is wiped on every deploy, so
 set R2 on **api** (create an R2 bucket and an API token with Object Read & Write in Cloudflare):
 
 ```bash

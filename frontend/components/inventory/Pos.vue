@@ -41,10 +41,7 @@
               <MoneyInput :model-value="line.price" :currency="currency" class="h-8 w-full rounded-lg border border-border px-2 text-sm text-navy" :aria-label="mode === 'sale' ? 'Unit price' : 'Unit cost'" @update:model-value="(value) => update(index, { price: value })" />
             </td>
             <td v-if="currency" class="px-2 py-2" data-label="Discount">
-              <span class="flex h-8 overflow-hidden rounded-lg border border-border focus-within:border-primary">
-                <input :value="line.discount" type="text" inputmode="decimal" autocomplete="off" placeholder="0" class="min-w-0 flex-1 border-0 px-2 text-sm text-navy outline-none" aria-label="Line discount" @input="update(index, { discount: ($event.target as HTMLInputElement).value })" />
-                <button type="button" class="shrink-0 border-l border-border bg-canvas px-2 text-xs font-bold text-navy" :title="line.discount_mode === 'percent' ? 'Percent (tap for an amount)' : 'Amount (tap for a percent)'" @click="update(index, { discount_mode: line.discount_mode === 'percent' ? 'amount' : 'percent' })">{{ line.discount_mode === 'percent' ? '%' : symbol }}</button>
-              </span>
+              <InventoryDiscountInput class="h-8" input-class="py-0" :value="line.discount" :mode="line.discount_mode" :currency="currency" aria-label="Line discount" @set="(d) => update(index, { discount: d.value, discount_mode: d.mode })" />
             </td>
             <td v-if="currency" class="whitespace-nowrap px-2 py-2 text-right font-semibold text-navy" data-label="Total">{{ formatMoney(lineTotal(line), currency) }}</td>
             <td class="px-2 py-2 text-right">
@@ -69,7 +66,7 @@
 <script setup lang="ts">
 import { Minus, Plus, Trash2 } from 'lucide-vue-next'
 import type { Currency, DocLineForm, Product } from '~/types/api'
-import { currencyMeta, formatMoney } from '~/utils/money'
+import { formatMoney } from '~/utils/money'
 import { availableQty, cartQty, formatQty, isService, lineDiscount, linesSubtotal } from '~/utils/inventory'
 
 /**
@@ -90,7 +87,6 @@ const emit = defineEmits<{ 'update:modelValue': [lines: DocLineForm[]] }>()
 let nextKey = Date.now()
 
 const showStock = computed(() => props.mode !== 'purchase')
-const symbol = computed(() => currencyMeta(props.currency || 'USD').symbol.trim())
 const subtotal = computed(() => props.currency ? linesSubtotal(props.modelValue, props.currency) : 0)
 const totalQty = computed(() => props.modelValue.reduce((sum, l) => sum + (Number(l.quantity) || 0), 0))
 

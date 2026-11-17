@@ -3,6 +3,8 @@ import { discountAmount, lineDiscount, linesSubtotal, roundMoney } from '~/utils
 
 export interface PosCart {
   branch_id: string
+  /** From the customers list ('' = walk-in); customer is their name. */
+  customer_id?: string
   customer: string
   /** Off the whole sale, typed as an amount or a percent (sent as an amount). */
   discount: string
@@ -17,6 +19,7 @@ export interface HeldSale {
   held_at: string
   currency: string
   total: number
+  customer_id?: string
   customer: string
   discount: string
   discount_mode: DiscountMode
@@ -32,7 +35,7 @@ export interface PosPayment {
   cash?: { received_usd: number; received_khr: number; change_usd: number; change_khr: number; change: number }
 }
 
-const emptyCart = (branchId = ''): PosCart => ({ branch_id: branchId, customer: '', discount: '', discount_mode: 'amount', lines: [] })
+const emptyCart = (branchId = ''): PosCart => ({ branch_id: branchId, customer_id: '', customer: '', discount: '', discount_mode: 'amount', lines: [] })
 
 /**
  * The POS cart. It lives for the browser session, so leaving the till for the back office and
@@ -90,7 +93,7 @@ export function usePosCart(currency: () => string) {
   /** Puts a held sale back in the cart (only the lines whose product is still sold here). */
   function restore(held: HeldSale, keep: (productId: string) => boolean) {
     cart.value = {
-      branch_id: cart.value.branch_id, customer: held.customer, discount: held.discount, discount_mode: held.discount_mode,
+      branch_id: cart.value.branch_id, customer_id: held.customer_id || '', customer: held.customer, discount: held.discount, discount_mode: held.discount_mode,
       lines: held.lines.filter(l => keep(l.product_id)).map(l => ({ ...l, key: nextKey++ })),
     }
     return held.lines.length - cart.value.lines.length

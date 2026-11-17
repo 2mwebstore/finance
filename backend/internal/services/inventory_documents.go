@@ -64,10 +64,11 @@ type parsedLine struct {
 	note      string
 }
 
-// parseLines checks the lines: active products, quantities above zero, and prices or costs (in
-// the document's currency) of zero or more. Services are only sold: purchases and transfers
-// (amountField unit_cost) can't have them.
-func (s *InventoryService) parseLines(ctx context.Context, items []DocItemInput, amountField string) ([]parsedLine, error) {
+// parseLines checks the lines: active products the document's branch can use (shared, or that
+// branch's own; branch nil, for transfers: shared only), quantities above zero, and prices or
+// costs (in the document's currency) of zero or more. Services are only sold: purchases and
+// transfers (amountField unit_cost) can't have them.
+func (s *InventoryService) parseLines(ctx context.Context, items []DocItemInput, amountField string, branch *uuid.UUID) ([]parsedLine, error) {
 	if len(items) == 0 {
 		return nil, fieldError("items", "add at least one product")
 	}
@@ -95,6 +96,12 @@ func (s *InventoryService) parseLines(ctx context.Context, items []DocItemInput,
 		p, ok := byID[ids[i]]
 		if !ok || !p.IsActive {
 			return nil, fieldError("items", fmt.Sprintf("line %d: this product was not found or is inactive", i+1))
+		}
+		if p.BranchID != nil && branch == nil {
+			return nil, fieldError("items", fmt.Sprintf("line %d (%s): this is %s's own product; only shared products move between branches", i+1, p.Name, BranchName(ctx, s.db, *p.BranchID)))
+		}
+		if branch != nil && !usableIn(p.BranchID, *branch) {
+			return nil, fieldError("items", fmt.Sprintf("line %d (%s): this is %s's own product, so another branch can't use it", i+1, p.Name, BranchName(ctx, s.db, *p.BranchID)))
 		}
 		if amountField != "unit_price" && p.Type == models.ProductService {
 			return nil, fieldError("items", fmt.Sprintf("line %d (%s): a service has no stock, so it can't be bought or moved", i+1, p.Name))
@@ -230,7 +237,8 @@ func (s *InventoryService) paymentNames(ctx context.Context, ids []uuid.UUID) ma
 
 type PurchaseInput struct {
 	BranchID        string         `json:"branch_id" binding:"required,uuid"`
-	Supplier        string         `json:"supplier" binding:"max=191"`
+	SupplierID      string         `json:"supplier_id"`                // from the suppliers list
+	Supplier        string         `json:"supplier" binding:"max=191"` // without supplier_id: the name typed
 	PurchaseDate    string         `json:"purchase_date"`
 	Currency        string         `json:"currency" binding:"required,len=3"`
 	PaymentMethodID string         `json:"payment_method_id"` // empty: Cash
@@ -262,7 +270,7 @@ func (s *InventoryService) CreatePurchase(ctx context.Context, in PurchaseInput,
 	if err != nil {
 		return nil, err
 	}
-	lines, err := s.parseLines(ctx, in.Items, "unit_cost")
+	lines, err := s.parseLines(ctx, in.Items, "unit_cost", &branchID)
 	if err != nil {
 		return nil, err
 	}
@@ -270,7 +278,11 @@ func (s *InventoryService) CreatePurchase(ctx context.Context, in PurchaseInput,
 	if err != nil {
 		return nil, err
 	}
-	paymentID, err := s.paymentMethod(ctx, in.PaymentMethodID)
+	paymentID, err := s.paymentMethod(ctx, in.PaymentMethodID, branchID)
+	if err != nil {
+		return nil, err
+	}
+	supplierID, supplier, err := s.pickParty(ctx, Suppliers, in.SupplierID, in.Supplier, nil, branchID)
 	if err != nil {
 		return nil, err
 	}
@@ -286,7 +298,7 @@ func (s *InventoryService) CreatePurchase(ctx context.Context, in PurchaseInput,
 	approved := !in.Pending && s.actorHas(ctx, actor, permissions.PurchasesApprove)
 	purchase := models.Purchase{
 		Base: models.Base{ID: uuid.New()}, Number: number, BranchID: branchID,
-		Supplier: strings.TrimSpace(in.Supplier), PurchaseDate: date, Currency: in.Currency,
+		SupplierID: supplierID, Supplier: supplier, PurchaseDate: date, Currency: in.Currency,
 		Subtotal: subtotal, Discount: discount, Shipping: shipping, Total: total, PaymentMethodID: paymentID,
 		Status: models.DocPending, Note: note, CreatedByID: actor,
 	}
@@ -507,7 +519,8 @@ func (s *InventoryService) purchaseViews(ctx context.Context, list []models.Purc
 
 type SaleInput struct {
 	BranchID        string         `json:"branch_id" binding:"required,uuid"`
-	Customer        string         `json:"customer" binding:"max=191"`
+	CustomerID      string         `json:"customer_id"`                // from the customers list
+	Customer        string         `json:"customer" binding:"max=191"` // without customer_id: the name typed (POS: empty for walk-in)
 	SaleDate        string         `json:"sale_date"`
 	DueDate         string         `json:"due_date"` // optional, not before the sale date
 	Currency        string         `json:"currency" binding:"required,len=3"`
@@ -516,6 +529,8 @@ type SaleInput struct {
 	Shipping        string         `json:"shipping"`          // charged to the customer
 	Note            string         `json:"note"`              // rich text
 	Items           []DocItemInput `json:"items" binding:"required,dive"`
+	// keepCustomer: a sale made from a quotation keeps its customer, even one turned off since.
+	keepCustomer *uuid.UUID
 }
 
 type SaleView struct {
@@ -527,6 +542,9 @@ type SaleView struct {
 	CreatedBy     string          `json:"created_by"`
 	VoidedBy      string          `json:"voided_by"`
 	Lines         []DocLineView   `json:"lines"`
+	// The quotation the sale was made from, if any.
+	QuotationID     *uuid.UUID `json:"quotation_id,omitempty"`
+	QuotationNumber string     `json:"quotation_number,omitempty"`
 }
 
 // parseDueDate reads a sale's optional due date, which can't be before the sale date.
@@ -545,6 +563,20 @@ func (s *InventoryService) parseDueDate(raw string, saleDate time.Time) (*time.T
 }
 
 func (s *InventoryService) CreateSale(ctx context.Context, in SaleInput, scope BranchScope, actor uuid.UUID) (*SaleView, error) {
+	sale, err := s.newSale(ctx, in, scope, actor)
+	if err != nil {
+		return nil, err
+	}
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error { return s.saveNewSale(tx, sale, actor) })
+	if err != nil {
+		return nil, s.describeShort(ctx, err)
+	}
+	return s.GetSale(ctx, sale.ID, scope)
+}
+
+// newSale checks a new sale and works out its number, lines and totals; no stock has moved yet
+// (see saveNewSale).
+func (s *InventoryService) newSale(ctx context.Context, in SaleInput, scope BranchScope, actor uuid.UUID) (*models.Sale, error) {
 	branchID := uuid.MustParse(in.BranchID)
 	if !scope.Has(branchID) {
 		return nil, ErrBranchAccessDenied
@@ -557,11 +589,18 @@ func (s *InventoryService) CreateSale(ctx context.Context, in SaleInput, scope B
 	if err != nil {
 		return nil, err
 	}
-	paymentID, err := s.paymentMethod(ctx, in.PaymentMethodID)
+	paymentID, err := s.paymentMethod(ctx, in.PaymentMethodID, branchID)
 	if err != nil {
 		return nil, err
 	}
-	lines, err := s.parseLines(ctx, in.Items, "unit_price")
+	if in.keepCustomer != nil && in.CustomerID == "" {
+		in.CustomerID = in.keepCustomer.String()
+	}
+	customerID, customer, err := s.pickParty(ctx, Customers, in.CustomerID, in.Customer, in.keepCustomer, branchID)
+	if err != nil {
+		return nil, err
+	}
+	lines, err := s.parseLines(ctx, in.Items, "unit_price", &branchID)
 	if err != nil {
 		return nil, err
 	}
@@ -579,7 +618,7 @@ func (s *InventoryService) CreateSale(ctx context.Context, in SaleInput, scope B
 	}
 	sale := models.Sale{
 		Base: models.Base{ID: uuid.New()}, Number: number, BranchID: branchID,
-		Customer: strings.TrimSpace(in.Customer), SaleDate: date, DueDate: due, Currency: in.Currency, PaymentMethodID: paymentID,
+		CustomerID: customerID, Customer: customer, SaleDate: date, DueDate: due, Currency: in.Currency, PaymentMethodID: paymentID,
 		Subtotal: subtotal, Discount: discount, Shipping: shipping, Total: total,
 		Status: models.DocCompleted, Note: note, CreatedByID: actor,
 	}
@@ -598,29 +637,28 @@ func (s *InventoryService) CreateSale(ctx context.Context, in SaleInput, scope B
 			UnitPrice: l.amount, Discount: l.discount, LineTotal: l.lineTotal, NetTotal: net, NetTotalBase: toBase(net, in.Currency, rate), Note: l.note,
 		}
 	}
-	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Stock goes out first, so each line records the average cost it left at.
-		for _, i := range lockOrder(len(sale.Items), func(i int) uuid.UUID { return sale.Items[i].ProductID }) {
-			cost, err := s.applyMove(tx, move{
-				branchID: branchID, productID: sale.Items[i].ProductID, qty: sale.Items[i].Quantity.Neg(),
-				kind: models.MoveSale, refType: "sale", refID: &sale.ID, refNumber: number, actor: actor,
-			})
-			if err != nil {
-				return err
-			}
-			sale.Items[i].UnitCost = cost
+	return &sale, nil
+}
+
+// saveNewSale takes a new sale's goods out of stock and saves it, in tx. The stock goes out first,
+// so each line records the average cost it left at.
+func (s *InventoryService) saveNewSale(tx *gorm.DB, sale *models.Sale, actor uuid.UUID) error {
+	for _, i := range lockOrder(len(sale.Items), func(i int) uuid.UUID { return sale.Items[i].ProductID }) {
+		cost, err := s.applyMove(tx, move{
+			branchID: sale.BranchID, productID: sale.Items[i].ProductID, qty: sale.Items[i].Quantity.Neg(),
+			kind: models.MoveSale, refType: "sale", refID: &sale.ID, refNumber: sale.Number, actor: actor,
+		})
+		if err != nil {
+			return err
 		}
-		totalCost := decimal.Zero
-		for _, it := range sale.Items {
-			totalCost = totalCost.Add(it.Quantity.Mul(it.UnitCost).Round(4))
-		}
-		sale.TotalCost = totalCost
-		return tx.Create(&sale).Error
-	})
-	if err != nil {
-		return nil, s.describeShort(ctx, err)
+		sale.Items[i].UnitCost = cost
 	}
-	return s.GetSale(ctx, sale.ID, scope)
+	totalCost := decimal.Zero
+	for _, it := range sale.Items {
+		totalCost = totalCost.Add(it.Quantity.Mul(it.UnitCost).Round(4))
+	}
+	sale.TotalCost = totalCost
+	return tx.Create(sale).Error
 }
 
 // VoidSale cancels a sale and puts its goods back into stock at the cost they left at.
@@ -714,10 +752,14 @@ func (s *InventoryService) saleViews(ctx context.Context, list []models.Sale) []
 	}
 	book := s.lookup(ctx, users, branches, products)
 	paymentNames := s.paymentNames(ctx, payments)
+	fromQuote := s.quotationsOfSales(ctx, list)
 	out := make([]SaleView, len(list))
 	for i, sale := range list {
 		v := SaleView{Sale: sale, BranchCode: book.branches[sale.BranchID].Code, BranchName: book.branches[sale.BranchID].Name,
 			CreatedBy: book.users[sale.CreatedByID], Profit: sale.TotalBase.Sub(sale.TotalCost)}
+		if q, ok := fromQuote[sale.ID]; ok {
+			v.QuotationID, v.QuotationNumber = &q.ID, q.Number
+		}
 		if sale.PaymentMethodID != nil {
 			v.PaymentMethod = paymentNames[*sale.PaymentMethodID]
 		}
@@ -767,7 +809,7 @@ func (s *InventoryService) CreateTransfer(ctx context.Context, in TransferInput,
 	if err != nil {
 		return nil, err
 	}
-	lines, err := s.parseLines(ctx, in.Items, "unit_cost")
+	lines, err := s.parseLines(ctx, in.Items, "unit_cost", nil)
 	if err != nil {
 		return nil, err
 	}
