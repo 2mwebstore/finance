@@ -1,0 +1,93 @@
+# The whole app on one VPS, e.g. with Hostinger's Docker Manager (see docs/DEPLOY_HOSTINGER.md):
+#   mysql  the database (not reachable from outside)
+#   app    the website, API and nginx in one image, built from ./Dockerfile
+#   caddy  serves your domains over HTTPS on ports 80/443 and gets their certificates by itself
+#
+# Settings come from a .env file next to this file (or Docker Manager's environment variables).
+# The list is in deploy/hostinger.env.example. Required: DOMAINS, CORS_ORIGINS, MYSQL_ROOT_PASSWORD,
+# DB_PASSWORD, JWT_SECRET.
+#
+# Data is kept in folders under DATA_DIR (default ./data, next to this file; e.g. /var/www/finance/data):
+#   mysql/         the database
+#   app/backups/   the app's backups;  app/uploads/  uploaded files (receipts, product pictures…)
+#   caddy/, caddy-config/   HTTPS certificates
+# git and Docker builds leave ./data out. Deleting it deletes the data.
+
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${DB_NAME:-income_expense}
+      MYSQL_USER: ${DB_USER:-finance}
+      MYSQL_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD}
+      TZ: Asia/Phnom_Penh
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_0900_ai_ci"]
+    volumes:
+      - ${DATA_DIR:-./data}/mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      APP_ENV: production
+      TZ: Asia/Phnom_Penh
+      # Creates and updates the tables on start (a new database needs it).
+      AUTO_MIGRATE: "true"
+      DB_HOST: mysql
+      DB_PORT: "3306"
+      DB_USER: ${DB_USER:-finance}
+      DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD}
+      DB_NAME: ${DB_NAME:-income_expense}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET (at least 32 random characters)}
+      CORS_ORIGINS: ${CORS_ORIGINS:?set CORS_ORIGINS, e.g. https://rp001.pro,https://rph001.pro}
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      COOKIE_SAME_SITE: Strict
+      # Only for creating the first admin on a new database; empty it afterwards.
+      SETUP_TOKEN: ${SETUP_TOKEN:-}
+      BACKUP_DIR: /data/backups
+      UPLOAD_DIR: /data/uploads
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+    volumes:
+      - ${DATA_DIR:-./data}/app:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/health >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+      - "${HTTPS_PORT:-443}:443/udp"
+    environment:
+      # The site's addresses, comma-separated, e.g. "rp001.pro, rph001.pro". Each must point (DNS A
+      # record) at this server for its certificate to be issued; Caddy keeps retrying until it does.
+      DOMAINS: ${DOMAINS:?set DOMAINS, e.g. rp001.pro, rph001.pro}
+    # The Caddyfile is written at start from DOMAINS, so the project needs no other files.
+    command:
+      - sh
+      - -c
+      - |
+        printf '%s {\n\tencode zstd gzip\n\treverse_proxy app:8080\n}\n' "$$DOMAINS" > /etc/caddy/Caddyfile
+        exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
+    volumes:
+      - ${DATA_DIR:-./data}/caddy:/data
+      - ${DATA_DIR:-./data}/caddy-config:/config

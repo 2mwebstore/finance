@@ -4,8 +4,14 @@
 .DS_Store
 .env
 .env.*
+**/.env
+**/.env.*
 !.env.prod.example
+**/.nuxt
+**/.output
 **/node_modules
 **/dist
 **/vendor
 **/.DS_Store
+# docker-compose.yml's data folder (database files, backups) on a server
+data
