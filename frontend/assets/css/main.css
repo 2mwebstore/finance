@@ -76,7 +76,24 @@ button { -webkit-tap-highlight-color: transparent; }
 .action-success { color: #11815e; background: #e3f6ee; }
 .action-success:hover:not(:disabled) { background: #cfeee1; }
 
-/* Win/lose report tables (Weekly report, Group summary, an entry's page): on phones smaller text
+/* Data entry's agent tables (New entry, Update, an entry's View page). The row's number shows in its
+   own column, or before the agent on phones, where each agent becomes a card: its number and name,
+   then the two amounts side by side. */
+.wl-table .row-no-inline { display: none; }
+@media (max-width: 639px) {
+  .wl-table .row-no-inline { display: inline; }
+  .wl-table thead { display: none; }
+  .wl-table, .wl-table tbody, .wl-table tr, .wl-table td { display: block; width: 100%; }
+  .wl-table tbody tr:not(.empty-row) { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; padding: 12px; }
+  .wl-table tbody tr:not(.empty-row) td { padding: 0; text-align: left; }
+  .wl-table tbody tr:not(.empty-row) td.row-no { display: none; }
+  .wl-table tbody tr:not(.empty-row) td:nth-child(2) { grid-column: 1 / -1; }
+  .wl-table tbody tr:not(.empty-row) td.row-save { grid-column: 1 / -1; text-align: right; }
+  .wl-table tbody tr:not(.empty-row) td.row-save:empty { display: none; }
+  .wl-table td[data-label]::before { content: attr(data-label); display: block; margin-bottom: 3px; color: #64748b; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+}
+
+/* Win/lose report tables (Weekly report, Group summary): on phones smaller text
    (scaled to the screen) and tighter cells, so they fit without scrolling sideways; amounts stay on
    one line. */
 .report-table { width: 100%; text-align: left; font-size: clamp(7px, 2.45vw, 9.5px); line-height: 1.35; }

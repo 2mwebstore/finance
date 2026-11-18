@@ -170,6 +170,10 @@ type PlatformInput struct {
 	// Groups (optional): the groups the agent is in, each at its rate and type. Missing: they stay
 	// as they are; empty: it is taken out of every group (see setPlatformGroups).
 	Groups *[]PlatformGroupInput `json:"groups" binding:"omitempty,max=100,dive"`
+	// GroupsAddOnly (set by the API, never sent): with Add Agents to Groups but not Update Group Agent
+	// Assignments, Groups may only put the agent in more groups; the groups it is in must come back
+	// as they are (same rate and type).
+	GroupsAddOnly bool `json:"-"`
 }
 
 // PlatformGroupInput is one group an agent is in, with its rate there (percent: 35 = 35%) and its
@@ -407,7 +411,7 @@ func (s *PlatformService) SavePlatformWithGroups(ctx context.Context, id *uuid.U
 		if in.Groups == nil {
 			return nil
 		}
-		changes, err = s.setPlatformGroups(ctx, tx, p, *in.Groups, scope, actor)
+		changes, err = s.setPlatformGroups(ctx, tx, p, *in.Groups, in.GroupsAddOnly, scope, actor)
 		return err
 	})
 	if err != nil {

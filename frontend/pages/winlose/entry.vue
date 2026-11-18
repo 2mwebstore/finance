@@ -49,6 +49,8 @@
                 <!-- On phones the buttons are icons only. -->
                 <div class="flex justify-end gap-1 sm:flex-wrap sm:gap-1.5">
                   <NuxtLink :to="`/winlose/entries/${e.id}`" class="action-chip" title="View"><Eye :size="13" /> <span class="max-sm:sr-only">View</span></NuxtLink>
+                  <!-- Add agents: only the agents not saved on the entry yet (the saved ones and the title stay) -->
+                  <button v-if="canCreate || canAddAgents" type="button" class="action-chip action-success" title="Add agents" @click="openAdd(e)"><UserPlus :size="13" /> <span class="max-sm:sr-only">Add agents</span></button>
                   <button v-if="canCreate || canEdit" type="button" class="action-chip action-edit" title="Update" @click="openEdit(e)"><Pencil :size="13" /> <span class="max-sm:sr-only">Update</span></button>
                   <button v-if="canDelete" type="button" class="action-chip action-danger" title="Delete" @click="deleting = e"><Trash2 :size="13" /> <span class="max-sm:sr-only">Delete</span></button>
                 </div>
@@ -66,7 +68,8 @@
       <header class="space-y-2">
         <!-- Back to the entries (asks first when something isn't saved) -->
         <button type="button" class="inline-flex items-center gap-1 rounded-lg border border-border bg-white px-3 py-1.5 text-xs font-semibold text-navy hover:bg-canvas" @click="closeForm"><ChevronLeft :size="14" /> Back</button>
-        <h1 class="text-xl font-bold text-navy">{{ form.mode === 'new' && !sheet?.entry ? 'New entry' : canSave ? 'Update entry' : 'Entry' }}</h1>
+        <h1 class="text-xl font-bold text-navy">{{ form.mode === 'add' ? 'Add agents' : form.mode === 'new' && !sheet?.entry ? 'New entry' : canSave ? 'Update entry' : 'Entry' }}</h1>
+        <p v-if="form.mode === 'add'" class="text-xs text-muted">Only the agents not saved on this entry yet are listed; each Save puts that agent in. The title and the amounts already saved stay as they are.</p>
       </header>
 
       <!-- A new entry is for this week; one being updated keeps its own. The title saves on its own
@@ -80,37 +83,16 @@
       <div class="space-y-1">
         <label for="entry-title" class="block text-xs font-medium text-muted">Title</label>
         <div class="flex items-center gap-2">
-          <input id="entry-title" v-model="title" maxlength="128" :disabled="!canSave" :aria-invalid="titleMissing ? 'true' : undefined" class="h-10 min-w-0 flex-1 rounded-lg border border-border px-3 text-sm text-navy disabled:bg-canvas disabled:text-muted" placeholder="e.g. Week (01-06)" />
-          <button v-if="canSave && titleChanged && title.trim()" type="button" class="action-chip action-success" :disabled="saving" @click="trySave(null)"><Save :size="13" /> {{ saving && !only ? 'Saving…' : 'Save' }}</button>
+          <input id="entry-title" v-model="title" maxlength="128" :disabled="!canSave || form.mode === 'add'" :aria-invalid="titleMissing ? 'true' : undefined" class="h-10 min-w-0 flex-1 rounded-lg border border-border px-3 text-sm text-navy disabled:bg-canvas disabled:text-muted" placeholder="e.g. Week (01-06)" />
+          <button v-if="canSave && form.mode !== 'add' && titleChanged && title.trim()" type="button" class="action-chip action-success" :disabled="saving" @click="trySave(null)"><Save :size="13" /> {{ saving && !only ? 'Saving…' : 'Save' }}</button>
         </div>
       </div>
 
       <div v-if="loading" class="text-sm text-muted">Loading the week…</div>
       <AppAlert v-else-if="error" title="Couldn’t load the week" :message="error"><template #action><button type="button" @click="load">Try again</button></template></AppAlert>
       <template v-else-if="sheet">
-        <!-- Finds an agent by user or name, and puts each currency's agents A to Z or Z to A; what was
-             typed in the others stays -->
-        <div v-if="sheet.rows.length" class="flex flex-wrap items-center gap-2">
-          <div class="min-w-0 flex-1 sm:max-w-sm"><ListSearch v-model="agentSearch" :delay="150" placeholder="Search agent…" /></div>
-          <div class="flex items-center gap-0.5 rounded-lg bg-canvas p-1" role="radiogroup" aria-label="Sort agents">
-            <span class="px-1.5 text-[11px] font-semibold text-muted">Sort</span>
-            <button v-for="o in SORTS" :key="o.value" type="button" role="radio" :aria-checked="sort === o.value" class="rounded-md px-2.5 py-1 text-xs font-semibold" :class="sort === o.value ? 'bg-white text-primary shadow-sm' : 'text-muted hover:text-navy'" @click="sort = o.value">{{ o.label }}</button>
-          </div>
-        </div>
-        <!-- Only the agents in one currency, or whose code starts with SBK_, SBU_, 12K_ … (All: every one) -->
-        <div v-if="currencies.length || prefixes.length" class="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-          <div v-if="currencies.length" class="flex flex-wrap items-center gap-1.5" role="radiogroup" aria-label="Currency">
-            <button v-for="c in [{ value: '', label: 'All', count: sheet.rows.length }, ...currencies]" :key="c.value || 'all'" type="button" role="radio" :aria-checked="currency === c.value" class="inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-semibold" :class="currency === c.value ? 'border-primary bg-blue-50 text-primary' : 'border-border bg-white text-muted hover:text-navy'" @click="chosenCurrency = c.value">
-              <span>{{ c.label }}</span><span class="font-normal opacity-70">{{ c.count }}</span>
-            </button>
-          </div>
-          <span v-if="currencies.length && prefixes.length" class="h-5 w-px bg-border" aria-hidden="true" />
-          <div v-if="prefixes.length" class="flex flex-wrap items-center gap-1.5" role="radiogroup" aria-label="Agents">
-            <button v-for="p in [{ value: '', label: 'All', count: sheet.rows.length }, ...prefixes]" :key="p.value || 'all'" type="button" role="radio" :aria-checked="prefix === p.value" class="inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-semibold" :class="prefix === p.value ? 'border-primary bg-blue-50 text-primary' : 'border-border bg-white text-muted hover:text-navy'" @click="chosenPrefix = p.value">
-              <span :class="p.value ? 'font-mono' : ''">{{ p.label }}</span><span class="font-normal opacity-70">{{ p.count }}</span>
-            </button>
-          </div>
-        </div>
+        <!-- Search, sort, and one currency or code start (what was typed in the agents hidden stays) -->
+        <WinloseAgentFilters v-if="shownRows.length" v-model:search="agentSearch" v-model:sort="sort" v-model:currency="currency" v-model:prefix="prefix" :currencies="currencies" :prefixes="prefixes" :total="shownRows.length" />
         <!-- Like the Report: one table per currency, USD first then KHR, each numbered from 1 (one
              table with the message when no agent is shown) -->
         <div v-for="part in agentTables.length ? agentTables : [{ currency: '', rows: [] }]" :key="part.currency || 'none'" class="overflow-hidden rounded-xl border border-border bg-white">
@@ -150,7 +132,8 @@
                   <button v-if="editable(row)" type="button" class="action-chip action-success" :disabled="!changed(row) || rowInvalid(row) || saving" :aria-label="`Save ${row.platform_code}`" @click="trySave(row)"><Save :size="13" /> {{ saving && only?.platform_id === row.platform_id ? 'Saving…' : 'Save' }}</button>
                 </td>
               </tr>
-              <tr v-if="!sheet.rows.length" class="empty-row"><td :colspan="canSave ? 5 : 4" class="px-3 py-8 text-center text-sm text-muted">No agents are turned on.<NuxtLink v-if="can('platforms.create')" to="/admin/platforms" class="ml-1 font-semibold text-primary">Agents</NuxtLink></td></tr>
+              <tr v-if="!shownRows.length && form.mode === 'add'" class="empty-row"><td :colspan="canSave ? 5 : 4" class="px-3 py-8 text-center text-sm text-muted">Every agent on this entry is saved: none is left to add.</td></tr>
+              <tr v-else-if="!sheet.rows.length" class="empty-row"><td :colspan="canSave ? 5 : 4" class="px-3 py-8 text-center text-sm text-muted">No agents are turned on.<NuxtLink v-if="can('platforms.create')" to="/admin/platforms" class="ml-1 font-semibold text-primary">Agents</NuxtLink></td></tr>
               <tr v-else-if="!part.currency" class="empty-row"><td :colspan="canSave ? 5 : 4" class="px-3 py-8 text-center text-sm text-muted">{{ noMatch }}</td></tr>
             </tbody>
           </table>
@@ -173,14 +156,15 @@
 </template>
 
 <script setup lang="ts">
-import { ChevronLeft, Eye, FileSpreadsheet, Pencil, Plus, Save, Trash2 } from 'lucide-vue-next'
+import { ChevronLeft, Eye, FileSpreadsheet, Pencil, Plus, Save, Trash2, UserPlus } from 'lucide-vue-next'
 import type { WeekSheet, WeekSheetRow, WinLoseEntry } from '~/types/api'
 import { useToast } from '~/composables/useToast'
 import { useInfiniteList } from '~/composables/useInfiniteList'
 import { useRpBranch } from '~/composables/useRpBranch'
+import { SHEET_ROW_FIELDS, useAgentFilter } from '~/composables/useAgentFilter'
 import { currentMonthRange } from '~/utils/dateRanges'
 import { formatDocDate, todayISO } from '~/utils/inventory'
-import { byAgentCode, byCurrency, currencyTables, mondayOf } from '~/utils/winlose'
+import { mondayOf } from '~/utils/winlose'
 
 const { api } = useApi()
 const { can } = usePermissions()
@@ -188,6 +172,8 @@ const toast = useToast()
 const canCreate = computed(() => can('winlose.create'))
 const canEdit = computed(() => can('winlose.edit'))
 const canDelete = computed(() => can('winlose.delete'))
+// Add Agents to Data Entry: agents not yet saved, on an entry that exists.
+const canAddAgents = computed(() => can('winlose.add-agents'))
 const today = todayISO()
 
 // --- the list ---
@@ -236,73 +222,19 @@ async function deleteEntry(reason: string) {
 
 // --- the form: a new entry is for this week, in the person's own group (the API works it out) ---
 // A new entry has no id until its first save; the saves after change only that entry.
-const form = ref<{ mode: 'new' | 'edit'; week_start: string; entry_id: string; branch_id: string } | null>(null)
+// add: Add agents, only the agents not saved on the entry when it opened (saved ones stay as they are).
+const form = ref<{ mode: 'new' | 'edit' | 'add'; week_start: string; entry_id: string; branch_id: string } | null>(null)
 const sheet = ref<WeekSheet | null>(null)
 const loading = ref(false)
 const error = ref('')
 const title = ref('')
 const edits = reactive<Record<string, { win_lose: string; commission: string }>>({})
-// The agents shown, like the Report: a table per currency (USD first, then KHR), its agents in the
-// order chosen and numbered in it; then only those of the currency and the code start chosen (All:
-// every one) matching the search by user or name, each keeping its number.
-const agentSearch = ref('')
-const SORTS = [
-  { value: 'name', label: 'A to Z' },
-  { value: 'desc', label: 'Z to A' },
-] as const
-const sort = ref<(typeof SORTS)[number]['value']>('name')
-// The currencies the entry's agents are in (USD first), each with how many: buttons only with two.
-const currencies = computed(() => {
-  const counts = new Map<string, number>()
-  for (const row of sheet.value?.rows || []) counts.set(row.currency, (counts.get(row.currency) || 0) + 1)
-  if (counts.size < 2) return []
-  return [...counts].sort(([a], [b]) => byCurrency(a, b)).map(([value, count]) => ({ value, label: value, count }))
-})
-const chosenCurrency = ref('')
-const currency = computed(() => (currencies.value.some(c => c.value === chosenCurrency.value) ? chosenCurrency.value : ''))
-// A code's start: up to its first "_" (SBK_, SBU_, 12K_ …), in capitals; '' when it has none.
-const prefixOf = (code: string) => {
-  const at = code.indexOf('_')
-  return at > 0 ? code.slice(0, at + 1).toUpperCase() : ''
-}
-// The starts the entry's agents have, A to Z, each with how many: buttons only when they split the
-// agents (not when every agent has the same one).
-const prefixes = computed(() => {
-  const rows = sheet.value?.rows || []
-  const counts = new Map<string, number>()
-  for (const row of rows) {
-    const p = prefixOf(row.platform_code)
-    if (p) counts.set(p, (counts.get(p) || 0) + 1)
-  }
-  if (counts.size === 1 && [...counts.values()][0] === rows.length) return []
-  return [...counts].sort(([a], [b]) => byAgentCode(a, b)).map(([value, count]) => ({ value, label: value, count }))
-})
-const chosenPrefix = ref('')
-// What was chosen, while the entry's agents still have it.
-const prefix = computed(() => (prefixes.value.some(p => p.value === chosenPrefix.value) ? chosenPrefix.value : ''))
-const agentTables = computed(() => {
-  const list = [...(sheet.value?.rows || [])].sort((a, b) => byAgentCode(a.platform_code, b.platform_code))
-  if (sort.value === 'desc') list.reverse()
-  const q = agentSearch.value.trim().toLowerCase()
-  const shown = (row: WeekSheetRow) => (!currency.value || row.currency === currency.value)
-    && (!prefix.value || prefixOf(row.platform_code) === prefix.value)
-    && (!q || row.platform_code.toLowerCase().includes(q) || (row.platform_name || '').toLowerCase().includes(q))
-  return currencyTables(list, row => row.currency)
-    .map(t => ({ currency: t.currency, rows: t.rows.map((row, i) => ({ row, no: i + 1 })).filter(({ row }) => shown(row)) }))
-    .filter(t => t.rows.length)
-})
-const noMatch = computed(() => {
-  const q = agentSearch.value.trim()
-  const within = [currency.value, prefix.value].filter(Boolean).join(' · ')
-  return `No agent matches${q ? ` “${q}”` : ''}${within ? ` in ${within}` : ''}.`
-})
-// Each New entry or Update starts on every agent, A to Z.
-function resetAgentFilters() {
-  agentSearch.value = ''
-  chosenPrefix.value = ''
-  chosenCurrency.value = ''
-  sort.value = 'name'
-}
+// The agents shown: a table per currency, with search, sort and currency / code start (as on an
+// entry's View page). Each New entry or Update starts on every agent, A to Z.
+// Add agents lists only the agents not saved when the entry opened (one saved there then stays, locked).
+const addIds = ref<string[]>([])
+const shownRows = computed(() => form.value?.mode === 'add' ? (sheet.value?.rows || []).filter(r => addIds.value.includes(r.platform_id)) : sheet.value?.rows || [])
+const { search: agentSearch, sort, currencies, currency, prefixes, prefix, tables: agentTables, noMatch, reset: resetAgentFilters } = useAgentFilter(() => shownRows.value, SHEET_ROW_FIELDS)
 
 function openNew() {
   // A new entry is in the branch chosen (else the person's own; with one branch the API picks it).
@@ -312,11 +244,12 @@ function openNew() {
 }
 // Another branch for a new entry has other agents: the sheet is loaded again.
 watch(() => form.value?.branch_id, () => { if (form.value?.mode === 'new' && !form.value.entry_id) load() })
-function openEdit(e: WinLoseEntry) {
+function openEdit(e: WinLoseEntry, mode: 'edit' | 'add' = 'edit') {
   resetAgentFilters()
-  form.value = { mode: 'edit', week_start: e.week_start, entry_id: e.id, branch_id: e.branch_id }
+  form.value = { mode, week_start: e.week_start, entry_id: e.id, branch_id: e.branch_id }
   load()
 }
+const openAdd = (e: WinLoseEntry) => openEdit(e, 'add')
 function closeForm() {
   if (dirty.value && !window.confirm('Leave this entry without saving your changes?')) return
   form.value = null
@@ -350,6 +283,7 @@ async function load() {
     const result = await api<WeekSheet>('/winlose/entry', { query: form.value.entry_id ? { entry_id: form.value.entry_id } : { week_start: form.value.week_start, branch_id: form.value.branch_id || undefined } })
     if (request !== loadRequest) return
     sheet.value = result
+    addIds.value = result.rows.filter(r => !r.saved).map(r => r.platform_id)
     resetEdits()
   } catch (e: any) {
     if (request === loadRequest) { sheet.value = null; error.value = e?.data?.error || 'Could not load the week.' }
@@ -368,12 +302,14 @@ const titleChanged = computed(() => !!sheet.value && title.value.trim() !== (she
 const titleMissing = computed(() => !!saveError.value && !title.value.trim())
 const dirty = computed(() => !!sheet.value && (titleChanged.value || sheet.value.rows.some(changed)))
 const hasInvalid = computed(() => Object.values(edits).some(e => invalid(e.win_lose) || invalid(e.commission)))
-// Saving needs Enter Win/Lose for a new entry or new rows, Correct Win/Lose for saved ones.
-const canSave = computed(() => !!sheet.value && (canCreate.value || canEdit.value))
+// Saving needs Add Data Entry for a new entry or new rows (on an entry that exists Add Agents to Data
+// Entry is enough), Update Data Entry for saved ones (never in Add agents).
+const canFillNew = computed(() => canCreate.value || (canAddAgents.value && !!sheet.value?.entry))
+const canSave = computed(() => !!sheet.value && (canFillNew.value || (form.value?.mode !== 'add' && canEdit.value)))
 
 function editable(row: WeekSheetRow) {
   if (!canSave.value) return false
-  return row.saved ? canEdit.value : canCreate.value
+  return row.saved ? form.value?.mode !== 'add' && canEdit.value : canFillNew.value
 }
 
 function statusOf(row: WeekSheetRow) {
@@ -429,7 +365,7 @@ async function save(reason: string) {
     reasonOpen.value = false
     // Stay on the entry: the agent saved shows what was saved, the others keep what was typed.
     sheet.value = saved
-    form.value = { mode: 'edit', week_start: saved.week_start, entry_id: saved.entry?.id || form.value.entry_id, branch_id: saved.branch_id }
+    form.value = { mode: form.value.mode === 'add' ? 'add' : 'edit', week_start: saved.week_start, entry_id: saved.entry?.id || form.value.entry_id, branch_id: saved.branch_id }
     for (const r of saved.rows) {
       if (r.platform_id === row?.platform_id || !edits[r.platform_id]) edits[r.platform_id] = { win_lose: asText(r.win_lose), commission: asText(r.commission) }
     }
@@ -442,22 +378,3 @@ async function save(reason: string) {
   }
 }
 </script>
-
-<style scoped>
-/* The row's number shows in its own column, or before the agent on phones. */
-.row-no-inline { display: none; }
-
-/* Phones: each agent becomes a card: its number and name, then the two amounts side by side. */
-@media (max-width: 639px) {
-  .row-no-inline { display: inline; }
-  .wl-table thead { display: none; }
-  .wl-table, .wl-table tbody, .wl-table tr, .wl-table td { display: block; width: 100%; }
-  .wl-table tbody tr:not(.empty-row) { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; padding: 12px; }
-  .wl-table tbody tr:not(.empty-row) td { padding: 0; text-align: left; }
-  .wl-table tbody tr:not(.empty-row) td.row-no { display: none; }
-  .wl-table tbody tr:not(.empty-row) td:nth-child(2) { grid-column: 1 / -1; }
-  .wl-table tbody tr:not(.empty-row) td.row-save { grid-column: 1 / -1; text-align: right; }
-  .wl-table tbody tr:not(.empty-row) td.row-save:empty { display: none; }
-  .wl-table td[data-label]::before { content: attr(data-label); display: block; margin-bottom: 3px; color: #64748b; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
-}
-</style>

@@ -24,21 +24,85 @@
         <span>Groups <span class="font-normal">(optional)</span></span>
         <p v-if="groupsLoading" class="h-10 rounded-lg border border-border bg-canvas px-3 py-2.5 text-sm font-normal">Loading groups…</p>
         <p v-else-if="groupsError" class="rounded-lg bg-red-50 px-3 py-2 text-xs font-normal text-expense">{{ groupsError }} Groups are left as they are.</p>
-        <SearchSelect v-else v-model="groupIds" multiple :options="groupOptions" placeholder="No group" empty-text="No groups for this branch" aria-label="Groups" />
+        <!-- As on Add group: a pick closes the list; a group picked can't be unpicked here (✕ below takes it out) -->
+        <SearchSelect v-else v-model="groupIds" multiple close-on-select :options="groupOptions" placeholder="Choose one or more groups" empty-text="No groups for this branch" aria-label="Groups" />
       </div>
       <p v-else-if="editing && !editing.is_active" class="rounded-lg bg-canvas px-3 py-2 text-[11px] text-muted">This agent is turned off, so it can’t be in a group: turn it on in the list first.</p>
-      <!-- Each group picked, with the agent's type and rate in it -->
-      <ul v-if="showGroups && !groupsLoading && !groupsError && chosenGroups.length" class="space-y-1.5">
-        <li v-for="g in chosenGroups" :key="g.id" class="flex flex-wrap items-center gap-x-2 gap-y-1.5 rounded-lg border border-border px-2.5 py-2">
-          <span class="min-w-0 flex-1 basis-full truncate text-sm font-semibold text-navy sm:basis-0">{{ g.title }}<span v-if="!g.is_active" class="ml-1 text-[11px] font-normal text-muted">(off)</span><span v-if="!agentBranch && g.branch_code" class="ml-1 text-[11px] font-normal text-muted">· {{ g.branch_name || g.branch_code }}</span></span>
-          <select v-model="groupKinds[g.id]" :aria-label="`Type in ${g.title}`" class="h-9 rounded-lg border border-border bg-white px-2 text-sm font-semibold text-navy">
-            <option v-for="t in CALC_TYPES" :key="t.value" :value="t.value">{{ t.label }}</option>
-          </select>
-          <span class="inline-flex items-center gap-1 text-xs text-muted"><input v-model.trim="groupRates[g.id]" type="text" inputmode="decimal" :aria-label="`Rate in ${g.title}`" :aria-invalid="groupsTried && !!rateProblem(groupRates[g.id]) ? 'true' : undefined" class="h-9 w-20 rounded-lg border border-border px-2 text-right text-sm text-navy" placeholder="0" />%</span>
-          <span v-if="!rateProblem(groupRates[g.id])" class="whitespace-nowrap text-[11px] tabular-nums text-muted">→ {{ totalRate(groupKinds[g.id] || 'PO', Number(groupRates[g.id] || 0)) }}</span>
-          <button type="button" class="ml-auto grid h-8 w-8 place-items-center rounded-lg text-muted hover:bg-red-50 hover:text-expense" :aria-label="`Take out of ${g.title}`" @click="groupIds = groupIds.filter(id => id !== g.id)"><X :size="15" /></button>
-        </li>
-      </ul>
+
+      <!-- Each group picked, with the agent's type and rate in it (laid out as on Add group) -->
+      <template v-if="showGroups && !groupsLoading && !groupsError">
+        <!-- Phones: one card per group (title and remove on top, then Type and Rate) -->
+        <ul v-if="groupRows.length && phone" class="space-y-2">
+          <li v-for="g in groupRows" :key="g.id" class="rounded-xl border border-border bg-white p-3">
+            <div class="flex items-start justify-between gap-2">
+              <div class="min-w-0">
+                <p class="break-words text-sm font-bold text-navy">{{ g.title }}<span v-if="g.off" class="ml-1 text-[11px] font-normal text-muted">(off)</span></p>
+                <p v-if="g.branch" class="text-[11px] text-muted">{{ g.branch }}</p>
+                <p v-if="g.weeks" class="text-[11px] text-muted">{{ g.weeks }} {{ g.weeks === 1 ? 'week' : 'weeks' }} entered</p>
+              </div>
+              <button v-if="!g.locked" type="button" class="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-muted hover:bg-red-50 hover:text-expense" :aria-label="`Take out of ${g.title}`" @click="groupIds = groupIds.filter(id => id !== g.id)"><X :size="16" /></button>
+            </div>
+            <div class="keep-cols mt-3 grid grid-cols-2 gap-3">
+              <div class="space-y-1">
+                <p class="text-[10px] font-bold uppercase tracking-wide text-slate-500">Type</p>
+                <div class="keep-cols grid grid-cols-2 gap-1 rounded-lg bg-canvas p-1" role="radiogroup" :aria-label="`Type in ${g.title}`">
+                  <button v-for="t in CALC_TYPES" :key="t.value" type="button" role="radio" :aria-checked="groupKinds[g.id] === t.value" :disabled="g.locked" class="h-8 rounded-md text-sm font-bold disabled:cursor-not-allowed" :class="groupKinds[g.id] === t.value ? 'bg-white text-primary shadow-sm' : 'text-muted'" @click="groupKinds[g.id] = t.value">{{ t.label }}</button>
+                </div>
+              </div>
+              <div class="space-y-1">
+                <p class="text-[10px] font-bold uppercase tracking-wide text-slate-500">Rate</p>
+                <div class="flex items-center gap-1.5 text-xs text-muted">
+                  <input v-model.trim="groupRates[g.id]" type="text" inputmode="decimal" :disabled="g.locked" :aria-label="`Rate in ${g.title}`" :aria-invalid="groupsTried && !!rateProblem(groupRates[g.id]) ? 'true' : undefined" class="h-10 min-w-0 flex-1 rounded-lg border border-border px-2.5 text-right text-sm text-navy disabled:bg-canvas disabled:text-muted" placeholder="0" />%
+                </div>
+              </div>
+            </div>
+            <p class="mt-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 rounded-lg bg-canvas px-2.5 py-1.5 text-[11px] text-muted">
+              <span>{{ CALC_TYPES.find(t => t.value === groupKinds[g.id])?.formula }}</span>
+              <span v-if="!rateProblem(groupRates[g.id])" class="font-semibold tabular-nums text-navy">Total at {{ totalRate(groupKinds[g.id] || 'PO', Number(groupRates[g.id] || 0)) }}</span>
+            </p>
+          </li>
+        </ul>
+        <div v-else-if="groupRows.length" class="overflow-hidden rounded-lg border border-border">
+          <table class="w-full text-left text-sm">
+            <thead class="bg-canvas text-[10px] uppercase tracking-wide text-slate-500">
+              <tr>
+                <th class="px-2 py-2 font-bold sm:px-3">Group</th>
+                <th class="px-2 py-2 font-bold sm:w-80 sm:px-3">Type</th>
+                <th class="px-2 py-2 font-bold sm:w-56 sm:px-3">Rate → Total at</th>
+                <th class="px-1 py-2 sm:w-12 sm:px-2"><span class="sr-only">Take out</span></th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-border">
+              <tr v-for="g in groupRows" :key="g.id">
+                <td class="px-2 py-2 sm:px-3">
+                  <span class="text-xs font-semibold text-navy sm:text-sm">{{ g.title }}</span><span v-if="g.off" class="ml-1 text-[11px] text-muted">(off)</span>
+                  <span v-if="g.branch" class="block text-[11px] text-muted">{{ g.branch }}</span>
+                  <span v-if="g.weeks" class="block text-[11px] text-muted">{{ g.weeks }} {{ g.weeks === 1 ? 'week' : 'weeks' }} entered</span>
+                </td>
+                <td class="px-2 py-2 sm:px-3">
+                  <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <select v-model="groupKinds[g.id]" :disabled="g.locked" :aria-label="`Type in ${g.title}`" class="h-9 rounded-lg border border-border bg-white px-2 text-sm font-semibold text-navy disabled:bg-canvas disabled:text-muted">
+                      <option v-for="t in CALC_TYPES" :key="t.value" :value="t.value">{{ t.label }}</option>
+                    </select>
+                    <span class="hidden whitespace-nowrap text-[11px] text-muted sm:inline">{{ CALC_TYPES.find(t => t.value === groupKinds[g.id])?.formula }}</span>
+                  </div>
+                </td>
+                <td class="px-2 py-2 sm:px-3">
+                  <label class="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-muted sm:flex-nowrap">
+                    <span class="inline-flex items-center gap-1.5"><input v-model.trim="groupRates[g.id]" type="text" inputmode="decimal" :disabled="g.locked" :aria-label="`Rate in ${g.title}`" :aria-invalid="groupsTried && !!rateProblem(groupRates[g.id]) ? 'true' : undefined" class="h-9 w-16 rounded-lg border border-border px-2.5 text-right text-sm text-navy disabled:bg-canvas disabled:text-muted sm:w-24" placeholder="0" />%</span>
+                    <span v-if="!rateProblem(groupRates[g.id])" class="whitespace-nowrap tabular-nums max-sm:w-full">→ {{ totalRate(groupKinds[g.id] || 'PO', Number(groupRates[g.id] || 0)) }}</span>
+                  </label>
+                </td>
+                <td class="px-1 py-2 text-right sm:px-2">
+                  <button v-if="!g.locked" type="button" class="grid h-8 w-8 place-items-center rounded-lg text-muted hover:bg-red-50 hover:text-expense" :aria-label="`Take out of ${g.title}`" @click="groupIds = groupIds.filter(id => id !== g.id)"><X :size="15" /></button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p v-else class="rounded-lg bg-canvas px-3 py-2 text-xs text-muted">Pick groups above to put this agent in them; each one gets its own type and rate here.</p>
+        <p v-if="groupsAddOnly && startGroupIds.length" class="text-[11px] text-muted">You can put it in more groups. Changing its type or rate in the groups it is in, or taking it out, needs Update Group Agent Assignments.</p>
+      </template>
       <p v-if="showGroups && editing && removedGroups.length" class="rounded-lg bg-amber-50 px-3 py-2 text-[11px] text-amber-800">Taken out of {{ removedGroups.join(', ') }}: ended today if weeks were entered (they stay), else removed.</p>
 
       <p v-if="editing" class="rounded-lg bg-canvas px-3 py-2 text-[11px] text-muted">Changing the currency only affects groups assigned from now on; each assignment keeps its own, and saved weeks keep the currency they were entered in.</p>
@@ -52,6 +116,7 @@
 </template>
 
 <script setup lang="ts">
+import { useMediaQuery } from '@vueuse/core'
 import { ChevronLeft, X } from 'lucide-vue-next'
 import type { AssignmentGroup, Platform } from '~/types/api'
 import { useToast } from '~/composables/useToast'
@@ -64,6 +129,7 @@ import { CALC_TYPES, totalRate } from '~/utils/winlose'
 // An agent's own page: /admin/platforms/new adds one (needs Add Agents), /admin/platforms/<id>
 // changes it (needs Update Agents). Saving goes back to the agents.
 const route = useRoute()
+const phone = useMediaQuery('(max-width: 639px)')
 const { api } = useApi()
 const { can, hasFullAccess } = usePermissions()
 const toast = useToast()
@@ -101,10 +167,12 @@ const formCheck = reactive(useFormErrors(
 ))
 
 // --- the agent's groups (optional) ---
-// Putting an agent in groups changes them, so it needs Update Group Agent Assignments; a turned-off
-// agent can't be in a group (turn it on first).
+// Putting an agent in groups changes them, so it needs Update Group Agent Assignments; with Add
+// Agents to Groups alone it can only be put in more groups (the ones it is in stay as they are). A
+// turned-off agent can't be in a group (turn it on first).
 const { user } = useAuth()
-const canGroups = computed(() => can('platform-assignments.edit'))
+const canGroups = computed(() => can('platform-assignments.edit', 'platform-assignments.add-agents'))
+const groupsAddOnly = computed(() => !can('platform-assignments.edit'))
 const showGroups = computed(() => canGroups.value && !(editing.value && !editing.value.is_active))
 const groups = ref<AssignmentGroup[]>([])
 const groupsLoading = ref(false)
@@ -127,12 +195,29 @@ const agentBranch = computed<string | null>(() => {
 })
 const groupFits = (g: AssignmentGroup) => !agentBranch.value || g.branch_id === agentBranch.value
 // Switched-on groups of the agent's branch, plus any it is in now (one turned off since stays listed).
+// One picked stays ticked but can't be unpicked in the list: ✕ on its row takes it out.
 const groupOptions = computed(() => groups.value
   .filter(g => groupFits(g) && (g.is_active || startGroupIds.value.includes(g.id)))
-  .map(g => ({ value: g.id, label: `${g.title}${!agentBranch.value && g.branch_code ? ` · ${g.branch_name || g.branch_code}` : ''}${g.is_active ? '' : ' (off)'}` })))
+  .map(g => ({ value: g.id, label: `${g.title}${!agentBranch.value && g.branch_code ? ` · ${g.branch_name || g.branch_code}` : ''}${g.is_active ? '' : ' (off)'}`, disabled: groupIds.value.includes(g.id) })))
 const chosenGroups = computed(() => groupIds.value
   .map(id => groups.value.find(g => g.id === id))
   .filter((g): g is AssignmentGroup => !!g && groupFits(g)))
+// As on Add group: the group picked last is on top, so a pick is seen at once; the groups the agent
+// was in when the page opened follow A to Z.
+const groupRows = computed(() => {
+  const row = (g: AssignmentGroup) => ({
+    id: g.id,
+    title: g.title,
+    off: !g.is_active,
+    branch: !agentBranch.value && g.branch_code ? g.branch_name || g.branch_code : '',
+    weeks: editing.value ? g.agents.find(a => a.platform_id === editing.value!.id)?.weeks || 0 : 0,
+    // Add Agents to Groups only: the groups it is in can't be changed or left.
+    locked: groupsAddOnly.value && startGroupIds.value.includes(g.id),
+  })
+  const added = chosenGroups.value.filter(g => !startGroupIds.value.includes(g.id)).reverse().map(row)
+  const loaded = chosenGroups.value.filter(g => startGroupIds.value.includes(g.id)).map(row).sort((a, b) => a.title.localeCompare(b.title))
+  return [...added, ...loaded]
+})
 const removedGroups = computed(() => startGroupIds.value
   .filter(id => !chosenGroups.value.some(g => g.id === id))
   .map(id => groups.value.find(g => g.id === id)?.title || '?'))

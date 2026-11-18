@@ -119,9 +119,13 @@ func EnsureRequiredPermissions(db *gorm.DB) error {
 		permissions.PlatformAssignmentsCreate: {retiredAssignmentsManage},
 		permissions.PlatformAssignmentsEdit:   {retiredAssignmentsManage},
 		permissions.PlatformAssignmentsDelete: {retiredAssignmentsManage},
-		permissions.WinLoseDelete:             {permissions.WinLoseEdit},
-		permissions.WinLoseReportsRates:       {permissions.WinLoseReportsView},
-		permissions.WinLoseReact:              {permissions.WinLoseView, permissions.WinLoseCreate, permissions.WinLoseEdit, permissions.WinLoseReportsView},
+		// Whoever can update a group can already put agents in it.
+		permissions.PlatformAssignmentsAddAgents: {permissions.PlatformAssignmentsEdit},
+		permissions.WinLoseDelete:                {permissions.WinLoseEdit},
+		// Whoever can add data entry can already fill in agents not yet saved on an old entry.
+		permissions.WinLoseAddAgents:    {permissions.WinLoseCreate},
+		permissions.WinLoseReportsRates: {permissions.WinLoseReportsView},
+		permissions.WinLoseReact:        {permissions.WinLoseView, permissions.WinLoseCreate, permissions.WinLoseEdit, permissions.WinLoseReportsView},
 		// Quotations go with the matching sales rights when they first appear.
 		permissions.QuotationsView:   {permissions.SalesView},
 		permissions.QuotationsCreate: {permissions.SalesCreate},

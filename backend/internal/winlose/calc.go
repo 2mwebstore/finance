@@ -123,7 +123,7 @@ var formulas = map[string]Formula{
 }
 
 // Kind is how an agent splits the adjusted amount (the version's win/lose and commission). It is
-// set per agent on the Assign agents page and works on top of the formula version.
+// set per agent on the Add group page and works on top of the formula version.
 type Kind string
 
 const (

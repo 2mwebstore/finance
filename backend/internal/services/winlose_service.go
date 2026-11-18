@@ -740,9 +740,9 @@ func (s *PlatformService) Preview(ctx context.Context, in WeekEntryInput, scope 
 
 // SaveWeek saves an entry in one transaction: its title and its agents' results, each with its
 // Total in every group the agent is in. With no entry id it makes a new entry (a new entry's first
-// save); the sheet returned has its id for the saves after. A new entry and new rows need
-// winlose.create; changing a saved row or the title needs winlose.edit (a saved row also a
-// reason).
+// save); the sheet returned has its id for the saves after. A new entry needs winlose.create, new
+// rows winlose.create or (on an entry that exists) winlose.add-agents; changing a saved row or the
+// title needs winlose.edit (a saved row also a reason).
 func (s *PlatformService) SaveWeek(ctx context.Context, in WeekEntryInput, scope BranchScope, can func(string) bool, actor uuid.UUID) (*WeekSheet, []Correction, error) {
 	title := strings.TrimSpace(in.Title)
 	if title == "" {
@@ -766,6 +766,8 @@ func (s *PlatformService) SaveWeek(ctx context.Context, in WeekEntryInput, scope
 		}
 		now := time.Now()
 		entry := parts.entry
+		// Add Agents to Data Entry: agents not yet saved, on an entry made before.
+		canAddRows := can(permissions.WinLoseCreate) || (entry != nil && can(permissions.WinLoseAddAgents))
 		switch {
 		case entry == nil:
 			if !can(permissions.WinLoseCreate) {
@@ -788,8 +790,8 @@ func (s *PlatformService) SaveWeek(ctx context.Context, in WeekEntryInput, scope
 		for _, p := range plans {
 			code := parts.platforms[p.platform].Code
 			if p.existing == nil {
-				if !can(permissions.WinLoseCreate) {
-					return errors.New("you can't enter new results (needs Enter Win/Lose)")
+				if !canAddRows {
+					return errors.New("you can't enter new results (needs Add Data Entry, or Add Agents to Data Entry on an entry that exists)")
 				}
 				row := models.WeeklyPlatformResult{
 					Base: models.Base{ID: uuid.New()}, EntryID: &entry.ID, WeekStart: parts.start, WeekEnd: parts.start.AddDate(0, 0, 6), BranchID: parts.branch.ID, PlatformID: p.platform,

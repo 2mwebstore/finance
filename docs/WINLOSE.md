@@ -78,7 +78,7 @@ This is enforced in the API, not just the UI. In the code and database an assign
   12K_YMLLJB agents on the Agents page. **Turn off** asks for a reason (at least 3 characters; the
   audit log keeps it with `platform.save`) and is refused while an active group still has the agent;
   **Turn on** needs none.
-- **Titled groups:** Assign agents (its own page) makes a group: a title, its agents each with its
+- **Titled groups:** Add group (its own page) makes a group: a title, its agents each with its
   own **rate** (the Total is worked out at it), and its first day. There is no currency choice:
   each agent's amounts are in its own currency (Agents page). An agent can be in
   several groups, at its own rate in each. **Update** (its own page) changes the title, agents (one taken out is ended if
@@ -98,7 +98,7 @@ This is enforced in the API, not just the UI. In the code and database an assign
 - **Choosing the branch:** a person who works in **one** branch never sees a branch choice: the API
   works in it for them. With **several** (owners/admins: all), Data Entry, Report, Group Summary and
   Group Agent Assignments each have a **Branch** select, chosen once and kept for the four pages
-  (and Assign agents / a new entry use it for the new group or entry, with their own Branch select). The
+  (and Add group / a new entry use it for the new group or entry, with their own Branch select). The
   choice is **All branches** (every branch in the person's scope; for the Report only with View
   Consolidated Win/Lose) or one branch. A group, entry or report is always one branch's;
   the API checks every `branch_id` against the person's scope. With no `branch_id` the API works in the
@@ -158,7 +158,7 @@ of the API after this change works every saved week out again once to the cent (
 So an agent at 0% leaves the whole amount, and at 100% nothing. An agent in two groups has a Total
 in each (at each group's rate); its own Total is their sum.
 
-**Agent type.** Assign agents asks for a type for each agent, kept on its assignment in the group (`hq_platform_assignments.calc_type`, default `PO`), so agents in one group can differ:
+**Agent type.** Add group (and the agent form) asks for a type for each agent, kept on its assignment in the group (`hq_platform_assignments.calc_type`, default `PO`), so agents in one group can differ:
 
 | Type | Total (v4) |
 |---|---|
@@ -241,7 +241,7 @@ a small copy, the data entry's title (and branch, on the same line), then the gr
 `reactions` in the list), Downloaded / Shared, when and by whom; one opens
 full size (`GET /winlose/images/:id/file`, `?thumb=1` for the small copy) to download again or open
 its entry in Group summary. Same permission as the reports (`winlose-reports.view`), in your branches.
-The group form (Assign agents) shows beside each rate what the Total is worked out at (60% → 40%).
+The group form (Add group) and the agent form show beside each rate what the Total is worked out at (60% → 40%).
 
 ## Permissions
 

@@ -266,8 +266,9 @@ func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config, store storage.Store, 
 				need := func(codes ...string) gin.HandlerFunc { return middleware.RequireAnyPermission(db, codes...) }
 				// RP: each page has view, add, update and delete; the group form lists the agents too.
 				agentsAny := need(permissions.PlatformsView, permissions.PlatformsCreate, permissions.PlatformsEdit, permissions.PlatformsDelete,
-					permissions.PlatformAssignmentsCreate, permissions.PlatformAssignmentsEdit)
-				groupsAny := need(permissions.PlatformAssignmentsView, permissions.PlatformAssignmentsCreate, permissions.PlatformAssignmentsEdit, permissions.PlatformAssignmentsDelete)
+					permissions.PlatformAssignmentsCreate, permissions.PlatformAssignmentsEdit, permissions.PlatformAssignmentsAddAgents)
+				groupsAny := need(permissions.PlatformAssignmentsView, permissions.PlatformAssignmentsCreate, permissions.PlatformAssignmentsEdit, permissions.PlatformAssignmentsDelete,
+					permissions.PlatformAssignmentsAddAgents)
 				api.GET("/platforms", agentsAny, platformCtrl.ListPlatforms)
 				api.GET("/platforms/:id", agentsAny, platformCtrl.GetPlatform)
 				api.POST("/platforms", need(permissions.PlatformsCreate), platformCtrl.SavePlatform)
@@ -285,10 +286,12 @@ func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config, store storage.Store, 
 				// Report viewers list them too (the reports filter by group).
 				// The Report's group filter lists the groups too.
 				api.GET("/platform-groups", need(permissions.PlatformAssignmentsView, permissions.PlatformAssignmentsCreate, permissions.PlatformAssignmentsEdit,
-					permissions.PlatformAssignmentsDelete, permissions.WinLoseReportsView), platformCtrl.ListGroups)
+					permissions.PlatformAssignmentsDelete, permissions.PlatformAssignmentsAddAgents, permissions.WinLoseReportsView), platformCtrl.ListGroups)
 				api.GET("/platform-groups/:id", groupsAny, platformCtrl.GetGroup)
 				api.POST("/platform-groups", need(permissions.PlatformAssignmentsCreate), platformCtrl.CreateGroup)
 				api.PATCH("/platform-groups/:id", need(permissions.PlatformAssignmentsEdit), platformCtrl.UpdateGroup)
+				// Only puts new agents in (Add Agents to Groups; Update can do it too).
+				api.POST("/platform-groups/:id/agents", need(permissions.PlatformAssignmentsAddAgents, permissions.PlatformAssignmentsEdit), platformCtrl.AddGroupAgents)
 				api.POST("/platform-groups/:id/active", need(permissions.PlatformAssignmentsEdit), platformCtrl.SetGroupActive)
 				api.DELETE("/platform-groups/:id", need(permissions.PlatformAssignmentsDelete), platformCtrl.DeleteGroup)
 				api.GET("/platform-assignments", groupsAny, platformCtrl.ListAssignments)
@@ -298,10 +301,11 @@ func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config, store storage.Store, 
 				api.POST("/platform-assignments/:id/move", need(permissions.PlatformAssignmentsEdit), platformCtrl.MoveAssignment)
 
 				wl := api.Group("/winlose")
-				wl.GET("/formula", need(permissions.WinLoseView, permissions.WinLoseCreate, permissions.WinLoseEdit, permissions.WinLoseReportsView), platformCtrl.Formula)
-				// New rows need winlose.create and changed saved rows winlose.edit (checked per row).
+				wl.GET("/formula", need(permissions.WinLoseView, permissions.WinLoseCreate, permissions.WinLoseEdit, permissions.WinLoseAddAgents, permissions.WinLoseReportsView), platformCtrl.Formula)
+				// New rows need winlose.create (on an entry that exists, winlose.add-agents is enough) and changed
+				// saved rows winlose.edit (checked per row).
 				// Report viewers too: Group summary's Data entry filter lists the entries.
-				wl.GET("/entries", need(permissions.WinLoseView, permissions.WinLoseCreate, permissions.WinLoseEdit, permissions.WinLoseDelete, permissions.WinLoseReportsView), platformCtrl.ListEntries)
+				wl.GET("/entries", need(permissions.WinLoseView, permissions.WinLoseCreate, permissions.WinLoseEdit, permissions.WinLoseDelete, permissions.WinLoseAddAgents, permissions.WinLoseReportsView), platformCtrl.ListEntries)
 				// Deleting an entry removes saved amounts: Delete Data Entry, with a reason.
 				wl.DELETE("/entries/:id", need(permissions.WinLoseDelete), platformCtrl.DeleteEntry)
 				// ✅ / ❌ on an entry, on Data entry's list and the Report's By week.
@@ -312,9 +316,9 @@ func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config, store storage.Store, 
 				wl.POST("/entries/:id/groups/:group_id/reactions", need(permissions.WinLoseReact), platformCtrl.ReactToGroup)
 				wl.POST("/entries/:id/agents/:platform_id/reactions", need(permissions.WinLoseReact), platformCtrl.ReactToAgent)
 				// An entry by entry_id; without one, a new entry for this week in the person's own group.
-				wl.GET("/entry", need(permissions.WinLoseView, permissions.WinLoseCreate, permissions.WinLoseEdit), platformCtrl.WeekSheet)
-				wl.POST("/entry/preview", need(permissions.WinLoseCreate, permissions.WinLoseEdit), platformCtrl.Preview)
-				wl.PUT("/entry", need(permissions.WinLoseCreate, permissions.WinLoseEdit), platformCtrl.SaveWeek)
+				wl.GET("/entry", need(permissions.WinLoseView, permissions.WinLoseCreate, permissions.WinLoseEdit, permissions.WinLoseAddAgents), platformCtrl.WeekSheet)
+				wl.POST("/entry/preview", need(permissions.WinLoseCreate, permissions.WinLoseEdit, permissions.WinLoseAddAgents), platformCtrl.Preview)
+				wl.PUT("/entry", need(permissions.WinLoseCreate, permissions.WinLoseEdit, permissions.WinLoseAddAgents), platformCtrl.SaveWeek)
 				// Totals across HQs also need winlose-reports.consolidated (checked in the service).
 				wl.GET("/reports", need(permissions.WinLoseReportsView), platformCtrl.Report)
 				// Group summary's pictures: kept on their first Download or Share to Telegram (the other

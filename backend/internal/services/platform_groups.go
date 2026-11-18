@@ -416,6 +416,78 @@ func (s *PlatformService) UpdateGroup(ctx context.Context, id uuid.UUID, in Grou
 	return before, after, nil
 }
 
+// GroupAgentsInput: agents to put into a group that exists, each with its rate and type.
+type GroupAgentsInput struct {
+	Agents []GroupAgentInput `json:"agents" binding:"required,min=1,max=100,dive"`
+}
+
+// AddGroupAgents puts new agents into a switched-on group (Add Agents to Groups), as its page would:
+// each starts today (or on the group's first day, if later) at the rate and type given, in the
+// group's currency (else its own). The agents already in it, its title and their rates stay as they
+// are; an agent already in it is refused.
+func (s *PlatformService) AddGroupAgents(ctx context.Context, id uuid.UUID, in GroupAgentsInput, scope BranchScope, actor uuid.UUID) (before, after *GroupRow, err error) {
+	platformIDs, rates, kinds, err := agentRates(in.Agents)
+	if err != nil {
+		return nil, nil, err
+	}
+	ids, err := uniqueIDs(platformIDs, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	if before, err = s.groupRow(ctx, id); err != nil {
+		return nil, nil, err
+	}
+	counted := 0
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		g, err := lockGroup(tx, id, scope)
+		if err != nil {
+			return err
+		}
+		if !g.IsActive {
+			return fieldError("agents", "this group is turned off: it needs to be turned on before agents are put in it")
+		}
+		var already []models.HQPlatformAssignment
+		if err := tx.Where("group_id = ? AND is_active = ? AND platform_id IN ?", g.ID, true, ids).Limit(1).Find(&already).Error; err != nil {
+			return err
+		}
+		if len(already) > 0 {
+			code := already[0].PlatformID.String()
+			for _, a := range before.Agents {
+				if a.PlatformID == already[0].PlatformID {
+					code = a.PlatformCode
+				}
+			}
+			return fieldError("agents", code+" is already in this group")
+		}
+		plan := &assignPlan{branchIDs: []uuid.UUID{g.BranchID}, platformIDs: ids, rates: rates, kinds: kinds, starts: s.today()}
+		if g.StartsOn.After(plan.starts) {
+			plan.starts = g.StartsOn
+		}
+		if err := s.checkPlatforms(ctx, plan, g.Currency); err != nil {
+			return err
+		}
+		if plan.branches, err = s.branchesIn(ctx, plan.branchIDs); err != nil {
+			return err
+		}
+		made, err := s.applyAssign(tx, plan, actor, &g.ID)
+		if err != nil {
+			return err
+		}
+		if counted, err = countSavedWeeks(tx, made); err != nil {
+			return err
+		}
+		return tx.Model(g).Update("updated_at", time.Now()).Error
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	if after, err = s.groupRow(ctx, id); err != nil {
+		return nil, nil, err
+	}
+	after.CountedWeeks = counted
+	return before, after, nil
+}
+
 // takeOut removes an agent from its group: ended on the given day when weeks were entered for it
 // (they stay), else deleted with its partners.
 func takeOut(tx *gorm.DB, a *models.HQPlatformAssignment, day time.Time, actor uuid.UUID) error {
@@ -500,8 +572,9 @@ func (c *GroupChanges) Any() bool {
 // out is ended if weeks were entered for it (they stay), else removed; one put in starts today (or
 // on the group's first day, if later) in the group's currency (else the agent's own); one it stays
 // in gets the rate and type given. Only the person's groups count: another branch's group a shared
-// agent is in stays as it is.
-func (s *PlatformService) setPlatformGroups(ctx context.Context, tx *gorm.DB, p *models.Platform, groups []PlatformGroupInput, scope BranchScope, actor uuid.UUID) (*GroupChanges, error) {
+// agent is in stays as it is. addOnly (Add Agents to Groups without Update): it may only be put in
+// more switched-on groups; taking it out of one, or changing its rate or type there, is refused.
+func (s *PlatformService) setPlatformGroups(ctx context.Context, tx *gorm.DB, p *models.Platform, groups []PlatformGroupInput, addOnly bool, scope BranchScope, actor uuid.UUID) (*GroupChanges, error) {
 	type want struct {
 		rate decimal.Decimal
 		kind string
@@ -543,6 +616,12 @@ func (s *PlatformService) setPlatformGroups(ctx context.Context, tx *gorm.DB, p 
 		}
 		have[g.ID] = true
 		w, keep := wanted[g.ID]
+		if addOnly && !keep {
+			return nil, fieldError("groups", fmt.Sprintf("taking %s out of “%s” needs Update Group Agent Assignments", p.Code, g.Title))
+		}
+		if addOnly && (!a.CommissionRate.Equal(w.rate) || a.CalcType != w.kind) {
+			return nil, fieldError("groups", fmt.Sprintf("changing %s’s type or rate in “%s” needs Update Group Agent Assignments", p.Code, g.Title))
+		}
 		if !keep {
 			if err := takeOut(tx, a, today, actor); err != nil {
 				return nil, err
@@ -567,6 +646,9 @@ func (s *PlatformService) setPlatformGroups(ctx context.Context, tx *gorm.DB, p 
 		}
 		if !p.IsActive {
 			return nil, fieldError("groups", "turn the agent on before putting it in a group")
+		}
+		if addOnly && !g.IsActive {
+			return nil, fieldError("groups", fmt.Sprintf("“%s” is turned off: it needs to be turned on before agents are put in it", g.Title))
 		}
 		// An agent of one branch goes only in that branch's groups (a shared one in any).
 		if p.BranchID != nil && *p.BranchID != g.BranchID {

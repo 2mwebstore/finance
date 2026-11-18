@@ -262,7 +262,7 @@ const inventoryNav = computed<NavItem[]>(() => {
 // Agents (platforms) and weekly win/lose per group (a branch; results are entered once a week).
 const platformsNav = computed<NavItem[]>(() => {
   const items: NavItem[] = []
-  if (can('winlose.view', 'winlose.create', 'winlose.edit', 'winlose.delete')) items.push({ label: 'Data Entry', to: '/winlose/entry', icon: NotebookPen })
+  if (can('winlose.view', 'winlose.create', 'winlose.edit', 'winlose.delete', 'winlose.add-agents')) items.push({ label: 'Data Entry', to: '/winlose/entry', icon: NotebookPen })
   if (can('winlose-reports.view')) {
     items.push({ label: 'Group Summary', to: '/winlose/reports/branch-summary', icon: ChartColumn })
     items.push({ label: 'Report', to: '/winlose/reports/weekly', icon: CalendarRange })
@@ -270,7 +270,7 @@ const platformsNav = computed<NavItem[]>(() => {
     items.push({ label: 'History', to: '/winlose/reports/history', icon: History })
   }
   if (can('platforms.view', 'platforms.create', 'platforms.edit', 'platforms.delete')) items.push({ label: 'Agents', to: '/admin/platforms', icon: Layers })
-  if (can('platform-assignments.view', 'platform-assignments.create', 'platform-assignments.edit', 'platform-assignments.delete')) items.push({ label: 'Group Agent Assignments', to: '/admin/platform-assignments', icon: Network })
+  if (can('platform-assignments.view', 'platform-assignments.create', 'platform-assignments.edit', 'platform-assignments.delete', 'platform-assignments.add-agents')) items.push({ label: 'Group Agent Assignments', to: '/admin/platform-assignments', icon: Network })
   return items
 })
 

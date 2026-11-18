@@ -6,57 +6,60 @@
         <h1 class="text-xl font-bold text-navy">Agents</h1>
       </div>
       <div class="flex gap-2">
-        <NuxtLink v-if="can('platform-assignments.view', 'platform-assignments.create', 'platform-assignments.edit', 'platform-assignments.delete')" to="/admin/platform-assignments" class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-white px-3 py-2 text-sm font-medium text-navy hover:bg-canvas"><Network :size="16" /> Group assignments</NuxtLink>
+        <NuxtLink v-if="can('platform-assignments.view', 'platform-assignments.create', 'platform-assignments.edit', 'platform-assignments.delete', 'platform-assignments.add-agents')" to="/admin/platform-assignments" class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-white px-3 py-2 text-sm font-medium text-navy hover:bg-canvas"><Network :size="16" /> Group assignments</NuxtLink>
         <!-- Add and Update open the agent's own page (not a pop-up) -->
         <NuxtLink v-if="canCreate" to="/admin/platforms/new" class="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white hover:bg-primary-hover"><Plus :size="16" /> Add agent</NuxtLink>
       </div>
     </header>
 
-    <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
-      <div class="min-w-0 flex-1"><ListSearch v-model="search" placeholder="Search by user or name…" /></div>
-      <!-- Only for people who work in more than one branch -->
-      <div v-if="showBranch" class="sm:w-56"><SearchSelect v-model="branchFilter" :options="branchOptions" aria-label="Branch" /></div>
+    <!-- As on Data entry: search, sort, and one currency or code start; then the Branch (only for
+         people who work in more than one) and the turned-off agents -->
+    <WinloseAgentFilters v-model:search="search" v-model:sort="sort" v-model:currency="currency" v-model:prefix="prefix" :currencies="currencies" :prefixes="prefixes" :total="items.length">
+      <div v-if="showBranch" class="w-full sm:w-56"><SearchSelect v-model="branchFilter" :options="branchOptions" aria-label="Branch" /></div>
       <label class="flex items-center gap-2 text-xs font-medium text-navy"><input v-model="showInactive" type="checkbox" class="accent-primary" /> Show turned-off agents</label>
-    </div>
+    </WinloseAgentFilters>
 
     <div v-if="loading && !items.length" class="text-sm text-muted">Loading agents…</div>
-    <AppAlert v-else-if="error && !items.length" title="Couldn’t load agents" :message="error"><template #action><button type="button" @click="reset">Try again</button></template></AppAlert>
-    <!-- Like Data entry: on phones the buttons are icons only -->
-    <div v-else class="overflow-hidden rounded-xl border border-border bg-white">
-      <table class="w-full text-left text-sm">
-        <thead class="bg-canvas text-[10px] uppercase tracking-wide text-slate-500">
-          <tr>
-            <th class="px-2 py-2 font-bold sm:px-3">User</th>
-            <!-- On phones the currency goes under the user -->
-            <th class="hidden px-2 py-2 font-bold sm:table-cell sm:px-3">Currency</th>
-            <th v-if="showBranch" class="hidden px-2 py-2 font-bold sm:table-cell sm:px-3">Branch</th>
-            <th class="px-2 py-2 text-right font-bold sm:px-3">Groups</th>
-            <th v-if="canEdit || canDelete" class="px-2 py-2 sm:px-3"><span class="sr-only">Actions</span></th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-border">
-          <tr v-for="platform in shown" :key="platform.id" :class="platform.is_active ? 'text-navy' : 'bg-canvas/60 text-slate-400'">
-            <td class="px-2 py-2.5 sm:px-3">
-              <span class="whitespace-nowrap font-mono font-semibold">{{ platform.code }}</span>
-              <span v-if="!platform.is_active" class="ml-1.5 rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-muted">Off</span>
-              <span class="block text-[11px] text-muted"><span class="sm:hidden">{{ platform.default_currency }}</span><template v-if="platform.name && platform.name !== platform.code"><span class="sm:hidden"> · </span>{{ platform.name }}</template></span>
-            </td>
-            <td class="hidden px-2 py-2.5 sm:table-cell sm:px-3">{{ platform.default_currency }}</td>
-            <td v-if="showBranch" class="hidden px-2 py-2.5 sm:table-cell sm:px-3"><span v-if="platform.branch_code">{{ platform.branch_name || platform.branch_code }}</span><span v-else class="text-muted" title="Shared: every branch sees it">Shared</span></td>
-            <td class="px-2 py-2.5 text-right tabular-nums sm:px-3">{{ platform.active_hqs }}</td>
-            <td v-if="canEdit || canDelete" class="px-2 py-2 sm:px-3">
-              <div class="flex justify-end gap-1 sm:gap-1.5">
-                <NuxtLink v-if="canEdit" :to="`/admin/platforms/${platform.id}`" class="action-chip action-edit" title="Update"><Pencil :size="13" /> <span class="max-sm:sr-only">Update</span></NuxtLink>
-                <button v-if="canEdit" type="button" class="action-chip" :class="platform.is_active ? 'action-danger' : 'action-success'" :title="platform.is_active ? 'Turn off' : 'Turn on'" :disabled="busyId === platform.id" @click="platform.is_active ? (turningOff = platform) : setActive(platform, true)"><Power :size="13" /> <span class="max-sm:sr-only">{{ platform.is_active ? 'Turn off' : 'Turn on' }}</span></button>
-                <button v-if="canDelete" type="button" class="action-chip action-danger" title="Delete" @click="openDelete(platform)"><Trash2 :size="13" /> <span class="max-sm:sr-only">Delete</span></button>
-              </div>
-            </td>
-          </tr>
-          <tr v-if="!shown.length"><td :colspan="(canEdit || canDelete ? 4 : 3) + (showBranch ? 1 : 0)" class="px-3 py-8 text-center text-sm text-muted">{{ search ? `No agent matches “${search}”.` : 'No agents yet.' }}</td></tr>
-        </tbody>
-      </table>
-    </div>
-    <InfiniteLoader :has-more="hasMore" :loading="loadingMore" :count="items.length" @more="loadMore" />
+    <AppAlert v-else-if="error && !items.length" title="Couldn’t load agents" :message="error"><template #action><button type="button" @click="load">Try again</button></template></AppAlert>
+    <!-- Like Data entry: one table per currency, USD first then KHR, each numbered from 1 (one table
+         with the message when no agent is shown); on phones the buttons are icons only -->
+    <template v-else>
+      <div v-for="part in tables.length ? tables : [{ currency: '', rows: [] }]" :key="part.currency || 'none'" class="overflow-hidden rounded-xl border border-border bg-white">
+        <h2 v-if="part.currency" class="border-b border-border px-4 py-2.5 text-sm font-semibold text-navy">{{ part.currency }}</h2>
+        <table class="w-full text-left text-sm">
+          <thead class="bg-canvas text-[10px] uppercase tracking-wide text-slate-500">
+            <tr>
+              <th class="w-10 px-2 py-2 text-center font-bold sm:w-12 sm:px-3">No</th>
+              <th class="px-2 py-2 font-bold sm:px-3">User</th>
+              <th v-if="showBranch" class="hidden px-2 py-2 font-bold sm:table-cell sm:px-3">Branch</th>
+              <th class="px-2 py-2 text-right font-bold sm:px-3">Groups</th>
+              <th v-if="canEdit || canDelete" class="px-2 py-2 sm:px-3"><span class="sr-only">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-border">
+            <tr v-for="{ row: platform, no } in part.rows" :key="platform.id" :class="platform.is_active ? 'text-navy' : 'bg-canvas/60 text-slate-400'">
+              <td class="px-2 py-2.5 text-center text-sm tabular-nums text-muted sm:px-3">{{ no }}</td>
+              <td class="px-2 py-2.5 sm:px-3">
+                <span class="whitespace-nowrap font-mono font-semibold">{{ platform.code }}</span>
+                <span v-if="!platform.is_active" class="ml-1.5 rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-muted">Off</span>
+                <!-- The name, and on phones the branch -->
+                <span v-if="(platform.name && platform.name !== platform.code) || showBranch" class="block text-[11px] text-muted"><template v-if="platform.name && platform.name !== platform.code">{{ platform.name }}</template><span v-if="showBranch" class="sm:hidden"><template v-if="platform.name && platform.name !== platform.code"> · </template>{{ platform.branch_code ? platform.branch_name || platform.branch_code : 'Shared' }}</span></span>
+              </td>
+              <td v-if="showBranch" class="hidden px-2 py-2.5 sm:table-cell sm:px-3"><span v-if="platform.branch_code">{{ platform.branch_name || platform.branch_code }}</span><span v-else class="text-muted" title="Shared: every branch sees it">Shared</span></td>
+              <td class="px-2 py-2.5 text-right tabular-nums sm:px-3">{{ platform.active_hqs }}</td>
+              <td v-if="canEdit || canDelete" class="px-2 py-2 sm:px-3">
+                <div class="flex justify-end gap-1 sm:gap-1.5">
+                  <NuxtLink v-if="canEdit" :to="`/admin/platforms/${platform.id}`" class="action-chip action-edit" title="Update"><Pencil :size="13" /> <span class="max-sm:sr-only">Update</span></NuxtLink>
+                  <button v-if="canEdit" type="button" class="action-chip" :class="platform.is_active ? 'action-danger' : 'action-success'" :title="platform.is_active ? 'Turn off' : 'Turn on'" :disabled="busyId === platform.id" @click="platform.is_active ? (turningOff = platform) : setActive(platform, true)"><Power :size="13" /> <span class="max-sm:sr-only">{{ platform.is_active ? 'Turn off' : 'Turn on' }}</span></button>
+                  <button v-if="canDelete" type="button" class="action-chip action-danger" title="Delete" @click="openDelete(platform)"><Trash2 :size="13" /> <span class="max-sm:sr-only">Delete</span></button>
+                </div>
+              </td>
+            </tr>
+            <tr v-if="!part.currency"><td :colspan="(canEdit || canDelete ? 4 : 3) + (showBranch ? 1 : 0)" class="px-3 py-8 text-center text-sm text-muted">{{ items.length ? noMatch : 'No agents yet.' }}</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </template>
 
     <!-- Delete: only an agent never in a group or entered; a used one can only be turned off -->
     <AppModal :model-value="!!deleting" form :title="deleting ? `Delete ${deleting.code}?` : ''" eyebrow="DELETE AGENT" subtitle="Only an agent that was never in a group or entered can be deleted; a used one can only be turned off." :busy="deleteBusy" width="460px" @update:model-value="(open) => { if (!open && !deleteBusy) deleting = null }" @submit="deleteAgent">
@@ -76,7 +79,7 @@
 import { Network, Pencil, Plus, Power, Trash2 } from 'lucide-vue-next'
 import type { Platform } from '~/types/api'
 import { useToast } from '~/composables/useToast'
-import { useInfiniteList } from '~/composables/useInfiniteList'
+import { useAgentFilter } from '~/composables/useAgentFilter'
 import { useBranchOptions } from '~/composables/useBranchOptions'
 
 const { api } = useApi()
@@ -87,31 +90,43 @@ const canCreate = computed(() => can('platforms.create'))
 const canEdit = computed(() => can('platforms.edit'))
 const canDelete = computed(() => can('platforms.delete'))
 
-const search = ref('')
 const showInactive = ref(false)
 // Agents belong to a branch. People who work in one branch just get theirs (nothing to choose);
 // with several, a Branch filter (and a Branch choice on the agent's page).
 const { branches, options: branchOptions } = useBranchOptions('All branches')
 const showBranch = computed(() => branches.value.length > 1)
 const branchFilter = ref('')
-// Agents load a page at a time as the list is scrolled (search and turned-off agents are worked out
-// by the API); turning one off or on, or deleting it, fetches the pages already shown again (Add and
-// Update are on the agent's own page, which comes back here).
-const { items, loading, loadingMore, error, hasMore, reset, loadMore, refresh: load } = useInfiniteList<Platform>(
-  async (page, size) => await api<{ items: Platform[]; total: number }>('/platforms', {
-    query: { include_inactive: showInactive.value ? 'true' : undefined, search: search.value.trim() || undefined, branch_id: branchFilter.value || undefined, page, page_size: size },
-  }),
-  platform => platform.id, 30, 'Could not load agents.',
-)
-const shown = computed(() => items.value)
-// Another search or filter starts from the top again.
-let searchTimer: ReturnType<typeof setTimeout> | undefined
-watch(search, () => {
-  if (searchTimer) clearTimeout(searchTimer)
-  searchTimer = setTimeout(reset, 300)
+
+// Every agent of the branch chosen (turned-off ones too when asked) loads at once, as on Data entry,
+// so they can be split by currency and filtered here; another branch or Show turned-off loads them
+// again, as do turning one off or on and deleting one (Add and Update are on the agent's own page,
+// which comes back here).
+const items = ref<Platform[]>([])
+const loading = ref(true)
+const error = ref('')
+let loadRequest = 0
+async function load() {
+  const request = ++loadRequest
+  loading.value = true
+  error.value = ''
+  try {
+    const result = await api<{ items: Platform[] }>('/platforms', { query: { include_inactive: showInactive.value ? 'true' : undefined, branch_id: branchFilter.value || undefined } })
+    if (request === loadRequest) items.value = result.items || []
+  } catch (e: any) {
+    if (request === loadRequest) error.value = e?.data?.error || 'Could not load agents.'
+  } finally {
+    if (request === loadRequest) loading.value = false
+  }
+}
+watch([showInactive, branchFilter], load)
+onMounted(load)
+
+// A table per currency (USD first), with search by user or name, sort, and currency / code start.
+const { search, sort, currencies, currency, prefixes, prefix, tables, noMatch } = useAgentFilter(() => items.value, {
+  code: p => p.code,
+  name: p => p.name,
+  currency: p => p.default_currency,
 })
-watch([showInactive, branchFilter], reset)
-onMounted(reset)
 
 const busyId = ref('')
 

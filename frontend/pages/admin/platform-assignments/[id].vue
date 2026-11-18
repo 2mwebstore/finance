@@ -2,12 +2,14 @@
   <section class="rp-compact space-y-4">
     <header>
       <button type="button" class="mb-2 inline-flex items-center gap-1 rounded-lg border border-border bg-white px-3 py-1.5 text-xs font-semibold text-navy hover:bg-canvas" @click="goBack"><ChevronLeft :size="14" /> Back</button>
-      <h1 class="text-xl font-bold text-navy">{{ isNew ? 'Assign agents' : 'Update group' }}</h1>
+      <h1 class="text-xl font-bold text-navy">{{ isNew ? 'Add group' : addOnly ? 'Add agents' : 'Update group' }}</h1>
     </header>
 
-    <AppAlert v-if="!canSave" type="warning" :title="isNew ? 'You can’t add groups' : 'You can’t change groups'" :message="isNew ? 'It needs Add Group Agent Assignments.' : 'It needs Update Group Agent Assignments.'" />
+    <AppAlert v-if="!canSave" type="warning" :title="isNew ? 'You can’t add groups' : 'You can’t change groups'" :message="isNew ? 'It needs Add Group Agent Assignments.' : 'It needs Update Group Agent Assignments or Add Agents to Groups.'" />
     <div v-else-if="loading" class="text-sm text-muted">Loading…</div>
     <AppAlert v-else-if="loadError" title="Couldn’t load the group" :message="loadError"><template #action><NuxtLink to="/admin/platform-assignments">Back to the groups</NuxtLink></template></AppAlert>
+    <!-- Add Agents to Groups only: a turned-off group takes no one -->
+    <AppAlert v-else-if="addOnly && group && !group.is_active" type="warning" :title="`“${group.title}” is turned off`" message="Agents can be put in once it is turned on (that needs Update Group Agent Assignments)."><template #action><NuxtLink to="/admin/platform-assignments">Back to the groups</NuxtLink></template></AppAlert>
     <form v-else class="space-y-4 rounded-xl border border-border bg-white p-4 sm:p-5" novalidate @submit.prevent="save">
       <!-- Only with several branches: a new group picks its branch (its agents change with it); a saved one keeps its own -->
       <div v-if="rp.show.value" class="space-y-1 text-xs font-medium text-muted">Branch
@@ -16,7 +18,7 @@
       </div>
 
       <label class="block space-y-1 text-xs font-medium text-muted">Title <span class="text-expense">*</span>
-        <input v-model="title" maxlength="128" :aria-invalid="tried && !title.trim() ? 'true' : undefined" class="h-10 w-full rounded-lg border border-border px-3 text-sm text-navy" placeholder="e.g. Group" />
+        <input v-model="title" maxlength="128" :disabled="addOnly" :aria-invalid="tried && !title.trim() ? 'true' : undefined" class="h-10 w-full rounded-lg border border-border px-3 text-sm text-navy disabled:bg-canvas disabled:text-muted" placeholder="e.g. Group" />
       </label>
 
       <div class="space-y-1 text-xs font-medium text-muted">Agents <span class="text-expense">*</span>
@@ -33,19 +35,19 @@
               <p class="break-all font-mono text-sm font-bold text-navy">{{ r.code }}</p>
               <p v-if="r.weeks" class="text-[11px] text-muted">{{ r.weeks }} {{ r.weeks === 1 ? 'week' : 'weeks' }} entered</p>
             </div>
-            <button type="button" class="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-muted hover:bg-red-50 hover:text-expense" :aria-label="`Take ${r.code} out`" @click="agentIds = agentIds.filter(id => id !== r.id)"><X :size="16" /></button>
+            <button v-if="!r.locked" type="button" class="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-muted hover:bg-red-50 hover:text-expense" :aria-label="`Take ${r.code} out`" @click="agentIds = agentIds.filter(id => id !== r.id)"><X :size="16" /></button>
           </div>
           <div class="keep-cols mt-3 grid grid-cols-2 gap-3">
             <div class="space-y-1">
               <p class="text-[10px] font-bold uppercase tracking-wide text-slate-500">Type</p>
               <div class="keep-cols grid grid-cols-2 gap-1 rounded-lg bg-canvas p-1" role="radiogroup" :aria-label="`Type for ${r.code}`">
-                <button v-for="t in CALC_TYPES" :key="t.value" type="button" role="radio" :aria-checked="kinds[r.id] === t.value" class="h-8 rounded-md text-sm font-bold" :class="kinds[r.id] === t.value ? 'bg-white text-primary shadow-sm' : 'text-muted'" @click="kinds[r.id] = t.value">{{ t.label }}</button>
+                <button v-for="t in CALC_TYPES" :key="t.value" type="button" role="radio" :aria-checked="kinds[r.id] === t.value" :disabled="r.locked" class="h-8 rounded-md text-sm font-bold disabled:cursor-not-allowed" :class="kinds[r.id] === t.value ? 'bg-white text-primary shadow-sm' : 'text-muted'" @click="kinds[r.id] = t.value">{{ t.label }}</button>
               </div>
             </div>
             <div class="space-y-1">
               <p class="text-[10px] font-bold uppercase tracking-wide text-slate-500">Rate</p>
               <div class="flex items-center gap-1.5 text-xs text-muted">
-                <input v-model.trim="rates[r.id]" type="text" inputmode="decimal" :aria-label="`Rate for ${r.code}`" :aria-invalid="tried && !!rateProblem(rates[r.id]) ? 'true' : undefined" class="h-10 min-w-0 flex-1 rounded-lg border border-border px-2.5 text-right text-sm text-navy" placeholder="0" />%
+                <input v-model.trim="rates[r.id]" type="text" inputmode="decimal" :disabled="r.locked" :aria-label="`Rate for ${r.code}`" :aria-invalid="tried && !!rateProblem(rates[r.id]) ? 'true' : undefined" class="h-10 min-w-0 flex-1 rounded-lg border border-border px-2.5 text-right text-sm text-navy disabled:bg-canvas disabled:text-muted" placeholder="0" />%
               </div>
             </div>
           </div>
@@ -73,7 +75,7 @@
               </td>
               <td class="px-2 py-2 sm:px-3">
                 <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
-                  <select v-model="kinds[r.id]" :aria-label="`Type for ${r.code}`" class="h-9 rounded-lg border border-border bg-white px-2 text-sm font-semibold text-navy">
+                  <select v-model="kinds[r.id]" :disabled="r.locked" :aria-label="`Type for ${r.code}`" class="h-9 rounded-lg border border-border bg-white px-2 text-sm font-semibold text-navy disabled:bg-canvas disabled:text-muted">
                     <option v-for="t in CALC_TYPES" :key="t.value" :value="t.value">{{ t.label }}</option>
                   </select>
                   <span class="hidden whitespace-nowrap text-[11px] text-muted sm:inline">{{ CALC_TYPES.find(t => t.value === kinds[r.id])?.formula }}</span>
@@ -81,13 +83,13 @@
               </td>
               <td class="px-2 py-2 sm:px-3">
                 <label class="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-muted sm:flex-nowrap">
-                  <span class="inline-flex items-center gap-1.5"><input v-model.trim="rates[r.id]" type="text" inputmode="decimal" :aria-label="`Rate for ${r.code}`" :aria-invalid="tried && !!rateProblem(rates[r.id]) ? 'true' : undefined" class="h-9 w-16 rounded-lg border border-border px-2.5 text-right text-sm text-navy sm:w-24" placeholder="0" />%</span>
+                  <span class="inline-flex items-center gap-1.5"><input v-model.trim="rates[r.id]" type="text" inputmode="decimal" :disabled="r.locked" :aria-label="`Rate for ${r.code}`" :aria-invalid="tried && !!rateProblem(rates[r.id]) ? 'true' : undefined" class="h-9 w-16 rounded-lg border border-border px-2.5 text-right text-sm text-navy disabled:bg-canvas disabled:text-muted sm:w-24" placeholder="0" />%</span>
                   <!-- PO: the Total is at what is left, 60% → 40%; GI: at the rate with a minus, 60% → −60% (under the rate on phones) -->
                   <span v-if="!rateProblem(rates[r.id])" class="whitespace-nowrap tabular-nums max-sm:w-full">→ {{ totalRate(kinds[r.id] || 'PO', Number(rates[r.id] || 0)) }}</span>
                 </label>
               </td>
               <td class="px-1 py-2 text-right sm:px-2">
-                <button type="button" class="grid h-8 w-8 place-items-center rounded-lg text-muted hover:bg-red-50 hover:text-expense" :aria-label="`Take ${r.code} out`" @click="agentIds = agentIds.filter(id => id !== r.id)"><X :size="15" /></button>
+                <button v-if="!r.locked" type="button" class="grid h-8 w-8 place-items-center rounded-lg text-muted hover:bg-red-50 hover:text-expense" :aria-label="`Take ${r.code} out`" @click="agentIds = agentIds.filter(id => id !== r.id)"><X :size="15" /></button>
               </td>
             </tr>
           </tbody>
@@ -100,14 +102,15 @@
         <div class="space-y-1 text-xs font-medium text-muted">From<DatePicker v-model="startsOn" aria-label="First day" /></div>
       </div>
 
-      <p v-if="!isNew" class="text-[11px] text-muted">An agent taken out is ended if weeks were entered for it (they stay), else removed. An agent put in starts today; its weeks already saved for this week count in the group too. Saved weeks are worked out again at the rates and types here.</p>
-      <AppAlert v-if="group?.partners.length" type="warning" title="This group still has partners" :message="`${group.partners.map(p => `${p.partner_name} ${formatRate(p.commission_rate)}`).join(', ')}. Saving takes them off: from then on each agent’s rate above is used. Weeks already saved keep their partner shares.`" />
+      <p v-if="addOnly" class="text-[11px] text-muted">The agents you put in start today; their weeks already saved for this week count in the group too. The agents already in the group, their rates and the title stay as they are ({{ can('platform-assignments.edit') ? 'Update on the groups list changes them' : 'changing them needs Update Group Agent Assignments' }}).</p>
+      <p v-else-if="!isNew" class="text-[11px] text-muted">An agent taken out is ended if weeks were entered for it (they stay), else removed. An agent put in starts today; its weeks already saved for this week count in the group too. Saved weeks are worked out again at the rates and types here.</p>
+      <AppAlert v-if="group?.partners.length && !addOnly" type="warning" title="This group still has partners" :message="`${group.partners.map(p => `${p.partner_name} ${formatRate(p.commission_rate)}`).join(', ')}. Saving takes them off: from then on each agent’s rate above is used. Weeks already saved keep their partner shares.`" />
       <p v-else-if="isNew" class="text-[11px] text-muted">An agent can be in more than one group, at its own rate in each. Results are entered once a week; the first day can be in the past to enter earlier weeks. Weeks already saved from the first day on count in the group too.</p>
 
       <AppAlert v-if="formError" title="Couldn’t save the group" :message="formError" dismissible @dismiss="formError = ''" />
       <div class="flex flex-wrap items-center justify-end gap-2 border-t border-border pt-4">
         <NuxtLink to="/admin/platform-assignments" class="rounded-lg border border-border bg-white px-4 py-2 text-sm font-semibold text-muted">Cancel</NuxtLink>
-        <button type="submit" class="rounded-lg bg-primary px-5 py-2 text-sm font-semibold text-white disabled:opacity-60" :disabled="saving">{{ saving ? 'Saving…' : isNew ? 'Assign' : 'Update' }}</button>
+        <button type="submit" class="rounded-lg bg-primary px-5 py-2 text-sm font-semibold text-white disabled:opacity-60" :disabled="saving">{{ saving ? 'Saving…' : isNew ? 'Add group' : addOnly ? 'Add agents' : 'Update' }}</button>
       </div>
     </form>
   </section>
@@ -127,9 +130,14 @@ const phone = useMediaQuery('(max-width: 639px)')
 const { api } = useApi()
 const { can } = usePermissions()
 const toast = useToast()
-// Assign agents needs Add Group Agent Assignments, a group's page Update.
-const canSave = computed(() => can(isNew.value ? 'platform-assignments.create' : 'platform-assignments.edit'))
+// Add group needs Add Group Agent Assignments, a group's page Update. With Add Agents to Groups
+// alone the page only puts new agents in: the agents already in it, their rates and the title stay.
 const isNew = computed(() => route.params.id === 'new')
+// Add agents (the list's button, ?mode=add, or Add Agents to Groups without Update): only new agents
+// are put in; the title and the agents already in the group stay as they are.
+const addOnly = computed(() => !isNew.value && can('platform-assignments.edit', 'platform-assignments.add-agents')
+  && (route.query.mode === 'add' || !can('platform-assignments.edit')))
+const canSave = computed(() => isNew.value ? can('platform-assignments.create') : can('platform-assignments.edit') || addOnly.value)
 
 const platforms = ref<Platform[]>([])
 const group = ref<AssignmentGroup | null>(null)
@@ -156,7 +164,8 @@ const rows = computed(() => {
   const row = (id: string) => {
     const p = platforms.value.find(x => x.id === id)
     const saved = group.value?.agents.find(a => a.platform_id === id)
-    return { id, code: p?.code || saved?.platform_code || '?', weeks: saved?.weeks || 0 }
+    // Add Agents to Groups only: the agents already in the group can't be changed or taken out.
+    return { id, code: p?.code || saved?.platform_code || '?', weeks: saved?.weeks || 0, locked: addOnly.value && loadedIds.value.includes(id) }
   }
   const added = agentIds.value.filter(id => !loadedIds.value.includes(id)).reverse().map(row)
   const loaded = agentIds.value.filter(id => loadedIds.value.includes(id)).map(row).sort((a, b) => byAgentCode(a.code, b.code))
@@ -239,6 +248,7 @@ function goBack() {
 async function save() {
   tried.value = true
   formError.value = ''
+  if (addOnly.value) return addAgents()
   const bad = rows.value.find(r => rateProblem(rates[r.id]))
   formError.value = !title.value.trim() ? 'Give the group a title.'
     : !agentIds.value.length ? 'Choose at least one agent.'
@@ -261,6 +271,29 @@ async function save() {
     await navigateTo('/admin/platform-assignments')
   } catch (e: any) {
     formError.value = e?.data?.error || 'Could not save the group.'
+  } finally {
+    saving.value = false
+  }
+}
+
+// Add Agents to Groups only: just the agents picked here go in, each at its type and rate.
+async function addAgents() {
+  const added = rows.value.filter(r => !r.locked)
+  const bad = added.find(r => rateProblem(rates[r.id]))
+  formError.value = !added.length ? 'Choose at least one agent to put in.' : bad ? `${bad.code}: ${rateProblem(rates[bad.id])}.` : ''
+  if (formError.value) return
+  saving.value = true
+  try {
+    const g = await api<AssignmentGroup>(`/platform-groups/${route.params.id}/agents`, {
+      method: 'POST',
+      body: { agents: added.map(r => ({ platform_id: r.id, commission_rate: rates[r.id] || '0', calc_type: kinds[r.id] || 'PO' })) },
+    })
+    saved.value = true
+    const counted = g.counted_weeks ? ` ${g.counted_weeks} ${g.counted_weeks === 1 ? 'week' : 'weeks'} saved before now count in it.` : ''
+    toast.success(`${added.map(r => r.code).join(', ')} put in at the types and rates chosen.${counted}`, { title: `${added.length} ${added.length === 1 ? 'agent' : 'agents'} added to “${g.title}”` })
+    await navigateTo('/admin/platform-assignments')
+  } catch (e: any) {
+    formError.value = e?.data?.error || 'Could not put the agents in.'
   } finally {
     saving.value = false
   }

@@ -2,7 +2,7 @@
 
 Server-side authorization is enforced on every protected API. The UI uses the same codes for visibility only.
 
-**Total: 70 permissions** across 21 modules.
+**Total: 72 permissions** across 21 modules.
 
 ## Full table
 
@@ -66,12 +66,14 @@ Server-side authorization is enforced on every protected API. The UI uses the sa
 | `platforms.edit` | Update Agents | Platforms | Edit agents; turn them off (with a reason) or on |
 | `platforms.delete` | Delete Agents | Platforms | Delete an agent that was never in a group or entered (a used one can only be turned off) |
 | `platform-assignments.view` | View Group Agent Assignments | Platforms | See the titled groups with their agents and rates |
-| `platform-assignments.create` | Add Group Agent Assignments | Platforms | Make a titled group of agents with their rates (Assign agents) |
+| `platform-assignments.create` | Add Group Agent Assignments | Platforms | Make a titled group of agents with their rates (Add group) |
 | `platform-assignments.edit` | Update Group Agent Assignments | Platforms | Change a group's title, agents and rates; turn it off or on |
+| `platform-assignments.add-agents` | Add Agents to Groups | Platforms | Put new agents into a group that exists, with their type and rate (not change or take out the agents already in it). Owner/admin and every role with Update Group Agent Assignments get it; give it to other roles on the Roles page |
 | `platform-assignments.delete` | Delete Group Agent Assignments | Platforms | Delete a group no week was entered for (a used one can only be turned off) |
 | `winlose.view` | View Data Entry | Win/Lose | See the entries and the W/L and COMM entered for your groups |
 | `winlose.create` | Add Data Entry | Win/Lose | Make new entries and enter agents' W/L and COMM for your groups |
 | `winlose.edit` | Update Data Entry | Win/Lose | Change an entry's title and amounts already saved, with a reason (kept in the audit log) |
+| `winlose.add-agents` | Add Agents to Data Entry | Win/Lose | Enter W/L and COMM for the agents not yet saved in an entry that exists (not make new entries, or change its title or the amounts already saved); Data entry's **Add agents** button |
 | `winlose.delete` | Delete Data Entry | Win/Lose | Delete an entry and its amounts, with a reason (kept in the audit log) |
 | `winlose.react` | React to Data Entry | Win/Lose | Give an entry, or a group or agent in it (at 0 too), ✅ or ❌ and 📤 (report sent), on Data entry, the Report and Group summary |
 | `winlose-reports.view` | View Report | Win/Lose Reports | The Report, the group summary and History (its downloaded or shared images) for your groups, one group at a time |

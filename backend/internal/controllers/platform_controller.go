@@ -192,10 +192,13 @@ func (pc *PlatformController) SavePlatform(c *gin.Context) {
 		return
 	}
 	// Putting the agent in groups or taking it out changes those groups: it needs Update Group
-	// Agent Assignments too.
+	// Agent Assignments too; with only Add Agents to Groups it may just be put in more groups.
 	if in.Groups != nil && !access.Can(permissions.PlatformAssignmentsEdit) {
-		c.JSON(http.StatusForbidden, gin.H{"error": "changing an agent’s groups needs Update Group Agent Assignments"})
-		return
+		if !access.Can(permissions.PlatformAssignmentsAddAgents) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "changing an agent’s groups needs Update Group Agent Assignments"})
+			return
+		}
+		in.GroupsAddOnly = true
 	}
 	p, groups, err := pc.svc.SavePlatformWithGroups(c.Request.Context(), id, in, scope, actor)
 	if err != nil {
@@ -523,6 +526,33 @@ func (pc *PlatformController) UpdateGroup(c *gin.Context) {
 		return
 	}
 	pc.record(c, actor, "platform.group.update", "assignment_group", id.String(), &after.BranchID, map[string]interface{}{
+		"before": groupDetails(before), "after": groupDetails(after),
+	})
+	c.JSON(http.StatusOK, after)
+}
+
+// AddGroupAgents puts new agents into a group (Add Agents to Groups, or Update Group Agent
+// Assignments); the agents already in it stay as they are.
+func (pc *PlatformController) AddGroupAgents(c *gin.Context) {
+	_, scope, ok := pc.scope(c)
+	if !ok {
+		return
+	}
+	id, ok := paramID(c)
+	if !ok {
+		return
+	}
+	var in services.GroupAgentsInput
+	if !bindJSON(c, &in) {
+		return
+	}
+	actor := actorOf(c)
+	before, after, err := pc.svc.AddGroupAgents(c.Request.Context(), id, in, scope, actor)
+	if err != nil {
+		writePlatformError(c, err)
+		return
+	}
+	pc.record(c, actor, "platform.group.add_agents", "assignment_group", id.String(), &after.BranchID, map[string]interface{}{
 		"before": groupDetails(before), "after": groupDetails(after),
 	})
 	c.JSON(http.StatusOK, after)

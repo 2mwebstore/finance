@@ -77,22 +77,26 @@ const (
 
 	// RP: agents (platforms), group agent assignments, Data entry (weekly win/lose) and the Report;
 	// each page has its own view, add, update and delete (Data entry also react). An HQ is a branch.
-	PlatformsView              = "platforms.view"
-	PlatformsCreate            = "platforms.create"
-	PlatformsEdit              = "platforms.edit"
-	PlatformsDelete            = "platforms.delete"
-	PlatformAssignmentsView    = "platform-assignments.view"
-	PlatformAssignmentsCreate  = "platform-assignments.create"
-	PlatformAssignmentsEdit    = "platform-assignments.edit"
-	PlatformAssignmentsDelete  = "platform-assignments.delete"
-	WinLoseView                = "winlose.view"
-	WinLoseCreate              = "winlose.create"
-	WinLoseEdit                = "winlose.edit"
-	WinLoseDelete              = "winlose.delete"
-	WinLoseReact               = "winlose.react"
-	WinLoseReportsView         = "winlose-reports.view"
-	WinLoseReportsConsolidated = "winlose-reports.consolidated"
-	WinLoseReportsRates        = "winlose-reports.rates"
+	PlatformsView             = "platforms.view"
+	PlatformsCreate           = "platforms.create"
+	PlatformsEdit             = "platforms.edit"
+	PlatformsDelete           = "platforms.delete"
+	PlatformAssignmentsView   = "platform-assignments.view"
+	PlatformAssignmentsCreate = "platform-assignments.create"
+	PlatformAssignmentsEdit   = "platform-assignments.edit"
+	PlatformAssignmentsDelete = "platform-assignments.delete"
+	// Put new agents into a group that exists, with their type and rate (not change or take out the
+	// agents already in it, nor its title): less than Update.
+	PlatformAssignmentsAddAgents = "platform-assignments.add-agents"
+	WinLoseView                  = "winlose.view"
+	WinLoseCreate                = "winlose.create"
+	WinLoseEdit                  = "winlose.edit"
+	WinLoseDelete                = "winlose.delete"
+	WinLoseReact                 = "winlose.react"
+	WinLoseAddAgents             = "winlose.add-agents"
+	WinLoseReportsView           = "winlose-reports.view"
+	WinLoseReportsConsolidated   = "winlose-reports.consolidated"
+	WinLoseReportsRates          = "winlose-reports.rates"
 )
 
 // AllPermissions returns the full list for seeding.
@@ -171,13 +175,15 @@ func AllPermissions() []struct {
 		{PlatformsEdit, "Update Agents", "Platforms", "Edit agents; turn them off (with a reason) or on"},
 		{PlatformsDelete, "Delete Agents", "Platforms", "Delete an agent that was never in a group or entered (a used one can only be turned off)"},
 		{PlatformAssignmentsView, "View Group Agent Assignments", "Platforms", "See the titled groups with their agents and rates"},
-		{PlatformAssignmentsCreate, "Add Group Agent Assignments", "Platforms", "Make a titled group of agents with their rates (Assign agents)"},
+		{PlatformAssignmentsCreate, "Add Group Agent Assignments", "Platforms", "Make a titled group of agents with their rates (Add group)"},
 		{PlatformAssignmentsEdit, "Update Group Agent Assignments", "Platforms", "Change a group's title, agents and rates; turn it off or on"},
+		{PlatformAssignmentsAddAgents, "Add Agents to Groups", "Platforms", "Put new agents into a group that exists, with their type and rate (not change or take out the agents already in it)"},
 		{PlatformAssignmentsDelete, "Delete Group Agent Assignments", "Platforms", "Delete a group no week was entered for (a used one can only be turned off)"},
 		{WinLoseView, "View Data Entry", "Win/Lose", "See the entries and the W/L and COMM entered for your groups"},
 		{WinLoseCreate, "Add Data Entry", "Win/Lose", "Make new entries and enter agents' W/L and COMM for your groups"},
 		{WinLoseEdit, "Update Data Entry", "Win/Lose", "Change an entry's title and amounts already saved, with a reason (kept in the audit log)"},
 		{WinLoseDelete, "Delete Data Entry", "Win/Lose", "Delete an entry and its amounts, with a reason (kept in the audit log)"},
+		{WinLoseAddAgents, "Add Agents to Data Entry", "Win/Lose", "Enter W/L and COMM for the agents not yet saved in an entry that exists (not make new entries, or change its title or the amounts already saved)"},
 		{WinLoseReact, "React to Data Entry", "Win/Lose", "Give an entry, or an agent in it, ✅ or ❌, on Data entry and the Report"},
 		{WinLoseReportsView, "View Report", "Win/Lose Reports", "The Report, the group summary and History (its downloaded or shared images) for your groups, one group at a time"},
 		{WinLoseReportsConsolidated, "View Consolidated Win/Lose", "Win/Lose Reports", "Combined totals across all your groups"},
@@ -231,8 +237,8 @@ func DefaultRoles() map[string]struct {
 				CustomersManage, SuppliersManage,
 				InventoryExpensesView, InventoryExpensesCreate, InventoryExpensesVoid,
 				PlatformsView, PlatformsCreate, PlatformsEdit, PlatformsDelete,
-				PlatformAssignmentsView, PlatformAssignmentsCreate, PlatformAssignmentsEdit, PlatformAssignmentsDelete,
-				WinLoseView, WinLoseCreate, WinLoseEdit, WinLoseDelete, WinLoseReact,
+				PlatformAssignmentsView, PlatformAssignmentsCreate, PlatformAssignmentsEdit, PlatformAssignmentsDelete, PlatformAssignmentsAddAgents,
+				WinLoseView, WinLoseCreate, WinLoseEdit, WinLoseDelete, WinLoseReact, WinLoseAddAgents,
 				WinLoseReportsView, WinLoseReportsConsolidated, WinLoseReportsRates,
 			},
 		},
@@ -255,7 +261,7 @@ func DefaultRoles() map[string]struct {
 				CustomersManage, SuppliersManage,
 				InventoryExpensesView, InventoryExpensesCreate,
 				PlatformsView, PlatformAssignmentsView,
-				WinLoseView, WinLoseCreate, WinLoseEdit, WinLoseDelete, WinLoseReact, WinLoseReportsView, WinLoseReportsRates,
+				WinLoseView, WinLoseCreate, WinLoseEdit, WinLoseDelete, WinLoseReact, WinLoseAddAgents, WinLoseReportsView, WinLoseReportsRates,
 			},
 		},
 		"accountant": {
@@ -271,7 +277,7 @@ func DefaultRoles() map[string]struct {
 				InventoryView, SalesView, QuotationsView, PurchasesView, PurchasesCreate, PurchasesEdit,
 				InventoryExpensesView, InventoryExpensesCreate,
 				PlatformsView, PlatformAssignmentsView,
-				WinLoseView, WinLoseCreate, WinLoseReact, WinLoseReportsView, WinLoseReportsRates,
+				WinLoseView, WinLoseCreate, WinLoseReact, WinLoseAddAgents, WinLoseReportsView, WinLoseReportsRates,
 			},
 		},
 		"cashier": {

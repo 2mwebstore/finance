@@ -1046,6 +1046,38 @@ func TestWeeklyEntryCalculationAndRateHistory(t *testing.T) {
 	}
 }
 
+// Add Agents to Data Entry: agents not yet saved can be entered on an entry that exists, but not a
+// new entry, a saved agent's amounts or the title.
+func TestAddAgentsToDataEntry(t *testing.T) {
+	f := newWLFixture(t)
+	f.assign(t, []models.Platform{f.p1, f.p2}, 0)
+	onlyAdd := func(code string) bool { return code == permissions.WinLoseAddAgents }
+	if _, _, err := f.save(f.week, 0, onlyAdd, "", row(f.p1, "1000", "0")); err == nil {
+		t.Error("Add Agents to Data Entry can't make a new entry")
+	}
+	if _, _, err := f.save(f.week, 0, canAll, "", row(f.p1, "1000", "0")); err != nil {
+		t.Fatal(err)
+	}
+	// The agent not yet saved (p2) can be put in; the one saved (p1) and the title can't change.
+	added, _, err := f.save(f.week, 0, onlyAdd, "", row(f.p2, "-5000", "250"))
+	if err != nil {
+		t.Fatalf("an agent not yet saved can be entered on the entry: %v", err)
+	}
+	if r := sheetRow(t, added, f.p2); !r.Saved || r.WinLose == nil || !r.WinLose.Equal(decimal.NewFromInt(-5000)) {
+		t.Errorf("p2 is saved on the entry: %+v", r)
+	}
+	if r := sheetRow(t, added, f.p1); r.WinLose == nil || !r.WinLose.Equal(decimal.NewFromInt(1000)) {
+		t.Errorf("p1 keeps what was saved: %+v", r)
+	}
+	if _, _, err := f.save(f.week, 0, onlyAdd, "typo", row(f.p1, "2000", "0")); err == nil {
+		t.Error("a saved agent's amounts can't be changed with Add Agents to Data Entry")
+	}
+	in := WeekEntryInput{EntryID: added.Entry.ID.String(), WeekStart: dayString(f.week), Title: "Renamed"}
+	if _, _, err := f.svc.SaveWeek(f.ctx, in, all, onlyAdd, f.actor); err == nil {
+		t.Error("the title can't be changed with Add Agents to Data Entry")
+	}
+}
+
 func TestWinLoseHQAccess(t *testing.T) {
 	f := newWLFixture(t)
 	f.assign(t, []models.Platform{f.p1}, 0, 1)
@@ -1869,6 +1901,88 @@ func TestAgentGroupsFromItsForm(t *testing.T) {
 	}
 	if _, _, err := f.svc.SavePlatformWithGroups(f.ctx, &p.ID, in(&p.ID, "TWL_FORM", put(b, "5", "")), scope0, f.actor); err == nil || !strings.Contains(err.Error(), "turn the agent on") {
 		t.Errorf("a turned-off agent is refused: %v", err)
+	}
+}
+
+// Add Agents to Groups: new agents go into a group that exists at their own rate and type; the
+// agents already in it, its title and their rates stay. From an agent's form it may only be put in
+// more groups (not taken out, nor its rate or type changed).
+func TestAddAgentsToGroups(t *testing.T) {
+	f := newWLFixture(t)
+	start := dayString(f.week.AddDate(0, 0, -21))
+	scope0 := f.scope(0)
+	group := func(title string) *GroupRow {
+		t.Helper()
+		g, err := f.svc.CreateGroup(f.ctx, GroupInput{Title: title, Agents: []GroupAgentInput{{PlatformID: f.p2.ID.String(), CommissionRate: "10"}}, StartsOn: start, BranchID: f.hq[0].ID.String()}, all, f.actor)
+		if err != nil {
+			t.Fatalf("group %s: %v", title, err)
+		}
+		return g
+	}
+	jame := group("TWL rp-jame")
+	agent3, _, err := f.svc.SavePlatformWithGroups(f.ctx, nil, PlatformInput{Code: "TWL_AG3", DefaultCurrency: "USD", BranchID: f.hq[0].ID.String()}, scope0, f.actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	add := func(g *GroupRow, scope BranchScope, agents ...GroupAgentInput) (*GroupRow, *GroupRow, error) {
+		return f.svc.AddGroupAgents(f.ctx, g.ID, GroupAgentsInput{Agents: agents}, scope, f.actor)
+	}
+
+	before, after, err := add(jame, scope0, GroupAgentInput{PlatformID: agent3.ID.String(), CommissionRate: "25", CalcType: "GI"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(before.Agents) != 1 || len(after.Agents) != 2 || after.Title != "TWL rp-jame" {
+		t.Fatalf("agent 3 is put in, the title stays: before %d, after %d, %q", len(before.Agents), len(after.Agents), after.Title)
+	}
+	for _, a := range after.Agents {
+		switch a.PlatformID {
+		case f.p2.ID:
+			if !a.CommissionRate.Equal(decimal.NewFromInt(10)) || a.CalcType != "PO" {
+				t.Errorf("the agent already in stays at PO 10%%: %+v", a)
+			}
+		case agent3.ID:
+			if !a.CommissionRate.Equal(decimal.NewFromInt(25)) || a.CalcType != "GI" {
+				t.Errorf("agent 3 is at GI 25%%: %+v", a)
+			}
+		}
+	}
+	if _, _, err := add(jame, scope0, GroupAgentInput{PlatformID: f.p2.ID.String(), CommissionRate: "5"}); err == nil || !strings.Contains(err.Error(), "already in") {
+		t.Errorf("an agent already in is refused: %v", err)
+	}
+	if _, _, err := add(jame, f.scope(1), GroupAgentInput{PlatformID: f.p1.ID.String(), CommissionRate: "5"}); !errors.Is(err, ErrGroupNotFound) {
+		t.Errorf("another branch's group is not found: %v", err)
+	}
+	off := group("TWL off")
+	if _, err := f.svc.SetGroupActive(f.ctx, off.ID, false, all); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := add(off, scope0, GroupAgentInput{PlatformID: agent3.ID.String(), CommissionRate: "5"}); err == nil || !strings.Contains(err.Error(), "turned off") {
+		t.Errorf("a turned-off group takes no one: %v", err)
+	}
+
+	// From agent 3's form, add only.
+	other := group("TWL other")
+	put := func(g *GroupRow, rate, kind string) PlatformGroupInput {
+		return PlatformGroupInput{GroupID: g.ID.String(), CommissionRate: rate, CalcType: kind}
+	}
+	save := func(groups ...PlatformGroupInput) (*GroupChanges, error) {
+		list := append([]PlatformGroupInput{}, groups...)
+		_, changes, err := f.svc.SavePlatformWithGroups(f.ctx, &agent3.ID, PlatformInput{Code: "TWL_AG3", DefaultCurrency: "USD", Groups: &list, GroupsAddOnly: true}, scope0, f.actor)
+		return changes, err
+	}
+	if _, err := save(); err == nil || !strings.Contains(err.Error(), "taking TWL_AG3 out") {
+		t.Errorf("taking it out is refused: %v", err)
+	}
+	if _, err := save(put(jame, "30", "GI")); err == nil || !strings.Contains(err.Error(), "type or rate") {
+		t.Errorf("changing its rate is refused: %v", err)
+	}
+	if _, err := save(put(jame, "25", "GI"), put(off, "5", "PO")); err == nil || !strings.Contains(err.Error(), "turned off") {
+		t.Errorf("a turned-off group is refused: %v", err)
+	}
+	changes, err := save(put(jame, "25", "GI"), put(other, "5", "PO"))
+	if err != nil || strings.Join(changes.Added, ",") != "TWL other" || len(changes.Removed)+len(changes.Changed) != 0 {
+		t.Fatalf("put in one more group: %v %+v", err, changes)
 	}
 }
 

@@ -5,7 +5,7 @@
         <p class="text-[10px] font-bold tracking-[0.14em] text-slate-400">RP</p>
         <h1 class="text-xl font-bold text-navy">Group agent assignments</h1>
       </div>
-      <NuxtLink v-if="canCreate" to="/admin/platform-assignments/new" class="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white hover:bg-primary-hover"><Plus :size="16" /> Assign agents</NuxtLink>
+      <NuxtLink v-if="canCreate" to="/admin/platform-assignments/new" class="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white hover:bg-primary-hover"><Plus :size="16" /> Add group</NuxtLink>
     </header>
 
     <div class="grid grid-cols-1 gap-2" :class="rp.show.value ? 'sm:grid-cols-4' : 'sm:grid-cols-3'">
@@ -42,6 +42,8 @@
             </label>
             <div class="flex items-center gap-1.5">
               <NuxtLink :to="`/admin/platform-assignments/view/${g.id}`" class="action-chip"><Eye :size="13" /> View</NuxtLink>
+              <!-- Add agents: only puts new agents in a switched-on group (the ones in it stay as they are) -->
+              <NuxtLink v-if="(canAddAgents || canEdit) && g.is_active" :to="`/admin/platform-assignments/${g.id}?mode=add`" class="action-chip action-success"><UserPlus :size="13" /> Add agents</NuxtLink>
               <NuxtLink v-if="canEdit" :to="`/admin/platform-assignments/${g.id}`" class="action-chip action-edit"><Pencil :size="13" /> Update</NuxtLink>
               <button v-if="canDelete" type="button" class="action-chip action-danger" @click="openDelete(g)"><Trash2 :size="13" /> Delete</button>
             </div>
@@ -49,7 +51,7 @@
         </div>
       </article>
       <InfiniteLoader :has-more="hasMore" :loading="loadingMore" :count="groups.length" @more="loadMore" />
-      <div v-if="!groups.length" class="rounded-xl border border-border bg-white p-8 text-center text-sm text-muted">{{ search || platformFilter || statusFilter !== 'all' ? 'No groups match these filters.' : 'No groups yet. Use Assign agents to make one.' }}</div>
+      <div v-if="!groups.length" class="rounded-xl border border-border bg-white p-8 text-center text-sm text-muted">{{ search || platformFilter || statusFilter !== 'all' ? 'No groups match these filters.' : 'No groups yet. Use Add group to make one.' }}</div>
     </template>
 
     <!-- Delete: only while no week has been entered -->
@@ -65,7 +67,7 @@
 </template>
 
 <script setup lang="ts">
-import { Eye, Handshake, Network, Pencil, Plus, Trash2 } from 'lucide-vue-next'
+import { Eye, Handshake, Network, Pencil, Plus, Trash2, UserPlus } from 'lucide-vue-next'
 import type { AssignmentGroup, Platform } from '~/types/api'
 import { useToast } from '~/composables/useToast'
 import { useInfiniteList } from '~/composables/useInfiniteList'
@@ -79,6 +81,7 @@ const toast = useToast()
 // Each action has its own permission (Add, Update, Delete Group Agent Assignments).
 const canCreate = computed(() => can('platform-assignments.create'))
 const canEdit = computed(() => can('platform-assignments.edit'))
+const canAddAgents = computed(() => can('platform-assignments.add-agents'))
 const canDelete = computed(() => can('platform-assignments.delete'))
 
 const platforms = ref<Platform[]>([])
