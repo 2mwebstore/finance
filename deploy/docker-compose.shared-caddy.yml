@@ -1,0 +1,23 @@
+# For a server where a shared Caddy (another app's, or one for several apps) already owns ports 80
+# and 443. This app's own Caddy is then not started: the app joins the shared Caddy's Docker network
+# as "finance-app", and the shared Caddy forwards this app's domains to http://finance-app:8080 and
+# handles HTTPS itself.
+#
+# Turn it on in .env (docs/DEPLOY_HOSTINGER.md, "Sharing the server with another app"):
+#   COMPOSE_FILE=docker-compose.yml:deploy/docker-compose.shared-caddy.yml
+#   PROXY_NETWORK=<the shared Caddy's Docker network>
+
+services:
+  caddy:
+    # Started only with --profile own-caddy, so not while the shared Caddy serves the domains.
+    profiles: [own-caddy]
+  app:
+    networks:
+      default:
+      proxy:
+        aliases: [finance-app]
+
+networks:
+  proxy:
+    external: true
+    name: ${PROXY_NETWORK:?set PROXY_NETWORK in .env (the shared Caddy's Docker network)}

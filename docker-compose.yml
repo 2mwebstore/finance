@@ -34,7 +34,11 @@ services:
       start_period: 30s
 
   app:
-    build: .
+    build:
+      context: .
+      # finance-deploy removes this app's old builds by this label (and nothing else on the server).
+      labels:
+        finance.image: "true"
     restart: unless-stopped
     depends_on:
       mysql:

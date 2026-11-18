@@ -1,0 +1,55 @@
+name: Deploy
+
+# When CI passes for a push to main on the private finance-pro repo (rp001.pro,
+# rph001.pro), updates the VPS to that commit. "Run workflow" on the Actions tab
+# does the same for the newest main (to redeploy without a push). The public
+# finance repo has this file too but never deploys.
+# Setup: docs/DEPLOY_HOSTINGER.md, "Deploying automatically".
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    if: >-
+      github.repository == '2mwebstore/finance-pro' && (
+        (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+        (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # One deploy at a time. A newer push waiting here replaces an older one
+    # that hasn't started yet, since the newer commit includes it.
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    steps:
+      - name: Update the VPS to this commit
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          # The commit CI passed for (a manual run: the newest main).
+          COMMIT: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          if [ -z "$SSH_KEY" ] || [ -z "$KNOWN_HOSTS" ]; then
+            echo "::error::Add the DEPLOY_SSH_KEY and DEPLOY_KNOWN_HOSTS secrets first (docs/DEPLOY_HOSTINGER.md, Deploying automatically)."
+            exit 1
+          fi
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          # DEPLOY_KNOWN_HOSTS is "SERVER_IP ssh-ed25519 AAAA...": the address
+          # comes first, and the key proves it's really that server.
+          host=$(awk 'NR == 1 { print $1 }' ~/.ssh/known_hosts)
+          # On the server this key runs only finance-deploy, which reads the
+          # commit id sent here and deploys it.
+          ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes -o ConnectTimeout=20 \
+            "root@$host" "$COMMIT"

@@ -100,6 +100,59 @@ All three should be `Up` (mysql and app `healthy` after a minute). The app's log
 docker compose logs --tail=30 app
 ```
 
+### Sharing the server with another app (a shared Caddy)
+
+If `docker compose up` stops at `Bind for :::80 failed: port is already allocated`, another container
+already owns ports 80 and 443, e.g. a Caddy shared by several apps. Keep it: this app's own Caddy is
+then not started, the app joins the shared Caddy's Docker network as `finance-app`, and the shared
+Caddy serves the domains (and their certificates).
+
+1. Find the container that owns port 80, and its network:
+
+   ```bash
+   docker ps --format '{{.Names}}  {{.Ports}}' | grep -E ':(80|443)->'
+   ```
+
+   ```bash
+   docker inspect SHARED_CADDY --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}'
+   ```
+
+   (`SHARED_CADDY` is the name the first command printed.)
+
+2. Add to `.env` (with that network's name), remove this app's Caddy container that couldn't start,
+   and start the app:
+
+   ```
+   COMPOSE_FILE=docker-compose.yml:deploy/docker-compose.shared-caddy.yml
+   PROXY_NETWORK=the_shared_network
+   ```
+
+   ```bash
+   docker rm -f finance_pro-caddy-1; docker compose up -d --build
+   ```
+
+   `docker compose ps` then lists mysql and app only. `DOMAINS` is still required in `.env` but not
+   used in this mode.
+
+3. In the shared Caddy's Caddyfile, add a block for this app's domains (the same ones as `DOMAINS`),
+   then reload it. The Caddyfile's place on the server is in
+   `docker inspect SHARED_CADDY --format '{{range .Mounts}}{{.Source}} -> {{.Destination}}{{println}}{{end}}'`.
+
+   ```
+   rp001.pro, rph001.pro {
+   	encode zstd gzip
+   	reverse_proxy finance-app:8080
+   }
+   ```
+
+   ```bash
+   docker exec SHARED_CADDY caddy reload --config /etc/caddy/Caddyfile
+   ```
+
+If the shared Caddy's stack is taken down with `docker compose down` and its network is made again,
+run `docker compose up -d` here again so the app rejoins it. The deploys (by hand or automatic) keep
+this mode, since `docker compose` reads `COMPOSE_FILE` from `.env`.
+
 ## 5. Point the domains at the VPS
 
 At your domains' DNS, set the **A record** of `rp001.pro` and of `rph001.pro` (and `www` if you use it,
@@ -147,9 +200,39 @@ After pushing to GitHub:
 cd /var/www/finance && git pull --ff-only && docker compose up -d --build
 ```
 
-`.env` and `data/` are never touched by `git pull`. To update automatically on every push, a GitHub
-Actions workflow can log in over SSH (with a key whose public half is in the VPS's
-`~/.ssh/authorized_keys`) and run that same line.
+`.env` and `data/` are never touched by `git pull`.
+
+### Deploying automatically
+
+Every push to `main` of **finance-pro** can deploy itself (the public `finance` repo has the same
+files but never deploys). When CI passes for the push, `.github/workflows/deploy.yml` connects to the
+VPS over SSH and runs `deploy/finance-deploy.sh` there. That script moves the clone forward to the
+tested commit, runs `docker compose up -d --build`, waits until the API answers `/ready`, and removes
+the app's old images. Failing CI means no deploy. A failed deploy shows as a red run on the Actions
+tab; if the build itself fails, the running containers are left as they were.
+
+The script deploys the clone in `/var/www/finance_pro` (`APP_DIR` at its top: change it if yours is
+elsewhere). One-time setup:
+
+1. On the VPS, as root, from the clone: `install -m 755 deploy/finance-deploy.sh /usr/local/bin/finance-deploy`,
+   then run `finance-deploy` once by hand (it deploys the newest `main`, and shows that `git fetch`
+   works without asking for a password).
+2. On your computer, make a key pair for GitHub:
+   `ssh-keygen -t ed25519 -N '' -C finance-github-actions -f finance_actions`.
+3. On the VPS, add the public half (`finance_actions.pub`) to `/root/.ssh/authorized_keys`, limited
+   to the deploy:
+   `command="/usr/local/bin/finance-deploy",restrict ssh-ed25519 AAAA... finance-github-actions`.
+   With `restrict` the key gets no shell, terminal or forwarding, and the script refuses anything
+   but a commit id.
+4. Add two secrets to **finance-pro** (Settings → Secrets and variables → Actions, or `gh secret set -R 2mwebstore/finance-pro`):
+   - `DEPLOY_SSH_KEY`: the private half (`gh secret set DEPLOY_SSH_KEY -R 2mwebstore/finance-pro < finance_actions`).
+     Then delete `finance_actions`; GitHub keeps the only copy.
+   - `DEPLOY_KNOWN_HOSTS`: one line with the VPS's address and host key, printed on the VPS by
+     `echo "YOUR_VPS_IP $(cut -d' ' -f1,2 /etc/ssh/ssh_host_ed25519_key.pub)"` (put the real IP in).
+
+To deploy again without a push: Actions → Deploy → Run workflow. When `deploy/finance-deploy.sh`
+changes, run step 1's `install` again (the VPS runs its installed copy). Don't edit tracked files in
+the VPS's clone: the deploy stops rather than overwrite them. Server-only settings belong in `.env`.
 
 ## Backups
 
