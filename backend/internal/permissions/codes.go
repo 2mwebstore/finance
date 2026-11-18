@@ -22,7 +22,7 @@ func IsValid(code string) bool {
 }
 
 // Count is the number of seeded permission codes.
-const Count = 72
+const Count = 75
 
 // CodeList is the flat list of all permission code strings (same as Codes()).
 // Prefer Codes() or constants (DashboardView, etc.) in application logic.
@@ -48,4 +48,5 @@ var CodeList = []string{
 	PlatformAssignmentsView, PlatformAssignmentsCreate, PlatformAssignmentsEdit, PlatformAssignmentsDelete, PlatformAssignmentsAddAgents,
 	WinLoseView, WinLoseCreate, WinLoseEdit, WinLoseDelete, WinLoseReact, WinLoseAddAgents,
 	WinLoseReportsView, WinLoseReportsConsolidated, WinLoseReportsRates,
+	RequestsView, RequestsCreate, RequestsApprove,
 }

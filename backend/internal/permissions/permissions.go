@@ -19,6 +19,13 @@ const (
 	TransactionsReject  = "transactions.reject"
 	TransactionsReverse = "transactions.reverse"
 
+	// Requests: an expense waiting for approval is a request. Approving one makes it a real expense
+	// (it moves to Expense); rejecting it keeps it on the Requests page with the reason. Approve
+	// Requests is also what approves pending expenses anywhere else (Approve Transactions: income).
+	RequestsView    = "requests.view"
+	RequestsCreate  = "requests.create"
+	RequestsApprove = "requests.approve"
+
 	ReportsView   = "reports.view"
 	ReportsExport = "reports.export"
 
@@ -123,6 +130,10 @@ func AllPermissions() []struct {
 		{TransactionsReject, "Reject Transactions", "Transactions", "Reject pending transactions"},
 		{TransactionsReverse, "Reverse Transactions", "Transactions", "Reverse finalized transactions"},
 
+		{RequestsView, "View Requests", "Requests", "See the Requests page: expenses waiting for approval, and the ones approved or rejected, in your branches"},
+		{RequestsCreate, "Make Requests", "Requests", "Ask for an expense from the Requests page; it waits there until someone approves it"},
+		{RequestsApprove, "Approve Requests", "Requests", "Approve or reject requests (pending expenses); an approved one becomes an expense"},
+
 		{ReportsView, "View Reports", "Reports", "View financial reports"},
 		{ReportsExport, "Export Reports", "Reports", "Export reports to CSV/Excel/PDF"},
 
@@ -225,6 +236,7 @@ func DefaultRoles() map[string]struct {
 				IncomeView, IncomeCreate, IncomeEdit, IncomeVoid,
 				ExpenseView, ExpenseCreate, ExpenseEdit, ExpenseVoid,
 				TransactionsView, TransactionsApprove, TransactionsReject, TransactionsReverse,
+				RequestsView, RequestsCreate, RequestsApprove,
 				ReportsView, ReportsExport,
 				BranchesView, BranchesCreate, BranchesEdit, BranchesManage,
 				UsersView, UsersCreate, UsersEdit, UsersManage,
@@ -250,6 +262,7 @@ func DefaultRoles() map[string]struct {
 				IncomeView, IncomeCreate, IncomeEdit, IncomeVoid,
 				ExpenseView, ExpenseCreate, ExpenseEdit, ExpenseVoid,
 				TransactionsView, TransactionsApprove, TransactionsReject,
+				RequestsView, RequestsCreate, RequestsApprove,
 				ReportsView, ReportsExport,
 				BranchesView,
 				UsersView,
@@ -272,6 +285,7 @@ func DefaultRoles() map[string]struct {
 				IncomeView, IncomeCreate, IncomeEdit,
 				ExpenseView, ExpenseCreate, ExpenseEdit,
 				TransactionsView,
+				RequestsView, RequestsCreate,
 				ReportsView, ReportsExport,
 				BranchesView,
 				InventoryView, SalesView, QuotationsView, PurchasesView, PurchasesCreate, PurchasesEdit,
@@ -288,6 +302,7 @@ func DefaultRoles() map[string]struct {
 				IncomeView, IncomeCreate,
 				ExpenseView, ExpenseCreate,
 				TransactionsView,
+				RequestsView, RequestsCreate,
 				InventoryView, SalesView, SalesCreate, QuotationsView, QuotationsCreate,
 			},
 		},
@@ -299,6 +314,7 @@ func DefaultRoles() map[string]struct {
 				IncomeView,
 				ExpenseView,
 				TransactionsView,
+				RequestsView,
 				ReportsView,
 				BranchesView,
 				InventoryView, SalesView, QuotationsView, PurchasesView, InventoryExpensesView,

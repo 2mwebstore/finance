@@ -20,6 +20,7 @@
           <NuxtLink v-for="item in financialNav" :key="item.label" :to="item.to" class="sidebar-link" :class="isActive(item) ? 'is-active' : ''">
             <component :is="item.icon" :size="18" :stroke-width="1.9" />
             <span>{{ item.label }}</span>
+            <span v-if="item.count" class="nav-count" :title="`${item.count} pending`" :aria-label="`${item.count} pending`">{{ item.count > 99 ? '99+' : item.count }}</span>
           </NuxtLink>
         </div>
 
@@ -150,7 +151,8 @@
 <script setup lang="ts">
 import { branchLabel } from '~/composables/useBranchOptions'
 import type { Component } from 'vue'
-import { onClickOutside, useResizeObserver } from '@vueuse/core'
+import { onClickOutside, useEventListener, useIntervalFn, useResizeObserver } from '@vueuse/core'
+import { usePendingRequests } from '~/composables/usePendingRequests'
 import { useCurrency } from '~/composables/useCurrency'
 import {
   ArrowLeftRight,
@@ -165,6 +167,7 @@ import {
   ChartPie,
   ChartNoAxesCombined,
   Check,
+  ClipboardCheck,
   Coins,
   Package,
   ShoppingCart,
@@ -195,7 +198,7 @@ import {
   X,
 } from 'lucide-vue-next'
 
-type NavItem = { label: string; to: string; icon: Component; queryType?: string; center?: boolean }
+type NavItem = { label: string; to: string; icon: Component; queryType?: string; center?: boolean; count?: number }
 
 const route = useRoute()
 const { user, logout } = useAuth()
@@ -203,6 +206,7 @@ const {
   can,
   canViewDashboard,
   canViewTransactions,
+  canViewRequests,
   canViewReports,
   canViewBranches,
   canViewUsers,
@@ -223,6 +227,8 @@ const {
 } = usePermissions()
 const searchTerm = ref('')
 const mobileMenuOpen = ref(false)
+// Pending requests for the sidebar chip.
+const { pendingRequests, refreshPendingRequests } = usePendingRequests()
 
 const mainNav = computed<NavItem[]>(() => {
   const items: NavItem[] = []
@@ -235,6 +241,9 @@ const financialNav = computed<NavItem[]>(() => {
   const items: NavItem[] = []
   if (canViewTransactions.value) items.push({ label: 'Transactions', to: '/transactions', icon: ReceiptText })
   if (can('income.view')) items.push({ label: 'Income', to: '/transactions?type=income', icon: TrendingUp, queryType: 'income' })
+  // Expenses waiting for approval; an approved one moves to Expense (listed next, below it). The
+  // chip counts the pending ones.
+  if (canViewRequests.value) items.push({ label: 'Requests', to: '/requests', icon: ClipboardCheck, count: pendingRequests.value })
   if (can('expense.view')) items.push({ label: 'Expense', to: '/transactions?type=expense', icon: TrendingDown, queryType: 'expense' })
   if (canViewReports.value) items.push({ label: 'Reports', to: '/reports', icon: FileChartColumnIncreasing })
   if (can('categories.manage')) items.push({ label: 'Categories', to: '/admin/categories', icon: Tags })
@@ -411,6 +420,12 @@ function chooseBranch(id: string) {
   pageKey.value++
 }
 
+// The pending chip: on load, on each page, when the top-bar branch or permissions change, and every
+// minute while the tab is visible (someone else may have made or decided a request).
+watch([() => route.path, activeBranchId, canViewRequests], () => { void refreshPendingRequests() }, { immediate: true })
+useIntervalFn(() => { if (document.visibilityState === 'visible') void refreshPendingRequests() }, 60_000)
+useEventListener(document, 'visibilitychange', () => { if (document.visibilityState === 'visible') void refreshPendingRequests() })
+
 function isActive(item: NavItem) {
   const path = item.to.split('?')[0]
   if (item.queryType) return route.path === path && route.query.type === item.queryType
@@ -450,6 +465,9 @@ async function onLogout() {
 .sidebar-link:hover { color: #fff; background: rgb(255 255 255 / 9%); }
 .sidebar-link.is-active { color: #fff; background: linear-gradient(100deg, #287ef2, #1263df); box-shadow: 0 5px 12px rgb(0 0 0 / 14%); }
 .sidebar-link.is-active svg { color: #fff; }
+/* Pending count, styled like the Pending chip on the Requests page. */
+.nav-count { min-width: 20px; margin-left: auto; border-radius: 999px; padding: 1px 6px; color: #8a5a07; background: #ffe7a8; font-size: 11px; font-weight: 750; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums; }
+.sidebar-link.is-active .nav-count { color: #1769e8; background: #fff; }
 .nav-chevron { margin-left: auto; opacity: .8; }
 .nav-divider { height: 1px; margin: 14px 10px 12px; background: rgb(255 255 255 / 11%); }
 .nav-caption { margin: 0 12px 7px; color: #8098ba; font-size: 10px; font-weight: 750; letter-spacing: .13em; }

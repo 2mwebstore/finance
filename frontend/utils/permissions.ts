@@ -17,6 +17,11 @@ export const P = {
   TransactionsReject: 'transactions.reject',
   TransactionsReverse: 'transactions.reverse',
 
+  // Requests: an expense waiting for approval. Approve Requests also approves pending expenses.
+  RequestsView: 'requests.view',
+  RequestsCreate: 'requests.create',
+  RequestsApprove: 'requests.approve',
+
   ReportsView: 'reports.view',
   ReportsExport: 'reports.export',
 
@@ -112,6 +117,10 @@ export const PERMISSION_CATALOG: {
   { code: P.TransactionsReject, name: 'Reject Transactions', module: 'Transactions', description: 'Reject pending transactions' },
   { code: P.TransactionsReverse, name: 'Reverse Transactions', module: 'Transactions', description: 'Reverse finalized transactions' },
 
+  { code: P.RequestsView, name: 'View Requests', module: 'Requests', description: 'See the Requests page: expenses waiting for approval, and the ones approved or rejected, in your branches' },
+  { code: P.RequestsCreate, name: 'Make Requests', module: 'Requests', description: 'Ask for an expense from the Requests page; it waits there until someone approves it' },
+  { code: P.RequestsApprove, name: 'Approve Requests', module: 'Requests', description: 'Approve or reject requests (pending expenses); an approved one becomes an expense' },
+
   { code: P.ReportsView, name: 'View Reports', module: 'Reports', description: 'View financial reports' },
   { code: P.ReportsExport, name: 'Export Reports', module: 'Reports', description: 'Export reports to CSV/Excel/PDF' },
 
@@ -181,7 +190,7 @@ export const PERMISSION_CATALOG: {
 ]
 
 /** Permission modules in the same order as the sidebar (Settings holds Categories). */
-export const PERMISSION_MODULE_ORDER = ['Dashboard', 'Transactions', 'Income', 'Expenses', 'Reports', 'Inventory', 'Quotations', 'Sales', 'Purchases', 'Customers', 'Suppliers', 'Inventory Expenses', 'Win/Lose', 'Win/Lose Reports', 'Branches', 'Platforms', 'Roles', 'Users', 'Settings', 'Audit', 'Backups']
+export const PERMISSION_MODULE_ORDER = ['Dashboard', 'Transactions', 'Income', 'Expenses', 'Requests', 'Reports', 'Inventory', 'Quotations', 'Sales', 'Purchases', 'Customers', 'Suppliers', 'Inventory Expenses', 'Win/Lose', 'Win/Lose Reports', 'Branches', 'Platforms', 'Roles', 'Users', 'Settings', 'Audit', 'Backups']
 
 /** Sort key for a module: sidebar order, unknown modules last. */
 export function permissionModuleRank(module: string) {
@@ -194,6 +203,7 @@ export const ROUTE_PERMISSIONS: Record<string, PermissionCode[]> = {
   '/dashboard': [P.DashboardView],
   '/transactions': [P.TransactionsView, P.IncomeView, P.ExpenseView],
   '/transactions/new': [P.IncomeCreate, P.ExpenseCreate],
+  '/requests': [P.RequestsView, P.RequestsCreate, P.RequestsApprove],
   '/reports': [P.ReportsView, P.DashboardView],
   '/admin/branches': [P.BranchesView, P.BranchesManage],
   '/admin/users': [P.UsersView, P.UsersManage],

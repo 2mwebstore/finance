@@ -171,8 +171,10 @@ import { currentMonthRange, formatDateKey } from '~/utils/dateRanges'
 import { useBranchOptions } from '~/composables/useBranchOptions'
 import { useToast } from '~/composables/useToast'
 import { useCurrency } from '~/composables/useCurrency'
+import { usePendingRequests } from '~/composables/usePendingRequests'
 
 const { api } = useApi()
+const { refreshPendingRequests } = usePendingRequests()
 const route = useRoute()
 const {
   canCreateIncome,
@@ -181,6 +183,7 @@ const {
   canEditExpense,
   canVoidIncome,
   canVoidExpense,
+  canViewRequests,
 } = usePermissions()
 const { user } = useAuth()
 const typeFilter = ref(typeof route.query.type === 'string' ? route.query.type : '')
@@ -350,6 +353,8 @@ async function load(append = false) {
       date_to: dateRange.value.to || undefined,
       currency: currency.value || undefined,
       branch_id: branchFilter.value || undefined,
+      // Pending and rejected expenses are on Requests (for people who can open it).
+      exclude_requests: canViewRequests.value ? 'true' : undefined,
       page: page.value,
       page_size: pageSize.value,
     }
@@ -501,15 +506,19 @@ async function onApprovalDone(updated: Transaction) {
     { title: approved ? 'Transaction approved' : 'Transaction rejected' },
   )
   approvalTransaction.value = null
+  if (updated.type === 'expense') void refreshPendingRequests()
   await load()
 }
 
 async function onTransactionSaved(saved: Transaction) {
+  // A pending expense is a request: the sidebar's chip counts it.
+  if (saved.type === 'expense') void refreshPendingRequests()
   const label = saved.type === 'income' ? 'Income' : 'Expense'
   const amount = formatMoney(saved.amount, saved.currency)
   if (modalMode.value === 'edit' && saved.status === 'pending' && selectedTransaction.value?.status === 'approved') {
     toast.info(`${saved.transaction_number} counts again once a manager approves the change.`, { title: 'Sent for approval again' })
   } else if (modalMode.value === 'edit') toast.success(`${saved.transaction_number} is up to date.`, { title: 'Changes saved' })
+  else if (saved.status === 'pending' && saved.type === 'expense' && canViewRequests.value) toast.info(`${amount} expense waits on Requests until a manager approves it.`, { title: 'Sent to Requests' })
   else if (saved.status === 'pending') toast.info(`${amount} ${saved.type} counts once a manager approves it.`, { title: 'Sent for approval' })
   else toast.success(`${amount} recorded as ${saved.transaction_number}.`, { title: `${label} saved` })
   selectedTransaction.value = null

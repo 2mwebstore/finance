@@ -2,7 +2,7 @@
 
 Server-side authorization is enforced on every protected API. The UI uses the same codes for visibility only.
 
-**Total: 72 permissions** across 21 modules.
+**Total: 75 permissions** across 22 modules.
 
 ## Full table
 
@@ -21,6 +21,9 @@ Server-side authorization is enforced on every protected API. The UI uses the sa
 | `transactions.approve` | Approve Transactions | Transactions | Approve pending transactions |
 | `transactions.reject` | Reject Transactions | Transactions | Reject pending transactions |
 | `transactions.reverse` | Reverse Transactions | Transactions | Reverse finalized transactions |
+| `requests.view` | View Requests | Requests | See the Requests page: expenses waiting for approval, and the ones approved or rejected, in your branches |
+| `requests.create` | Make Requests | Requests | Ask for an expense from the Requests page; it waits there until someone approves it |
+| `requests.approve` | Approve Requests | Requests | Approve or reject requests (pending expenses); an approved one becomes an expense |
 | `reports.view` | View Reports | Reports | View financial reports |
 | `reports.export` | Export Reports | Reports | Export reports to CSV/Excel/PDF |
 | `branches.view` | View Branches | Branches | View branch list and details |
@@ -110,6 +113,25 @@ Server-side authorization is enforced on every protected API. The UI uses the sa
 | `transactions.approve` | Approve pending transactions |
 | `transactions.reject` | Reject pending transactions |
 | `transactions.reverse` | Reverse finalized transactions |
+
+### Requests
+| Code | Description |
+|------|-------------|
+| `requests.view` | See the Requests page: expenses waiting for approval, and the ones approved or rejected, in your branches |
+| `requests.create` | Ask for an expense from the Requests page; it waits there until someone approves it |
+| `requests.approve` | Approve or reject requests (pending expenses); an approved one becomes an expense |
+
+**A request is a pending expense.** Making one on the Requests page (Make Requests) always saves it
+as pending, even for someone who could approve it. An expense entered on Expense by someone without
+Approve Requests is pending too, so it is a request as well. Requests (pending and rejected
+expenses) are only on the Requests page; the Transactions and Expense lists show them once
+approved. Approving needs Approve Requests (Approve Transactions approves pending income), a
+receipt, and someone other than the person who made it (an assigned manager, when the person has
+managers); only a Super Administrator may approve or reject their own request (or transaction); it
+runs once. Rejecting needs a reason; the request stays on the page as Rejected and
+never counts. The sidebar's Requests item shows how many are pending, in the top bar's branch
+(`GET /api/v1/requests/pending-count`, the same rules as the page). When these permissions first appear, roles with Manage Branches get all three, roles
+with Create Expenses get View and Make, and roles with Approve Transactions get View and Approve.
 
 ### Reports
 | Code | Description |

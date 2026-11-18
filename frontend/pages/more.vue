@@ -17,6 +17,7 @@
       <Can perm="dashboard.view"><NuxtLink to="/dashboard"><span>Dashboard</span><small>Business overview</small><ChevronRight :size="17" /></NuxtLink></Can>
       <Can :any="['transactions.view','income.view','expense.view']"><NuxtLink to="/transactions"><span>Transactions</span><small>Review financial activity</small><ChevronRight :size="17" /></NuxtLink></Can>
       <Can :any="['income.create','expense.create']"><NuxtLink to="/transactions/new"><span>Add transaction</span><small>Record income or expense</small><ChevronRight :size="17" /></NuxtLink></Can>
+      <Can :any="['requests.view','requests.create','requests.approve']"><NuxtLink to="/requests"><span>Requests</span><small>Expenses waiting for approval</small><ChevronRight :size="17" /></NuxtLink></Can>
       <Can :any="['reports.view','dashboard.view']"><NuxtLink to="/reports"><span>Reports</span><small>Explore financial insights</small><ChevronRight :size="17" /></NuxtLink></Can>
       <Can perm="categories.manage"><NuxtLink to="/admin/categories"><span>Categories</span><small>Categories for expense transactions</small><ChevronRight :size="17" /></NuxtLink></Can>
     </section>

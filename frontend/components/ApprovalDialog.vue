@@ -3,12 +3,12 @@
     <section class="approval-dialog" :class="isApprove ? 'is-approve' : 'is-reject'" role="alertdialog" aria-modal="true" aria-labelledby="approval-title">
       <span class="sheet-handle" aria-hidden="true"></span>
       <div class="approval-icon"><CheckCircle2 v-if="isApprove" :size="22" /><XCircle v-else :size="22" /></div>
-      <h2 id="approval-title">{{ isApprove ? 'Approve this transaction?' : 'Reject this transaction?' }}</h2>
+      <h2 id="approval-title">{{ isApprove ? `Approve this ${noun}?` : `Reject this ${noun}?` }}</h2>
       <p class="approval-summary">
         <strong>{{ transaction.transaction_number }}</strong> · {{ formatMoney(transaction.amount, transaction.currency) }} {{ transaction.type }}
         <template v-if="transaction.created_by?.name"> · by {{ transaction.created_by.name }}</template>
       </p>
-      <p class="approval-copy">{{ isApprove ? 'It will count toward totals and reports.' : 'It stays in the history but never counts toward totals.' }}</p>
+      <p class="approval-copy">{{ copy }}</p>
       <div class="approval-files">
         <!-- Kept apart: what the submitter attached, and what the approver adds. -->
         <section class="approval-file-group">
@@ -42,13 +42,13 @@
         <input ref="fileInput" type="file" class="sr-only" :accept="ACCEPTED_TYPES.join(',')" tabindex="-1" aria-hidden="true" @change="onFile" />
       </div>
       <label class="approval-note">
-        <span>{{ isApprove ? 'Note' : 'Reason' }} <small>Optional</small></span>
+        <span>{{ isApprove ? 'Note' : 'Reason' }} <small v-if="!reasonRequired">Optional</small><b v-else class="required-mark" aria-hidden="true">*</b></span>
         <textarea v-model.trim="notes" rows="2" maxlength="500" :placeholder="isApprove ? 'Anything to add?' : 'Why is it rejected?'" />
       </label>
       <AppAlert v-if="error" class="approval-error" compact :message="error" />
       <div class="approval-actions">
         <button type="button" class="cancel-button" :disabled="saving" @click="close">Cancel</button>
-        <button type="button" class="confirm-button" :disabled="saving || uploading || needsReceipt" @click="confirm">
+        <button type="button" class="confirm-button" :disabled="saving || uploading || needsReceipt || (reasonRequired && !notes)" @click="confirm">
           <Check v-if="isApprove" :size="16" /><X v-else :size="16" />
           {{ saving ? (isApprove ? 'Approving…' : 'Rejecting…') : (isApprove ? 'Approve' : 'Reject') }}
         </button>
@@ -77,7 +77,7 @@ const emit = defineEmits<{
 }>()
 
 const { api } = useApi()
-const { canApprove } = usePermissions()
+const { canApproveType } = usePermissions()
 const notes = ref('')
 const error = ref('')
 const saving = ref(false)
@@ -86,13 +86,21 @@ const fileInput = ref<HTMLInputElement | null>(null)
 const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'application/pdf']
 const MAX_FILE_BYTES = 10 * 1024 * 1024
 const isApprove = computed(() => props.action === 'approve')
+// A pending expense is a request: decided on /requests (Approve Requests), and rejecting one needs a reason.
+const isRequest = computed(() => props.transaction?.type === 'expense')
+const noun = computed(() => isRequest.value ? 'request' : 'transaction')
+const reasonRequired = computed(() => isRequest.value && !isApprove.value)
+const copy = computed(() => {
+  if (isRequest.value) return isApprove.value ? 'It becomes an expense and counts toward totals and reports.' : 'It stays on Requests as rejected and never counts.'
+  return isApprove.value ? 'It will count toward totals and reports.' : 'It stays in the history but never counts toward totals.'
+})
 const removingId = ref('')
 const submittedFiles = computed(() => filesOfStage(props.transaction?.attachments, 'submitted'))
 const approvalFiles = computed(() => filesOfStage(props.transaction?.attachments, 'approval'))
 // The API only approves an expense that has a receipt (from either side).
 const needsReceipt = computed(() => isApprove.value && props.transaction?.type === 'expense' && !submittedFiles.value.length && !approvalFiles.value.length)
 // Same rule as the API: approvers manage the approval files (the dialog only opens for people who may decide).
-const canAddFile = computed(() => canApprove.value)
+const canAddFile = computed(() => canApproveType(props.transaction?.type))
 
 function preview(id: string) {
   emit('preview', orderedAttachments(props.transaction?.attachments).findIndex(file => file.id === id))
@@ -156,14 +164,15 @@ async function confirm() {
   saving.value = true
   error.value = ''
   try {
-    const updated = await api<Transaction>(`/transactions/${props.transaction.id}/${props.action}`, {
+    const base = isRequest.value ? '/requests' : '/transactions'
+    const updated = await api<Transaction>(`${base}/${props.transaction.id}/${props.action}`, {
       method: 'POST',
       body: { notes: notes.value },
     })
     emit('update:modelValue', false)
     emit('done', updated)
   } catch (e: any) {
-    error.value = e?.data?.error || `Could not ${props.action} this transaction.`
+    error.value = e?.data?.error || `Could not ${props.action} this ${noun.value}.`
   } finally {
     saving.value = false
   }
@@ -200,6 +209,7 @@ async function confirm() {
 .approval-add-file:disabled { opacity: .6; cursor: wait; }
 .approval-note { display: flex; flex-direction: column; gap: 6px; color: #324b70; font-size: 13px; font-weight: 650; }
 .approval-note small { margin-left: 4px; color: #94a2b7; font-size: 11px; font-weight: 500; }
+.required-mark { margin-left: 3px; color: #d94357; font-weight: 700; }
 .approval-note textarea { width: 100%; min-height: 70px; resize: vertical; border: 1px solid #dfe7f1; border-radius: 10px; outline: none; padding: 10px 12px; color: #263f65; font: inherit; font-size: 14px; font-weight: 450; }
 .approval-note textarea:focus { border-color: #85b4f7; box-shadow: 0 0 0 3px rgb(37 99 235 / 10%); }
 .approval-error { margin-top: 12px; }

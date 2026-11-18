@@ -72,6 +72,13 @@ export function usePermissions() {
   const canApprove = computed(() => can(P.TransactionsApprove))
   const canReject = computed(() => can(P.TransactionsReject))
   const canReverse = computed(() => can(P.TransactionsReverse))
+  // Requests: pending expenses. Approve Requests approves expenses; Approve Transactions income.
+  const canViewRequests = computed(() => can(P.RequestsView, P.RequestsCreate, P.RequestsApprove))
+  const canCreateRequest = computed(() => can(P.RequestsCreate))
+  const canApproveRequests = computed(() => can(P.RequestsApprove))
+  function canApproveType(type: string | undefined) {
+    return type === 'expense' ? can(P.RequestsApprove) : can(P.TransactionsApprove)
+  }
   const canViewReports = computed(() => can(P.ReportsView, P.DashboardView))
   const canExportReports = computed(() => can(P.ReportsExport))
   const canManageBranches = computed(() => can(P.BranchesCreate, P.BranchesEdit, P.BranchesManage))
@@ -122,6 +129,10 @@ export function usePermissions() {
     canApprove,
     canReject,
     canReverse,
+    canViewRequests,
+    canCreateRequest,
+    canApproveRequests,
+    canApproveType,
     canViewReports,
     canExportReports,
     canManageBranches,

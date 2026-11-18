@@ -92,7 +92,7 @@ const emit = defineEmits<{
 
 const { api, apiBase } = useApi()
 const { getToken, tryRefresh } = useAuth()
-const { canEditIncome, canEditExpense, canCreateIncome, canCreateExpense, canApprove } = usePermissions()
+const { canEditIncome, canEditExpense, canCreateIncome, canCreateExpense, canApproveType, canCreateRequest, isSuperAdmin } = usePermissions()
 const { user } = useAuth()
 const index = ref(0)
 const objectUrl = ref('')
@@ -112,17 +112,21 @@ const current = computed(() => files.value[index.value] || null)
 const isImage = computed(() => !!current.value?.type.startsWith('image/'))
 const descriptionHtml = computed(() => sanitizeRichText(props.transaction?.description))
 // Same rules as the API. Submitted files: edit rights, or create rights while not approved yet.
-// Approval files: an approver who didn't enter the transaction, while it is pending or approved.
+// Approval files: an approver who didn't enter the transaction (a Super Administrator may on their
+// own), while it is pending or approved.
 const canDelete = computed(() => {
   const txn = props.transaction
   const file = current.value
   if (!txn || !file || txn.status === 'voided' || txn.status === 'reversed') return false
   if ((file.stage || 'submitted') === 'approval') {
-    return canApprove.value && txn.created_by?.id !== user.value?.id && (txn.status === 'pending' || txn.status === 'approved')
+    const notOwn = txn.created_by?.id !== user.value?.id || isSuperAdmin.value
+    return canApproveType(txn.type) && notOwn && (txn.status === 'pending' || txn.status === 'approved')
   }
   const edit = txn.type === 'income' ? canEditIncome.value : canEditExpense.value
   const create = txn.type === 'income' ? canCreateIncome.value : canCreateExpense.value
-  return edit || (create && txn.status !== 'approved')
+  // Someone who makes requests changes the files of their own pending ones.
+  const ownRequest = txn.type === 'expense' && txn.status === 'pending' && canCreateRequest.value && txn.created_by?.id === user.value?.id
+  return edit || (create && txn.status !== 'approved') || ownRequest
 })
 
 function stageLabel(file: TransactionAttachment) {

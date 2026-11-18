@@ -1,16 +1,18 @@
 <template>
   <div v-if="modelValue" class="modal-backdrop" @click.self="close">
-    <section class="transaction-modal" :class="transactionType === 'income' ? 'is-income' : 'is-expense'" role="dialog" aria-modal="true" :aria-label="`${actionLabel} ${transactionType}`">
+    <section class="transaction-modal" :class="request ? 'is-request' : transactionType === 'income' ? 'is-income' : 'is-expense'" role="dialog" aria-modal="true" :aria-label="request ? 'Request an expense' : `${actionLabel} ${transactionType}`">
       <header class="modal-header">
         <span class="sheet-handle" aria-hidden="true"></span>
         <div class="modal-title-group">
-          <span class="modal-icon" :class="transactionType === 'income' ? 'income-icon' : 'expense-icon'">
-            <ArrowDownLeft v-if="transactionType === 'income'" :size="20" />
+          <span class="modal-icon" :class="request ? 'request-icon' : transactionType === 'income' ? 'income-icon' : 'expense-icon'">
+            <ClipboardCheck v-if="request" :size="20" />
+            <ArrowDownLeft v-else-if="transactionType === 'income'" :size="20" />
             <ArrowUpRight v-else :size="20" />
           </span>
           <div>
-            <p class="modal-eyebrow">{{ mode === 'edit' ? 'UPDATE RECORD' : 'NEW RECORD' }}</p>
-            <h2>{{ actionLabel }} {{ transactionType === 'income' ? 'Income' : 'Expense' }}</h2>
+            <p class="modal-eyebrow">{{ request ? 'NEW REQUEST' : mode === 'edit' ? 'UPDATE RECORD' : 'NEW RECORD' }}</p>
+            <h2 v-if="request">Request an expense</h2>
+            <h2 v-else>{{ actionLabel }} {{ transactionType === 'income' ? 'Income' : 'Expense' }}</h2>
           </div>
         </div>
         <button type="button" class="icon-button" aria-label="Close dialog" @click="close"><X :size="19" /></button>
@@ -68,7 +70,7 @@
 
             <div class="form-field full-field" :class="{ 'has-error': errors.description }">
               <span>Description <small>Optional</small></span>
-              <RichText v-model="form.description" placeholder="What is this transaction for?" aria-label="Description" :max-length="DESCRIPTION_MAX" />
+              <RichText v-model="form.description" :placeholder="request ? 'What is the money for?' : 'What is this transaction for?'" aria-label="Description" :max-length="DESCRIPTION_MAX" />
               <small v-if="errors.description" class="field-error">{{ errors.description }}</small>
             </div>
 
@@ -110,17 +112,22 @@
             </div>
           </div>
 
-          <label v-if="mode === 'create' && canApprove" class="pending-option">
+          <!-- A request always waits for someone else to approve it. -->
+          <div v-if="request" class="pending-option is-locked" role="note">
+            <i class="pending-icon" aria-hidden="true"><Clock3 :size="17" :stroke-width="2.3" /></i>
+            <span><strong>Waits on Requests</strong><small>It becomes an expense once someone approves it.</small></span>
+          </div>
+          <label v-else-if="mode === 'create' && canApproveThis" class="pending-option">
             <span><strong>Submit for approval</strong><small>This transaction stays pending until approved.</small></span>
             <input v-model="form.pending" type="checkbox" role="switch" class="pending-switch" />
           </label>
           <!-- Without approve permission the API always saves it as pending. -->
           <div v-else-if="mode === 'create'" class="pending-option is-locked" role="note">
             <i class="pending-icon" aria-hidden="true"><Clock3 :size="17" :stroke-width="2.3" /></i>
-            <span><strong>Sent for approval</strong><small>It stays pending until a manager approves it.</small></span>
+            <span><strong>Sent for approval</strong><small>{{ transactionType === 'expense' && canViewRequests ? 'It waits on Requests until a manager approves it.' : 'It stays pending until a manager approves it.' }}</small></span>
           </div>
           <!-- The API sends an approved transaction back for approval when its money details change. -->
-          <div v-else-if="transaction?.status === 'approved' && !canApprove" class="pending-option is-locked" role="note">
+          <div v-else-if="transaction?.status === 'approved' && !canApproveThis" class="pending-option is-locked" role="note">
             <i class="pending-icon" aria-hidden="true"><Clock3 :size="17" :stroke-width="2.3" /></i>
             <span><strong>Needs approval again</strong><small>Changing the amount, date or category sends it back to a manager.</small></span>
           </div>
@@ -141,7 +148,7 @@
         <footer class="modal-actions">
           <button type="button" class="cancel-button" :disabled="saving" @click="close">Cancel</button>
           <button type="submit" class="save-button" :disabled="submitDisabled">
-            {{ saving ? 'Saving…' : mode === 'edit' ? 'Save changes' : `Save ${transactionType}` }}
+            {{ saving ? (request ? 'Sending…' : 'Saving…') : request ? 'Send request' : mode === 'edit' ? 'Save changes' : `Save ${transactionType}` }}
           </button>
         </footer>
       </form>
@@ -151,7 +158,7 @@
 
 <script setup lang="ts">
 import { branchLabel } from '~/composables/useBranchOptions'
-import { ArrowDownLeft, ArrowUpRight, Clock3, FileText, ImageIcon, Paperclip, Trash2, X } from 'lucide-vue-next'
+import { ArrowDownLeft, ArrowUpRight, ClipboardCheck, Clock3, FileText, ImageIcon, Paperclip, Trash2, X } from 'lucide-vue-next'
 import { MAX_ATTACHMENTS, filesOfStage, type Branch, type Category, type Transaction } from '~/types/api'
 import { richTextToPlain } from '~/utils/richText'
 import { rule } from '~/utils/validation'
@@ -167,10 +174,13 @@ const props = withDefaults(defineProps<{
   mode?: 'create' | 'edit'
   type?: TransactionType
   transaction?: Transaction | null
+  /** A request from the Requests page: an expense that always waits for approval (POST /requests). */
+  request?: boolean
 }>(), {
   mode: 'create',
   type: 'income',
   transaction: null,
+  request: false,
 })
 const emit = defineEmits<{
   'update:modelValue': [value: boolean]
@@ -179,7 +189,7 @@ const emit = defineEmits<{
 
 const { api } = useApi()
 const { user } = useAuth()
-const { canViewBranches, canApprove } = usePermissions()
+const { canViewBranches, canApproveType, canViewRequests } = usePermissions()
 const { activeBranchId } = useActiveBranch()
 const branches = ref<Branch[]>([])
 const categories = ref<Category[]>([])
@@ -236,9 +246,13 @@ const currencyOptions = computed(() => currencies.value
 const amountAtLimit = computed(() => (form.amount.split('.')[0] || '').length >= (currencyMeta(form.currency).decimals ? 9 : 12))
 const currencySymbol = computed(() => currencyMeta(form.currency).symbol.trim())
 
-const transactionType = computed<TransactionType>(() => props.mode === 'edit'
-  ? props.transaction?.type || props.type
-  : props.type)
+const transactionType = computed<TransactionType>(() => props.request
+  ? 'expense'
+  : props.mode === 'edit'
+    ? props.transaction?.type || props.type
+    : props.type)
+// Approve Requests approves expenses, Approve Transactions income (same rule as the API).
+const canApproveThis = computed(() => canApproveType(transactionType.value))
 const actionLabel = computed(() => props.mode === 'edit' ? 'Edit' : 'Add')
 // The button stays enabled: pressing it explains what is missing instead of silently doing nothing.
 const submitDisabled = computed(() => saving.value)
@@ -263,6 +277,7 @@ const { errors, messages: fieldMessages, check, fromApi, reset: resetErrors, inv
 const alertTitle = computed(() => {
   if (partialSave.value) return 'Saved, but the files weren’t all updated'
   if (!error.value) return 'Check the highlighted fields'
+  if (props.request) return 'Couldn’t send this request'
   return props.mode === 'edit' ? 'Couldn’t update this transaction' : 'Couldn’t save this transaction'
 })
 
@@ -432,6 +447,19 @@ async function submit() {
       })
     } else if (createdTransaction.value) {
       saved = createdTransaction.value
+    } else if (props.request) {
+      saved = await api<Transaction>('/requests', {
+        method: 'POST',
+        body: {
+          currency: form.currency,
+          amount: form.amount,
+          transaction_date: form.transaction_date,
+          branch_id: form.branch_id,
+          category_id: form.category_id,
+          description: form.description,
+        },
+      })
+      createdTransaction.value = saved
     } else {
       saved = await api<Transaction>('/transactions', {
         method: 'POST',
@@ -443,7 +471,7 @@ async function submit() {
           branch_id: form.branch_id,
           ...(transactionType.value === 'expense' ? { category_id: form.category_id } : {}),
           description: form.description,
-          pending: form.pending || !canApprove.value,
+          pending: form.pending || !canApproveThis.value,
         },
       })
       createdTransaction.value = saved
@@ -473,13 +501,13 @@ async function submit() {
     partialSave.value = recordSaved
     if (recordSaved) error.value = `A file couldn't be saved${reason ? ` (${reason})` : ''}. Try again, or remove that file and save.`
     // When the API names the fields, the list says it all; otherwise show its message.
-    else if (!fromApi(e)) error.value = reason || (props.mode === 'edit' ? 'Could not update this transaction.' : 'Could not save this transaction.')
+    else if (!fromApi(e)) error.value = reason || (props.request ? 'Could not send this request.' : props.mode === 'edit' ? 'Could not update this transaction.' : 'Could not save this transaction.')
   } finally {
     saving.value = false
   }
 }
 
-watch(() => [props.modelValue, props.mode, props.type, props.transaction?.id], ([isOpen]) => {
+watch(() => [props.modelValue, props.mode, props.type, props.request, props.transaction?.id], ([isOpen]) => {
   if (isOpen) prepareModal()
   else resetAttachment()
 })
@@ -497,12 +525,15 @@ onMounted(() => {
 .modal-backdrop { position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center; padding: 20px; background: rgb(8 24 48 / 55%); backdrop-filter: blur(4px); }
 .transaction-modal { --accent: #13966e; --accent-soft: #effaf5; --accent-border: #cdeedf; --accent-ring: rgb(19 150 110 / 14%); display: flex; width: min(560px, 100%); max-height: min(92vh, 780px); flex-direction: column; overflow: hidden; border: 1px solid #e2eaf5; border-radius: 18px; background: #fff; box-shadow: 0 24px 75px rgb(8 24 48 / 28%); }
 .transaction-modal.is-expense { --accent: #e24458; --accent-soft: #fff4f5; --accent-border: #f8d6dc; --accent-ring: rgb(226 68 88 / 13%); }
+/* A request uses the app's primary blue, not the expense red. */
+.transaction-modal.is-request { --accent: #2563eb; --accent-soft: #f3f7ff; --accent-border: #d5e1fb; --accent-ring: rgb(37 99 235 / 14%); }
 .sheet-handle { display: none; }
 .modal-header { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 20px 24px 16px; border-bottom: 1px solid #edf1f7; }
 .modal-title-group { display: flex; align-items: center; gap: 12px; }
 .modal-icon { display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 13px; }
 .income-icon { color: #0d946b; background: #e2f8ef; }
 .expense-icon { color: #dc3f55; background: #ffe8eb; }
+.request-icon { color: #2563eb; background: #e6eeff; }
 .modal-eyebrow { margin: 0 0 4px; color: #8c9ab0; font-size: 10px; font-weight: 800; letter-spacing: .13em; }
 .modal-header h2 { margin: 0; color: #172b4e; font-size: 19px; font-weight: 750; letter-spacing: -.02em; }
 .icon-button { display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; border: 0; border-radius: 10px; color: #73849d; background: #f3f6fb; cursor: pointer; }
@@ -570,6 +601,10 @@ onMounted(() => {
 .pending-option.is-locked small { color: #9b7440; }
 .pending-icon { display: grid; flex: 0 0 auto; width: 34px; height: 34px; place-items: center; border-radius: 10px; color: #b86e0c; background: #fdecd0; font-style: normal; }
 .pending-icon svg { display: block; }
+.is-request .pending-option.is-locked { border-color: var(--accent-border); background: var(--accent-soft); }
+.is-request .pending-option.is-locked strong { color: #1e4fbf; }
+.is-request .pending-option.is-locked small { color: #5b74a6; }
+.is-request .pending-icon { color: var(--accent); background: #e6eeff; }
 .pending-switch { position: relative; flex: 0 0 auto; width: 42px; height: 24px; margin: 0; border-radius: 999px; background: #cfd9e6; cursor: pointer; appearance: none; transition: background .15s ease; }
 .pending-switch::before { content: ''; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgb(16 40 80 / 25%); transition: transform .15s ease; }
 .pending-switch:checked { background: #1769e8; }

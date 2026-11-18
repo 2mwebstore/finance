@@ -30,6 +30,8 @@ var (
 	ErrDescriptionTooLong   = errors.New("description must be at most 1000 characters")
 	ErrTypeNotAllowed       = errors.New("you don't have permission for this type of transaction")
 	ErrReceiptRequired      = errors.New("attach a receipt (image or PDF) before approving this expense")
+	ErrNotRequest           = errors.New("only expenses can be requested")
+	ErrReasonRequired       = errors.New("give a reason for rejecting this request")
 )
 
 // withAttachments loads a transaction's files, oldest first.
@@ -103,19 +105,62 @@ type TransactionListFilter struct {
 	DateFrom   *time.Time
 	DateTo     *time.Time // exclusive end (half-open)
 	Search     string
-	Page       int
-	PageSize   int
+	// ExcludeRequests leaves out requests (pending and rejected expenses): they are on the
+	// Requests page until approved.
+	ExcludeRequests bool
+	Page            int
+	PageSize        int
+}
+
+// approveCodes are the permissions that approve and reject a pending transaction of this type:
+// a pending expense is a request (Approve Requests does both); income has its own two.
+func approveCodes(txnType string) (approve, reject string) {
+	if txnType == models.TxnTypeExpense {
+		return permissions.RequestsApprove, permissions.RequestsApprove
+	}
+	return permissions.TransactionsApprove, permissions.TransactionsReject
 }
 
 func (s *TransactionService) Create(ctx context.Context, in CreateTransactionInput, actorID uuid.UUID) (*models.Transaction, error) {
+	return s.create(ctx, in, actorID, false)
+}
+
+// CreateRequestInput is a request from the Requests page: an expense that waits for approval.
+type CreateRequestInput struct {
+	BranchID        string `json:"branch_id" binding:"required,uuid"`
+	CategoryID      string `json:"category_id"`
+	PaymentMethodID string `json:"payment_method_id"`
+	Currency        string `json:"currency" binding:"required,len=3"`
+	Amount          string `json:"amount" binding:"required"`
+	TransactionDate string `json:"transaction_date"`
+	Description     string `json:"description"`
+}
+
+// CreateRequest saves a request: a pending expense, whoever makes it (even someone who could
+// approve it). Making one needs Make Requests, not Create Expenses.
+func (s *TransactionService) CreateRequest(ctx context.Context, in CreateRequestInput, actorID uuid.UUID) (*models.Transaction, error) {
+	return s.create(ctx, CreateTransactionInput{
+		Type: models.TxnTypeExpense, BranchID: in.BranchID, CategoryID: in.CategoryID, PaymentMethodID: in.PaymentMethodID,
+		Currency: in.Currency, Amount: in.Amount, TransactionDate: in.TransactionDate, Description: in.Description, Pending: true,
+	}, actorID, true)
+}
+
+func (s *TransactionService) create(ctx context.Context, in CreateTransactionInput, actorID uuid.UUID, request bool) (*models.Transaction, error) {
 	if err := validateCurrency(ctx, s.db, in.Currency); err != nil {
 		return nil, err
 	}
 	if err := accounting.ValidateTxnType(in.Type); err != nil {
 		return nil, err
 	}
-	// The route accepts income.create or expense.create; each type needs its own.
-	if !s.hasPermission(ctx, actorID, in.Type+".create") {
+	if request {
+		if in.Type != models.TxnTypeExpense {
+			return nil, ErrNotRequest
+		}
+		if !s.hasPermission(ctx, actorID, permissions.RequestsCreate) {
+			return nil, ErrTypeNotAllowed
+		}
+	} else if !s.hasPermission(ctx, actorID, in.Type+".create") {
+		// The route accepts income.create or expense.create; each type needs its own.
 		return nil, ErrTypeNotAllowed
 	}
 	amount, err := accounting.ParseAmount(in.Amount)
@@ -191,8 +236,8 @@ func (s *TransactionService) Create(ctx context.Context, in CreateTransactionInp
 	status := models.TxnStatusApproved
 	var approvedBy *uuid.UUID
 	var approvedAt *time.Time
-	// People who can't approve always submit for approval, whatever the request says.
-	if in.Pending || !s.canApproveTransactions(ctx, actorID) {
+	// People who can't approve this type always submit for approval, whatever the request says.
+	if in.Pending || !s.canApproveType(ctx, actorID, in.Type) {
 		status = models.TxnStatusPending
 	} else {
 		approvedBy = &actorID
@@ -323,6 +368,9 @@ func (s *TransactionService) List(ctx context.Context, f TransactionListFilter, 
 		like := textsearch.Contains(f.Search)
 		q = q.Where("transaction_number LIKE ? OR description LIKE ? OR counterparty LIKE ?", like, like, like)
 	}
+	if f.ExcludeRequests {
+		q = q.Where("(type <> ? OR status NOT IN ?)", models.TxnTypeExpense, []string{models.TxnStatusPending, models.TxnStatusRejected})
+	}
 
 	var total int64
 	if err := q.Count(&total).Error; err != nil {
@@ -443,7 +491,7 @@ func (s *TransactionService) Update(ctx context.Context, id uuid.UUID, in Update
 	_, categoryChanged := updates["category_id"]
 	_, methodChanged := updates["payment_method_id"]
 	if txn.Status == models.TxnStatusApproved && (amountChanged || dateChanged || categoryChanged || methodChanged) &&
-		!s.canApproveTransactions(ctx, actorID) {
+		!s.canApproveType(ctx, actorID, txn.Type) {
 		updates["status"] = models.TxnStatusPending
 		updates["approved_by_id"] = nil
 		updates["approved_at"] = nil
@@ -590,9 +638,13 @@ func (s *TransactionService) Approve(ctx context.Context, id uuid.UUID, notes st
 	if txn.Status != models.TxnStatusPending {
 		return nil, ErrInvalidStatus
 	}
-	// Prevent self-approval
-	if txn.CreatedByID == actorID {
+	// Prevent self-approval; only a Super Administrator may approve their own.
+	if txn.CreatedByID == actorID && !s.isSuperAdmin(ctx, actorID) {
 		return nil, errors.New("cannot approve your own transaction")
+	}
+	// A pending expense is a request: Approve Requests approves it, whichever page it is on.
+	if code, _ := approveCodes(txn.Type); !s.hasPermission(ctx, actorID, code) {
+		return nil, ErrTypeNotAllowed
 	}
 	// An expense only counts once its receipt is on file.
 	if txn.Type == models.TxnTypeExpense && len(txn.Attachments) == 0 {
@@ -635,8 +687,11 @@ func (s *TransactionService) Reject(ctx context.Context, id uuid.UUID, notes str
 	if txn.Status != models.TxnStatusPending {
 		return nil, ErrInvalidStatus
 	}
-	if txn.CreatedByID == actorID {
+	if txn.CreatedByID == actorID && !s.isSuperAdmin(ctx, actorID) {
 		return nil, errors.New("cannot reject your own transaction")
+	}
+	if _, code := approveCodes(txn.Type); !s.hasPermission(ctx, actorID, code) {
+		return nil, ErrTypeNotAllowed
 	}
 	if err := s.assertCanDecide(ctx, txn, actorID); err != nil {
 		return nil, err
@@ -745,10 +800,11 @@ func (s *TransactionService) managersOf(ctx context.Context, userIDs []uuid.UUID
 
 // canDecide: when the creator has assigned managers, only those managers (or someone with
 // full access: owner/admin/Super Admin) may approve or reject; otherwise the permission
-// and branch rules alone apply. Nobody decides on their own transaction.
-func canDecide(creatorID, actorID uuid.UUID, managers []uuid.UUID, actorFull bool) bool {
+// and branch rules alone apply. Nobody decides on their own transaction, except a Super
+// Administrator.
+func canDecide(creatorID, actorID uuid.UUID, managers []uuid.UUID, actorFull, actorSuper bool) bool {
 	if creatorID == actorID {
-		return false
+		return actorSuper
 	}
 	if len(managers) == 0 || actorFull {
 		return true
@@ -771,7 +827,7 @@ func (s *TransactionService) assertCanDecide(ctx context.Context, txn *models.Tr
 	if err != nil {
 		return err
 	}
-	if !canDecide(txn.CreatedByID, actorID, managers[txn.CreatedByID], full) {
+	if !canDecide(txn.CreatedByID, actorID, managers[txn.CreatedByID], full, s.isSuperAdmin(ctx, actorID)) {
 		return ErrNotApprover
 	}
 	return nil
@@ -807,8 +863,6 @@ func (s *TransactionService) Decisions(ctx context.Context, actorID uuid.UUID, i
 		}
 	}
 	full := actor.IsSuperAdmin || perms[permissions.BranchesManage]
-	approve := actor.IsSuperAdmin || perms[permissions.TransactionsApprove]
-	reject := actor.IsSuperAdmin || perms[permissions.TransactionsReject]
 	managers, err := s.managersOf(ctx, creators)
 	if err != nil {
 		return nil, err
@@ -817,8 +871,12 @@ func (s *TransactionService) Decisions(ctx context.Context, actorID uuid.UUID, i
 		if t.Status != models.TxnStatusPending {
 			continue
 		}
-		ok := canDecide(t.CreatedByID, actorID, managers[t.CreatedByID], full)
-		out[t.ID] = Decision{CanApprove: ok && approve, CanReject: ok && reject}
+		approveCode, rejectCode := approveCodes(t.Type)
+		ok := canDecide(t.CreatedByID, actorID, managers[t.CreatedByID], full, actor.IsSuperAdmin)
+		out[t.ID] = Decision{
+			CanApprove: ok && (actor.IsSuperAdmin || perms[approveCode]),
+			CanReject:  ok && (actor.IsSuperAdmin || perms[rejectCode]),
+		}
 	}
 	return out, nil
 }
@@ -929,20 +987,23 @@ func (s *TransactionService) userNames(ctx context.Context, ids map[uuid.UUID]bo
 }
 
 // CanChangeApprovalFiles reports whether the actor may add or delete the approver's files: someone
-// who approves transactions (not the person who entered this one), while it is pending or approved.
+// who approves this type (not the person who entered it, unless they are a Super Administrator),
+// while it is pending or approved.
 func (s *TransactionService) CanChangeApprovalFiles(ctx context.Context, actorID uuid.UUID, txn *models.Transaction) bool {
-	if txn.CreatedByID == actorID {
+	if txn.CreatedByID == actorID && !s.isSuperAdmin(ctx, actorID) {
 		return false
 	}
 	if txn.Status != models.TxnStatusPending && txn.Status != models.TxnStatusApproved {
 		return false
 	}
-	return s.hasPermission(ctx, actorID, permissions.TransactionsApprove)
+	code, _ := approveCodes(txn.Type)
+	return s.hasPermission(ctx, actorID, code)
 }
 
 // CanChangeAttachments reports whether the actor may add or delete files on the transaction.
 // Creating is enough while it is pending (the person entering it adds the receipt); once it is
-// approved, changing its files needs edit rights. Owners/admins/Super Admins always can.
+// approved, changing its files needs edit rights. Someone who may only make requests changes the
+// files of their own pending requests. Owners/admins/Super Admins always can.
 func (s *TransactionService) CanChangeAttachments(ctx context.Context, actorID uuid.UUID, txn *models.Transaction) bool {
 	var actor models.User
 	if err := s.db.WithContext(ctx).Preload("Roles.Permissions").First(&actor, "id = ?", actorID).Error; err != nil {
@@ -957,14 +1018,30 @@ func (s *TransactionService) CanChangeAttachments(ctx context.Context, actorID u
 				(p.Code == txn.Type+".create" && txn.Status != models.TxnStatusApproved) {
 				return true
 			}
+			if p.Code == permissions.RequestsCreate && txn.Type == models.TxnTypeExpense &&
+				txn.Status == models.TxnStatusPending && txn.CreatedByID == actorID {
+				return true
+			}
 		}
 	}
 	return false
 }
 
-// canApproveTransactions: Super Admin or anyone holding transactions.approve.
-func (s *TransactionService) canApproveTransactions(ctx context.Context, actorID uuid.UUID) bool {
-	return s.hasPermission(ctx, actorID, permissions.TransactionsApprove)
+// canApproveType: Super Admin or anyone who may approve this type (Approve Requests for expenses,
+// Approve Transactions for income).
+func (s *TransactionService) canApproveType(ctx context.Context, actorID uuid.UUID, txnType string) bool {
+	code, _ := approveCodes(txnType)
+	return s.hasPermission(ctx, actorID, code)
+}
+
+// isSuperAdmin: the actor is a Super Administrator (the only one who may decide on their own
+// transactions).
+func (s *TransactionService) isSuperAdmin(ctx context.Context, actorID uuid.UUID) bool {
+	var actor models.User
+	if err := s.db.WithContext(ctx).Select("id", "is_super_admin").First(&actor, "id = ?", actorID).Error; err != nil {
+		return false
+	}
+	return actor.IsSuperAdmin
 }
 
 // hasPermission: Super Admin, or one of the actor's roles grants the code.

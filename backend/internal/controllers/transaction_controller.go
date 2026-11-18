@@ -93,6 +93,8 @@ func (tc *TransactionController) List(c *gin.Context) {
 		CategoryID: c.Query("category_id"),
 		Status:     c.Query("status"),
 		Search:     c.Query("search"),
+		// The Transactions, Income and Expense pages leave requests to the Requests page.
+		ExcludeRequests: c.Query("exclude_requests") == "true",
 	}
 	f.Page, _ = strconv.Atoi(c.DefaultQuery("page", "1"))
 	f.PageSize, _ = strconv.Atoi(c.DefaultQuery("page_size", "10"))

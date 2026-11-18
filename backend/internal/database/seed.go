@@ -94,6 +94,12 @@ func EnsureRequiredPermissions(db *gorm.DB) error {
 	required := map[string][]string{
 		permissions.BackupsManage:   nil,
 		permissions.PermissionsView: {permissions.RolesView},
+		// Requests (pending expenses) took over from the expense and approval rights: whoever
+		// entered expenses keeps seeing and sending them for approval, and whoever approved
+		// transactions keeps approving expenses.
+		permissions.RequestsView:    {permissions.BranchesManage, permissions.ExpenseCreate, permissions.TransactionsApprove},
+		permissions.RequestsCreate:  {permissions.BranchesManage, permissions.ExpenseCreate},
+		permissions.RequestsApprove: {permissions.BranchesManage, permissions.TransactionsApprove},
 	}
 	// Inventory: owner/admin (Manage Branches) get every inventory permission; other roles get
 	// them from the Roles page (or the default roles with AUTO_SEED).

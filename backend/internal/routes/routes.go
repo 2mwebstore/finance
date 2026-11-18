@@ -43,6 +43,7 @@ func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config, store storage.Store, 
 	pmCtrl := controllers.NewPaymentMethodController(pmSvc, db)
 	attachmentSvc := services.NewAttachmentService(db, txnSvc, store)
 	txnCtrl := controllers.NewTransactionController(txnSvc, attachmentSvc, auditSvc, branchTelegram)
+	reqCtrl := controllers.NewRequestController(txnSvc, auditSvc, branchTelegram)
 	invCtrl := controllers.NewInventoryController(services.NewInventoryService(db, cfg.Timezone, store), db, auditSvc)
 	platformSvc := services.NewPlatformService(db, cfg.Timezone)
 	platformSvc.SetStore(store) // Group summary's pictures (History)
@@ -134,7 +135,7 @@ func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config, store storage.Store, 
 
 			cats := api.Group("/categories")
 			{
-				cats.GET("", middleware.RequireAnyPermission(db, permissions.DashboardView, permissions.IncomeView, permissions.ExpenseView, permissions.IncomeCreate, permissions.ExpenseCreate, permissions.CategoriesManage, permissions.InventoryManage, permissions.InventoryExpensesView, permissions.InventoryExpensesCreate), catCtrl.List)
+				cats.GET("", middleware.RequireAnyPermission(db, permissions.DashboardView, permissions.IncomeView, permissions.ExpenseView, permissions.IncomeCreate, permissions.ExpenseCreate, permissions.CategoriesManage, permissions.InventoryManage, permissions.InventoryExpensesView, permissions.InventoryExpensesCreate, permissions.RequestsView, permissions.RequestsCreate), catCtrl.List)
 				// Financial expense categories need categories.manage, inventory expense categories
 				// inventory.manage (checked by type in the controller).
 				cats.POST("", middleware.RequireAnyPermission(db, permissions.CategoriesManage, permissions.InventoryManage), catCtrl.Create)
@@ -160,10 +161,24 @@ func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config, store storage.Store, 
 				txns.POST("/:id/approve", middleware.RequireAnyPermission(db, permissions.TransactionsApprove), txnCtrl.Approve)
 				txns.POST("/:id/reject", middleware.RequireAnyPermission(db, permissions.TransactionsReject), txnCtrl.Reject)
 				txns.POST("/:id/reverse", middleware.RequireAnyPermission(db, permissions.TransactionsReverse), txnCtrl.Reverse)
-				// Up to 2 images/PDFs per transaction (stored in R2, or local disk in development).
-				txns.POST("/:id/attachments", middleware.RequireAnyPermission(db, permissions.IncomeCreate, permissions.ExpenseCreate, permissions.IncomeEdit, permissions.ExpenseEdit), txnCtrl.UploadAttachment)
-				txns.GET("/:id/attachments/:attachmentId", middleware.RequireAnyPermission(db, permissions.TransactionsView, permissions.IncomeView, permissions.ExpenseView), txnCtrl.Attachment)
-				txns.DELETE("/:id/attachments/:attachmentId", middleware.RequireAnyPermission(db, permissions.IncomeCreate, permissions.ExpenseCreate, permissions.IncomeEdit, permissions.ExpenseEdit), txnCtrl.DeleteAttachment)
+				// Up to 2 images/PDFs per transaction (stored in R2, or local disk in development). A
+				// request is a pending expense, so its files are here too (who may change them is
+				// checked per file in the controller).
+				txns.POST("/:id/attachments", middleware.RequireAnyPermission(db, permissions.IncomeCreate, permissions.ExpenseCreate, permissions.IncomeEdit, permissions.ExpenseEdit, permissions.RequestsCreate, permissions.RequestsApprove), txnCtrl.UploadAttachment)
+				txns.GET("/:id/attachments/:attachmentId", middleware.RequireAnyPermission(db, permissions.TransactionsView, permissions.IncomeView, permissions.ExpenseView, permissions.RequestsView, permissions.RequestsCreate, permissions.RequestsApprove), txnCtrl.Attachment)
+				txns.DELETE("/:id/attachments/:attachmentId", middleware.RequireAnyPermission(db, permissions.IncomeCreate, permissions.ExpenseCreate, permissions.IncomeEdit, permissions.ExpenseEdit, permissions.RequestsCreate, permissions.RequestsApprove), txnCtrl.DeleteAttachment)
+			}
+
+			// Requests: expenses waiting for approval. Approving one makes it an expense; rejecting
+			// it (with a reason) keeps it here. Making one needs Make Requests, deciding Approve Requests.
+			reqs := api.Group("/requests")
+			{
+				reqs.GET("", middleware.RequireAnyPermission(db, permissions.RequestsView, permissions.RequestsCreate, permissions.RequestsApprove), reqCtrl.List)
+				// The sidebar's pending count.
+				reqs.GET("/pending-count", middleware.RequireAnyPermission(db, permissions.RequestsView, permissions.RequestsCreate, permissions.RequestsApprove), reqCtrl.PendingCount)
+				reqs.POST("", middleware.RequireAnyPermission(db, permissions.RequestsCreate), reqCtrl.Create)
+				reqs.POST("/:id/approve", middleware.RequireAnyPermission(db, permissions.RequestsApprove), reqCtrl.Approve)
+				reqs.POST("/:id/reject", middleware.RequireAnyPermission(db, permissions.RequestsApprove), reqCtrl.Reject)
 			}
 
 			// Phase 6: cash control
